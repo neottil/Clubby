@@ -1,176 +1,224 @@
-# ClubManager
-Gestione soci di un club. Anagrafica, incontri, card prepagate per incntri.
+# 🧩 Gestione ASD - Architettura e Analisi Tecnica
 
-# ARCHITETTURA GLOBALE (definitiva)
+## 📘 Panoramica
+Applicazione web per la gestione degli incontri e dei buoni prepagati dei soci di una Associazione Sportiva Dilettantistica (ASD).  
+Ogni ASD dispone di un’**istanza indipendente** del sistema (frontend, backend e database separati), gestita tramite **deploy dedicato** su AWS.
 
-## Struttura generale
-Ogni ASD avrà una propria istanza completa dell’applicazione:  
-- Frontend → React (SPA), hostato su S3 + CloudFront  
-- Backend API → Node.js (NestJS consigliato), in container ECS/Fargate  
-- Database → Aurora Serverless (una db per tenant)  
-- Autenticazione → Amazon Cognito (User Pool + Client + Groups admin, viewer)  
-- Storage (eventuali file, export, etc.) → Bucket S3 dedicato per tenant  
-- Infrastructure as Code (IaC) → Terraform modulare  
-- CI/CD → GitHub Actions (build → push ECR → Terraform apply)  
-- Domain per tenant → asd1.gestioneasddominio.com, asd2.gestioneasddominio.com, ecc.
+---
 
-## Componenti AWS per ogni tenant
+## 🏗️ Architettura Generale
 
-| Componente  | Servizio AWS         | Note principali                          |
-|-------------|---------------------|----------------------------------------|
-| Frontend    | S3 + CloudFront + Route53 | Hosting statico, HTTPS con ACM         |
-| Backend API | ECS + Fargate       | Container stateless (NestJS)            |
-| DB          | Aurora PostgreSQL   | Dati reali e persistenti                 |
-| Auth        | Cognito User Pool   | Gruppi admin, viewer                     |
-| Storage     | S3                  | Per esportazioni o file dei soci        |
-| Secrets/Config | SSM Parameter Store o Secrets Manager | Per variabili sensibili     |
-| Monitoring  | CloudWatch + X-Ray  | Logging e tracing                        |
-| IaC         | Terraform modules   | Parametrizzato con tenant_name, domain, env  |
-| Billing tags | Tag AWS            | Tag:Billing:Tenant=asd1, Environment=prod/dev |
+### ☁️ Panoramica infrastrutturale
+- **Frontend**: SPA React/Next.js, deploy su S3 + CloudFront  
+- **Backend**: AWS Lambda (Node.js 20) + API Gateway (HTTP API)  
+- **Database**: Amazon Aurora Serverless v2 (PostgreSQL compatibile)  
+- **Autenticazione**: Amazon Cognito (User Pool + Hosted UI)  
+- **Infra-as-code**: Terraform  
+- **CI/CD**: GitHub Actions  
+- **Dev locale**: LocalStack per simulare servizi AWS
 
-## Modello relazionale (Aurora PostgreSQL)
-Ogni tenant ha il proprio database, senza campo tenant_id. La coerenza è gestita a livello backend.
+Ogni tenant (ASD) è isolato:
+asd1.gestioneasddominio.com → Stack: Lambda + API + Aurora + Cognito + S3 dedicati
+asd2.gestioneasddominio.com → Stack: Lambda + API + Aurora + Cognito + S3 dedicati
 
-### Tabelle principali
+---
 
-**app_user**  
-- id: UUID (PK), generato app-side  
-- email: TEXT, univoco  
-- cognito_sub: TEXT (riferimento sub Cognito)  
-- role: TEXT (admin, viewer), coerente con gruppo Cognito  
-- display_name: TEXT  
-- created_at: timestamptz (default now())
+## ⚙️ Componenti Principali
 
-**socio**  
-- id: UUID (PK)  
-- codice_socio: TEXT (opzionale, univoco)  
-- nome, cognome, email, telefono, note: TEXT  
-- registered: BOOLEAN (true se registrato via Cognito)  
-- created_at: timestamptz (default now())
+### 🧠 Cognito (Autenticazione)
+- Gestisce login/signup e ruoli utente:
+  - **admin**: gestisce soci, incontri, buoni
+  - **viewer**: può visualizzare solo i dati del socio associato
+- L’associazione tra `viewer` e `socio` è effettuata da `admin` dopo la registrazione.
+- Cognito è l’unica fonte di autenticazione (no API interne di login).
 
-**viewer_association**  
-- id: UUID (PK)  
-- user_id: UUID → app_user.id (viewer associato)  
-- socio_id: UUID → socio.id (socio corrispondente)  
-- created_by: UUID → app_user.id (admin che ha fatto ass.)  
-- created_at: timestamptz (default now())  
-- Nota: viewer può essere associato solo a un socio (UNIQUE(user_id))
+---
 
-**incontro**  
-- id: UUID (PK)  
-- socio_id: UUID → socio.id  
-- data_incontro: DATE  
-- costo: NUMERIC(10,2)  
-- note: TEXT  
-- created_by: UUID → app_user.id  
-- created_at: timestamptz (default now())
+### 🧾 Aurora Serverless v2 (Database)
+Configurazione tipica:
+- Min ACU: `0.5`
+- Storage: 2 GB (espandibile)
+- Backup giornaliero (retention hot 30 giorni, cold 6 mesi)
+- Data API attiva per accesso da Lambda
 
-**movimento_buono**  
-- id: UUID (PK)  
-- socio_id: UUID → socio.id  
-- importo: NUMERIC(10,2) (positivo per ricarica, negativo per spesa)  
-- descrizione: TEXT  
-- riferimento_incontro: UUID → incontro.id (NULL se non legato)  
-- created_by: UUID → app_user.id  
-- created_at: timestamptz (default now())
-
-## Calcolo saldo buono
-Non è salvato nel DB ma calcolato lato backend:
+#### 📄 Schema relazionale
 
 ```sql
-SELECT COALESCE(SUM(importo), 0) AS saldo
-FROM movimento_buono
-WHERE socio_id = $1;
+-- Soci
+CREATE TABLE socio (
+  id UUID PRIMARY KEY,
+  nome VARCHAR(100) NOT NULL,
+  cognome VARCHAR(100) NOT NULL,
+  email VARCHAR(255),
+  telefono VARCHAR(50),
+  data_iscrizione DATE DEFAULT CURRENT_DATE,
+  id_account_viewer VARCHAR(255) NULL, -- ID Cognito associato (viewer)
+  note TEXT
+);
+
+-- Incontri
+CREATE TABLE incontro (
+  id UUID PRIMARY KEY,
+  socio_id UUID REFERENCES socio(id) ON DELETE CASCADE,
+  data_incontro DATE NOT NULL,
+  costo DECIMAL(10,2) NOT NULL,
+  note TEXT
+);
+
+-- Buoni prepagati
+CREATE TABLE buono (
+  id UUID PRIMARY KEY,
+  socio_id UUID REFERENCES socio(id) ON DELETE CASCADE,
+  data_creazione TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  saldo_iniziale DECIMAL(10,2) NOT NULL
+);
+
+-- Movimenti del buono
+CREATE TABLE movimento_buono (
+  id UUID PRIMARY KEY,
+  buono_id UUID REFERENCES buono(id) ON DELETE CASCADE,
+  data_movimento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  importo DECIMAL(10,2) NOT NULL, -- positivo: ricarica, negativo: addebito
+  descrizione TEXT
+);
 ```
+💡 Il saldo del buono viene calcolato come somma dei movimenti, non memorizzato.
 
-Gestione atomica con transazioni per inserimento incontro, modifica e ricarica.
+## ⚙️ Lambda Architecture
+Struttura consigliata
 
-## Autenticazione / Autorizzazione
-- Cognito User Pool con gruppi admin e viewer  
-- Middleware backend: verifica JWT Cognito, estrae dati utente e ruoli  
-- Access control con middleware authorizeRole([...])  
-- Viewer limitati ad accesso sul socio associato
+Ogni Lambda gestisce un gruppo logico di API (pattern “Lambda Router per dominio”):
 
-## API REST (definitive)
-/api/soci  
-- GET /soci (admin) → lista completa soci  
-- POST /soci (admin) → crea socio  
-- GET /soci/:id (admin o viewer associato) → dettaglio socio  
-- PUT /soci/:id (admin) → aggiorna socio
+- lambda-soci	/soci, /soci/{id}	CRUD soci
+- lambda-incontri	/incontri, /incontri/{id}	Gestione incontri
+- lambda-buoni	/buoni, /buoni/{id}, /movimenti	Buoni e movimenti
+- lambda-auth	/auth/*	Integrazione Cognito
+- lambda-admin	/admin/*	Operazioni privilegiate
 
-/api/incontri  
-- GET /soci/:id/incontri (admin o viewer) → lista incontri socio  
-- POST /soci/:id/incontri (admin) → aggiunge incontro (+ movimento spesa)  
-- PUT /incontri/:id (admin) → aggiorna incontro e movimento
+Ogni Lambda utilizza un router interno (es. Express o Fastify) e accede ad Aurora tramite Data API.
+Nessuna connessione TCP persistente → perfetta compatibilità con Lambda.
 
-/api/buono  
-- GET /soci/:id/buono (admin o viewer) → saldo e movimenti  
-- POST /soci/:id/buono/ricarica (admin) → ricarica (movimento positivo)
+## 🔀 API Gateway
 
-/api/viewer-association  
-- POST /viewer-association (admin) → associa viewer a socio
+Tipo: HTTP API (v2) → più economico e performante del REST API classico
 
-/api/me  
-- GET /me (viewer) → info utente e socio associato
+- Autenticazione integrata con Cognito JWT
+- Proxy diretto verso le Lambda (1:1 con i domini logici)
 
-## Struttura backend (NestJS consigliato)
-Moduli:  
-- auth (middleware JWT + guard roles)  
-- users (gestione utenti: lettura da Cognito + DB)  
-- soci (CRUD)  
-- incontri (gestione incontri e spese)  
-- buono (movimenti e saldo)  
-- viewer-association (mapping viewer → socio)  
+## 🧱 Terraform
 
-DB access tramite Prisma o TypeORM con gestione transazioni a livello servizio.
+Terraform gestisce:
 
-## Ambiente sviluppo locale
-- LocalStack (simula Cognito, S3, Secrets)  
-- Postgres Docker (simula Aurora)  
-- Backend NestJS con mock JWT Cognito  
-- Frontend React + Vite collegati al backend locale
+- Cognito (User Pool, Client, Domain)
+- Aurora Serverless v2 + Secret Manager
+- Lambda functions + API Gateway HTTP API
+- S3 bucket (frontend e file statici)
+- CloudFront distributions
+- Route53 records per i sottodomini (asd1.gestioneasddominio.com, ecc.)
+- AWS resource tagging (Environment, Tenant, CostCenter) per fatturazione separata
 
-Esempio docker-compose.yml:  
+##🔧 CI/CD (GitHub Actions)
 
+Ogni repository (o monorepo con più ambienti) include pipeline GitHub Actions che:
+
+- Eseguono build e test
+- Deployano con Terraform (backend + DB + Cognito)
+- Deployano il frontend su S3 + CloudFront
+
+Branch tipici:
+- main: produzione
+- develop: test/staging
+
+## 🧰 Sviluppo Locale
+### 🧱 LocalStack
+
+In locale vengono simulati i servizi AWS:
+
+- Lambda
+- API Gateway
+- S3
+- Cognito (mock)
+
+Aurora Serverless (DB Postgres locale)
+
+Esempio docker-compose.yml per sviluppo locale:
 ```yaml
-version: "3.8"
+version: "3.9"
 services:
-db:
-image: postgres:15
-environment:
-POSTGRES_DB: asd_local
-POSTGRES_USER: asd_user
-POSTGRES_PASSWORD: asd_pass
-ports:
-- "5432:5432"
-localstack:
-image: localstack/localstack
-environment:
-- SERVICES=cognito,s3,secretsmanager
-- EDGE_PORT=4566
-ports:
-- "4566:4566"
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=lambda,apigateway,s3,secretsmanager,cognito
+      - DEFAULT_REGION=eu-west-1
+      - DATA_DIR=/tmp/localstack/data
+    volumes:
+      - ./localstack:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - localnet
+
+  app:
+    build: .
+    command: npm run dev
+    environment:
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=eu-west-1
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"
+    depends_on:
+      - localstack
+    networks:
+      - localnet
+
+networks:
+  localnet:
+    driver: bridge
+```
+## 💰 Stima dei Costi Mensili (per tenant)
+```
+Servizio	Stima Mensile	Note
+Aurora Serverless v2	~$43	0.5 ACU, 2 GB storage
+Lambda (6 funzioni)	~$0.01	~100 invocazioni/mese
+API Gateway (HTTP API)	~$0.02	~100 richieste/mese
+S3 + CloudFront + Route53	~$5	Static assets + DNS
+Cognito	~$0	<10 utenti attivi/mese (free tier)
+CloudWatch + Logs	~$1	base logging
+Totale stimato	≈ $49–50 / mese per tenant
 ```
 
-## Terraform (deploy replicabili)
-- Moduli: base (VPC, IAM, SG), backend, frontend, db, auth  
-- Variabili: tenant_name, domain, environment, billing_tags (map)  
+## 🚀 Roadmap Implementativa
 
-Esempio di deploy:  
-```
-terraform apply -var tenant_name=asd1
--var domain=asd1.gestioneasddominio.com
--var environment=prod
--var billing_tags='{"Billing:Tenant":"asd1","Environment":"prod"}'
-```
+- Setup iniziale repo
+- Struttura monorepo o repo separati (backend, frontend, infra)
+- Config base Terraform + provider AWS
+- Implementazione backend
+- Setup lambda-soci e API Gateway HTTP API
+- Mock Cognito in locale
+- Configurazione Cognito reale
+- Creazione User Pool, Client App e ruoli
+- Deploy Aurora Serverless v2
+- Creazione schema iniziale SQL
+- Implementazione frontend (React)
+- Login via Cognito Hosted UI
+- Pagine soci e incontri
+- CI/CD con GitHub Actions
+- Build, test, deploy automatico
+- Replica multi-tenant
+- Terraform parametrizzato per asd1, asd2, ecc.
+- DNS automatico (asdX.gestioneasddominio.com)
 
-## Piano di lavoro (step operativi)
-- Inizializzare repo GitHub (monorepo backend/, frontend/, infra/)  
-- Implementare backend locale (NestJS + PostgreSQL)  
-- Middleware JWT mock sostituito con Cognito verifier  
-- Endpoint API minimi + frontend React (login mock, dashboard admin, scheda socio)  
-- Configurare LocalStack (Cognito, S3 mock), test login e flussi  
-- Scrivere moduli Terraform (backend, frontend, db, cognito, networking)  
-- Collegare GitHub Actions per build & deploy automatico  
-- Deploy ambiente test AWS → test.gestioneasddominio.com  
-- Replica per nuovi tenant (asd1, asd2, ...) tramite variabili Terraform  
+## 🧩 Etichettatura Risorse AWS (per fatturazione separata)
+
+Ogni stack Terraform deve includere i seguenti tag:
+```
+tags = {
+  Project     = "GestioneASD"
+  Environment = "prod"
+  Tenant      = "ASD1"
+  CostCenter  = "ASD1"
+}
+```
