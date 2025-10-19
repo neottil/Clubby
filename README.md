@@ -7,7 +7,7 @@ Gestione soci di un club. Anagrafica, incontri, card prepagate per incntri.
 Ogni ASD avrà una propria istanza completa dell’applicazione:  
 - Frontend → React (SPA), hostato su S3 + CloudFront  
 - Backend API → Node.js (NestJS consigliato), in container ECS/Fargate  
-- Database → Aurora PostgreSQL (una istanza per tenant)  
+- Database → Aurora Serverless (una db per tenant)  
 - Autenticazione → Amazon Cognito (User Pool + Client + Groups admin, viewer)  
 - Storage (eventuali file, export, etc.) → Bucket S3 dedicato per tenant  
 - Infrastructure as Code (IaC) → Terraform modulare  
