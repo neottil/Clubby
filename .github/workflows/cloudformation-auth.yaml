@@ -41,7 +41,7 @@ jobs:
           --stack-name ${{ env.STACK_NAME }} \
           --parameter-overrides file://${{ env.PARAMS_PATH }} \
           --capabilities CAPABILITY_NAMED_IAM \
-          --no-execute-changeset
+          --no-fail-on-empty-changeset
 
     - name: CloudFormation Plan (ChangeSet)
       if: github.event_name == 'pull_request'

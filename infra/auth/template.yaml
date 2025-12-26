@@ -42,23 +42,21 @@ Resources:
           AttributeDataType: Boolean
           Mutable: true
           Required: false
-      PasswordPolicy:
-        MinimumLength: 8
-        RequireLowercase: true
-        RequireNumbers: true
-        RequireSymbols: false
-        RequireUppercase: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
       AccountRecoverySetting:
         RecoveryMechanisms:
           - Name: verified_email
             Priority: 1
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Tenant
-          Value: !Ref TenantName
-        - Key: Project
-          Value: ClubManager
+      UserPoolTags:
+        Environment: !Ref Environment
+        Tenant: !Ref TenantName
+        Project: ClubManager
 
   # User Pool Client
   ClubManagerUserPoolClient:
