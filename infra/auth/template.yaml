@@ -44,7 +44,7 @@ Resources:
           Required: false
       Policies:
         PasswordPolicy:
-          MinimumLength: 8
+          MinimumLength: 10
           RequireLowercase: true
           RequireNumbers: true
           RequireSymbols: false
