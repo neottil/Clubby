@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ClubManager Cognito Auth Stack'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: test
+    Description: Environment name
+  TenantName:
+    Type: String
+    Default: test
+    Description: Tenant name
+  AwsRegion:
+    Type: String
+    Default: eu-central-1
+    Description: AWS Region
+  FrontendRedirectUris:
+    Type: CommaDelimitedList
+    Default: 'http://localhost:5173/callback'
+    Description: Frontend callback URLs
+  FrontendLogoutUris:
+    Type: CommaDelimitedList
+    Default: 'http://localhost:5173/'
+    Description: Frontend logout URLs
+
+Resources:
+  # Cognito User Pool
+  ClubManagerUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'clubmanager-${TenantName}-${Environment}'
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: email_verified
+          AttributeDataType: Boolean
+          Mutable: true
+          Required: false
+      PasswordPolicy:
+        MinimumLength: 8
+        RequireLowercase: true
+        RequireNumbers: true
+        RequireSymbols: false
+        RequireUppercase: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantName
+        - Key: Project
+          Value: ClubManager
+
+  # User Pool Client
+  ClubManagerUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref ClubManagerUserPool
+      ClientName: !Sub 'clubmanager-spa-${TenantName}-${Environment}'
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: false
+      RefreshTokenValidity: 30
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs: !Ref FrontendRedirectUris
+      LogoutURLs: !Ref FrontendLogoutUris
+      SupportedIdentityProviders:
+        - COGNITO
+
+  # User Pool Domain
+  ClubManagerUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub 'clubmanager-${TenantName}-${Environment}'
+      UserPoolId: !Ref ClubManagerUserPool
+
+  # Admin Group
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: Amministratori ClubManager
+      GroupName: admin
+      UserPoolId: !Ref ClubManagerUserPool
+
+Outputs:
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref ClubManagerUserPool
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolId'
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref ClubManagerUserPoolClient
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolClientId'
+
+  UserPoolDomain:
+    Description: Cognito User Pool Domain
+    Value: !Ref ClubManagerUserPoolDomain
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolDomain'
+
+  OauthAuthorizeEndpoint:
+    Description: Hosted UI authorize endpoint
+    Value: !Sub 'https://${ClubManagerUserPoolDomain}.auth.${AwsRegion}.amazoncognito.com/oauth2/authorize'
+    Export:
+      Name: !Sub '${AWS::StackName}-OauthAuthorizeEndpoint'
+
+  UserPoolArn:
+    Description: User Pool ARN (per API Gateway)
+    Value: !GetAtt ClubManagerUserPool.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolArn'

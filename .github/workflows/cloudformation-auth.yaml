@@ -1,0 +1,66 @@
+name: Deploy CloudFormation Auth
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'infra/auth/**'
+  pull_request:
+    paths:
+      - 'infra/auth/**'
+
+env:
+  AWS_REGION: eu-central-1
+  STACK_NAME: clubmanager-auth-test
+  TEMPLATE_PATH: infra/auth/template.yaml
+  PARAMS_PATH: infra/auth/parameters.json
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        role-session-name: GitHubActions-CF-Auth-${{ github.sha }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Deploy CloudFormation Stack
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        aws cloudformation deploy \
+          --template-file ${{ env.TEMPLATE_PATH }} \
+          --stack-name ${{ env.STACK_NAME }} \
+          --parameter-overrides file://${{ env.PARAMS_PATH }} \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --no-execute-changeset
+
+    - name: CloudFormation Plan (ChangeSet)
+      if: github.event_name == 'pull_request'
+      run: |
+        aws cloudformation create-change-set \
+          --stack-name ${{ env.STACK_NAME }} \
+          --template-body file://${{ env.TEMPLATE_PATH }} \
+          --change-set-name pr-${{ github.event.number }} \
+          --parameter-overrides file://${{ env.PARAMS_PATH }} \
+          --capabilities CAPABILITY_NAMED_IAM
+        
+        aws cloudformation describe-change-set \
+          --stack-name ${{ env.STACK_NAME }} \
+          --change-set-name pr-${{ github.event.number }}
+
+    - name: Show Outputs
+      if: always()
+      run: |
+        aws cloudformation describe-stacks \
+          --stack-name ${{ env.STACK_NAME }} \
+          --query 'Stacks[0].Outputs' \
+          --output table

@@ -1,0 +1,22 @@
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "test"
+  },
+  {
+    "ParameterKey": "TenantName", 
+    "ParameterValue": "test"
+  },
+  {
+    "ParameterKey": "AwsRegion",
+    "ParameterValue": "eu-central-1"
+  },
+  {
+    "ParameterKey": "FrontendRedirectUris",
+    "ParameterValue": "http://localhost:5173/callback"
+  },
+  {
+    "ParameterKey": "FrontendLogoutUris",
+    "ParameterValue": "http://localhost:5173/"
+  }
+]
