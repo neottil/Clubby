@@ -55,13 +55,14 @@ runs:
              [[ "$STACK_STATUS" == "DELETE_FAILED" ]] || \
              [[ "$STACK_STATUS" == "UPDATE_ROLLBACK_FAILED" ]]; then
             echo "✗ Stack is in failed state: $STACK_STATUS"
-            echo "Fetching failure reasons..."
+            echo "🔍 FAILURE EVENTS:"
             aws cloudformation describe-stack-events \
               --stack-name $STACK_NAME \
               --max-items 20 \
-              --query 'StackEvents[?contains(ResourceStatus, `FAILED`) || contains(ResourceStatus, `ROLLBACK`)].{Time:Timestamp,Resource:LogicalResourceId,Status:ResourceStatus,Reason:ResourceStatusReason}' \
-              --output table
-            echo "status=$STACK_STATUS" >> $GITHUB_OUTPUT
+              --query 'StackEvents[?ResourceStatus==`CREATE_FAILED` || ResourceStatus==`UPDATE_FAILED`].[LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+              --output text | while read line; do
+                echo "- $line"
+              done
             exit 1
           fi
           
