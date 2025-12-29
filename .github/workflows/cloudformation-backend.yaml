@@ -20,7 +20,7 @@ permissions:
 jobs:
   deploy-backend:
     runs-on: ubuntu-latest
-
+    
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -54,9 +54,9 @@ jobs:
           node_modules/ \
           package.json
         ls -lh ../backend-lambda-${{ github.sha }}.zip
-        echo "ZIP_PATH=backend-lambda-${{ github.sha }}.zip" >> $GITHUB_ENV
 
-    - name: Deploy CloudFormation Stack
+    # FASE 1: Deploy stack (crea bucket se non esiste)
+    - name: Deploy CloudFormation Stack (infra only)
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       run: |
         set +e
@@ -72,7 +72,44 @@ jobs:
           --no-fail-on-empty-changeset
         EXIT_CODE=$?
         echo "cloudformation deploy exit code: $EXIT_CODE"
-        exit $EXIT_CODE
+        if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 255 ]; then
+          exit $EXIT_CODE
+        fi
+
+    # FASE 2: Ottieni nome bucket dagli output CloudFormation
+    - name: Get S3 bucket name from CloudFormation
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      id: get-bucket
+      run: |
+        BUCKET_NAME=$(aws cloudformation describe-stacks \
+          --stack-name ${{ env.STACK_NAME }} \
+          --query 'Stacks[0].Outputs[?OutputKey==`LambdaArtifactsBucketName`].OutputValue' \
+          --output text)
+        echo "bucket=$BUCKET_NAME" >> $GITHUB_OUTPUT
+        echo "Bucket name: $BUCKET_NAME"
+
+    # FASE 3: Upload ZIP su S3
+    - name: Upload Lambda package to S3
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        aws s3 cp backend-lambda-${{ github.sha }}.zip \
+          s3://${{ steps.get-bucket.outputs.bucket }}/backend-lambda-${{ github.sha }}.zip
+
+    # FASE 4: Aggiorna Lambda con nuovo codice
+    - name: Update Lambda function code
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        FUNCTION_NAME=$(aws cloudformation describe-stacks \
+          --stack-name ${{ env.STACK_NAME }} \
+          --query 'Stacks[0].Outputs[?OutputKey==`BackendLambdaArn`].OutputValue' \
+          --output text | cut -d: -f7)
+        
+        aws lambda update-function-code \
+          --function-name $FUNCTION_NAME \
+          --s3-bucket ${{ steps.get-bucket.outputs.bucket }} \
+          --s3-key backend-lambda-${{ github.sha }}.zip
+        
+        echo "Lambda function updated: $FUNCTION_NAME"
 
     - name: Show Outputs
       if: always()

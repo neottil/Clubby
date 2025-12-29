@@ -6,30 +6,22 @@ Parameters:
     Type: String
     Default: test
     Description: Environment name (dev, test, prod)
-
+  
   AwsRegion:
     Type: String
     Default: eu-central-1
     Description: AWS Region
-
-  LambdaCodeS3Bucket:
-    Type: String
-    Description: S3 bucket where Lambda zip is stored
-
-  LambdaCodeS3Key:
-    Type: String
-    Description: S3 key (path) for Lambda zip file
-
+  
   UserPoolId:
     Type: String
     Description: Cognito User Pool ID
-
+  
   UserPoolClientId:
     Type: String
     Description: Cognito User Pool App Client ID
 
 Resources:
-  # S3 Bucket per Lambda artifacts (creato automaticamente)
+  # S3 Bucket per Lambda artifacts
   LambdaArtifactsBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -60,7 +52,7 @@ Resources:
             Action:
               - s3:GetObject
             Resource: !Sub '${LambdaArtifactsBucket.Arn}/*'
-            
+
   # IAM role per Lambda
   BackendLambdaRole:
     Type: AWS::IAM::Role
@@ -77,23 +69,37 @@ Resources:
               - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3ArtifactsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${LambdaArtifactsBucket.Arn}/*'
       Tags:
         - Key: Environment
           Value: !Ref Environment
         - Key: Project
           Value: ClubManager
 
-  # Lambda function (Node.js 20) che espone /api/soci
+  # Lambda function (Node.js 20)
   BackendLambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub clubmanager-backend-${Environment}
       Runtime: nodejs20.x
-      Handler: main.handler
+      Handler: dist/main.handler
       Role: !GetAtt BackendLambdaRole.Arn
       Code:
-        S3Bucket: !Ref LambdaCodeS3Bucket
-        S3Key: !Ref LambdaCodeS3Key
+        ZipFile: |
+          exports.handler = async (event) => {
+            return {
+              statusCode: 200,
+              body: JSON.stringify({ message: 'Placeholder - awaiting deployment' })
+            };
+          };
       MemorySize: 256
       Timeout: 10
       Environment:
@@ -116,6 +122,9 @@ Resources:
           - "*"
         AllowMethods:
           - GET
+          - POST
+          - PUT
+          - DELETE
           - OPTIONS
         AllowHeaders:
           - Authorization
@@ -145,17 +154,17 @@ Resources:
         Audience:
           - !Ref UserPoolClientId
 
-  # Route GET /api/soci protetta da JWT authorizer
+  # Route GET /api/soci protetta da JWT
   HttpApiRouteGetSoci:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
       RouteKey: "GET /api/soci"
-      Target: !Sub integrations/${HttpApiIntegration.Ref}
+      Target: !Sub integrations/${HttpApiIntegration}
       AuthorizationType: JWT
       AuthorizerId: !Ref HttpApiJwtAuthorizer
 
-  # Stage default ($default)
+  # Stage default
   HttpApiStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
@@ -163,14 +172,14 @@ Resources:
       StageName: "$default"
       AutoDeploy: true
 
-  # Permesso per API Gateway di invocare la Lambda
+  # Permesso per API Gateway
   LambdaInvokePermissionForHttpApi:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref BackendLambdaFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*/api/soci
+      SourceArn: !Sub arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*
 
 Outputs:
   HttpApiId:
@@ -178,18 +187,19 @@ Outputs:
     Value: !Ref HttpApi
     Export:
       Name: !Sub '${AWS::StackName}-HttpApiId'
-
+  
   HttpApiInvokeUrl:
     Description: HTTP API invoke URL
     Value: !Sub 'https://${HttpApi}.execute-api.${AwsRegion}.amazonaws.com'
     Export:
       Name: !Sub '${AWS::StackName}-HttpApiInvokeUrl'
-
+  
   BackendLambdaArn:
     Description: Backend Lambda ARN
     Value: !GetAtt BackendLambdaFunction.Arn
     Export:
       Name: !Sub '${AWS::StackName}-BackendLambdaArn'
+  
   LambdaArtifactsBucketName:
     Description: S3 bucket per Lambda artifacts
     Value: !Ref LambdaArtifactsBucket

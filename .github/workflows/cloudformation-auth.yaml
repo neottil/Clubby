@@ -37,13 +37,22 @@ jobs:
         set -e
         CHANGE_SET_NAME="gh-deploy-${GITHUB_RUN_NUMBER}-${GITHUB_SHA}"
 
-        echo "Creating ChangeSet $CHANGE_SET_NAME"
+        # Determina se lo stack esiste
+        if aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} 2>/dev/null; then
+          CHANGE_SET_TYPE="UPDATE"
+          echo "Stack exists, using UPDATE change set type"
+        else
+          CHANGE_SET_TYPE="CREATE"
+          echo "Stack does not exist, using CREATE change set type"
+        fi
+        
+        echo "Creating ChangeSet $CHANGE_SET_NAME with type $CHANGE_SET_TYPE"
 
         aws cloudformation create-change-set \
           --stack-name ${{ env.STACK_NAME }} \
           --template-body file://${{ env.TEMPLATE_PATH }} \
           --change-set-name "$CHANGE_SET_NAME" \
-          --change-set-type CREATE \
+          --change-set-type $CHANGE_SET_TYPE \
           --parameter file://${{ env.PARAMS_PATH }} \
           --capabilities CAPABILITY_NAMED_IAM
 
@@ -83,10 +92,11 @@ jobs:
           --change-set-name "$CHANGE_SET_NAME"
 
         echo "Waiting for stack to complete..."
-        aws cloudformation wait stack-create-complete \
-          --stack-name ${{ env.STACK_NAME }} || \
-        aws cloudformation wait stack-update-complete \
-          --stack-name ${{ env.STACK_NAME }}
+        if [ "$CHANGE_SET_TYPE" = "CREATE" ]; then
+          aws cloudformation wait stack-create-complete --stack-name ${{ env.STACK_NAME }}
+        else
+          aws cloudformation wait stack-update-complete --stack-name ${{ env.STACK_NAME }}
+        fi
 
     - name: Show Outputs
       if: always()
