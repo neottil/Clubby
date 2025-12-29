@@ -1,5 +1,4 @@
 import { Controller, Get } from '@nestjs/common';
-import { AppService } from './app.service';
 
 @Controller('api/soci')
 export class SociController {
@@ -11,4 +10,3 @@ export class SociController {
     ];
   }
 }
-

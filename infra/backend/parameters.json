@@ -1,0 +1,10 @@
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "test"
+  },
+  {
+    "ParameterKey": "AwsRegion",
+    "ParameterValue": "eu-central-1"
+  }
+]

@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ClubManager Backend Stack (Lambda + HTTP API + Cognito JWT Authorizer)'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: test
+    Description: Environment name (dev, test, prod)
+
+  AwsRegion:
+    Type: String
+    Default: eu-central-1
+    Description: AWS Region
+
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: S3 bucket where Lambda zip is stored
+
+  LambdaCodeS3Key:
+    Type: String
+    Description: S3 key (path) for Lambda zip file
+
+  UserPoolId:
+    Type: String
+    Description: Cognito User Pool ID
+
+  UserPoolClientId:
+    Type: String
+    Description: Cognito User Pool App Client ID
+
+Resources:
+  # S3 Bucket per Lambda artifacts (creato automaticamente)
+  LambdaArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub clubmanager-lambda-artifacts-${Environment}-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 7
+            NoncurrentVersionExpirationInDays: 7
+
+  LambdaArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LambdaArtifactsBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource: !Sub '${LambdaArtifactsBucket.Arn}/*'
+            
+  # IAM role per Lambda
+  BackendLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub clubmanager-backend-lambda-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: ClubManager
+
+  # Lambda function (Node.js 20) che espone /api/soci
+  BackendLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub clubmanager-backend-${Environment}
+      Runtime: nodejs20.x
+      Handler: main.handler
+      Role: !GetAtt BackendLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: ClubManager
+
+  # HTTP API Gateway
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub clubmanager-http-api-${Environment}
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - OPTIONS
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+
+  # Integrazione Lambda
+  HttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AwsRegion}:lambda:path/2015-03-31/functions/${BackendLambdaFunction.Arn}/invocations
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+
+  # JWT Authorizer Cognito
+  HttpApiJwtAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref HttpApi
+      AuthorizerType: JWT
+      IdentitySource:
+        - "$request.header.Authorization"
+      Name: !Sub clubmanager-jwt-authorizer-${Environment}
+      JwtConfiguration:
+        Issuer: !Sub https://cognito-idp.${AwsRegion}.amazonaws.com/${UserPoolId}
+        Audience:
+          - !Ref UserPoolClientId
+
+  # Route GET /api/soci protetta da JWT authorizer
+  HttpApiRouteGetSoci:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /api/soci"
+      Target: !Sub integrations/${HttpApiIntegration.Ref}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  # Stage default ($default)
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: "$default"
+      AutoDeploy: true
+
+  # Permesso per API Gateway di invocare la Lambda
+  LambdaInvokePermissionForHttpApi:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BackendLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*/api/soci
+
+Outputs:
+  HttpApiId:
+    Description: HTTP API ID
+    Value: !Ref HttpApi
+    Export:
+      Name: !Sub '${AWS::StackName}-HttpApiId'
+
+  HttpApiInvokeUrl:
+    Description: HTTP API invoke URL
+    Value: !Sub 'https://${HttpApi}.execute-api.${AwsRegion}.amazonaws.com'
+    Export:
+      Name: !Sub '${AWS::StackName}-HttpApiInvokeUrl'
+
+  BackendLambdaArn:
+    Description: Backend Lambda ARN
+    Value: !GetAtt BackendLambdaFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendLambdaArn'
+  LambdaArtifactsBucketName:
+    Description: S3 bucket per Lambda artifacts
+    Value: !Ref LambdaArtifactsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArtifactsBucket'

@@ -1,0 +1,83 @@
+name: Deploy CloudFormation Backend
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '.github/workflows/cloudformation-backend.yaml'
+      - 'infra/backend/**'
+      - 'backend/**'
+
+env:
+  AWS_REGION: eu-central-1
+  STACK_NAME: clubmanager-backend-test
+  TEMPLATE_PATH: infra/backend/template.yaml
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        role-session-name: GitHubActions-CF-Backend-${{ github.sha }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+
+    - name: Build Backend
+      working-directory: backend
+      run: |
+        npm ci
+        npm run build
+        ls -la dist/
+
+    - name: Create Lambda deployment package
+      working-directory: backend
+      run: |
+        zip -r ../backend-lambda-${{ github.sha }}.zip \
+          dist/ \
+          node_modules/ \
+          package.json
+        ls -lh ../backend-lambda-${{ github.sha }}.zip
+        echo "ZIP_PATH=backend-lambda-${{ github.sha }}.zip" >> $GITHUB_ENV
+
+    - name: Deploy CloudFormation Stack
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        set +e
+        aws cloudformation deploy \
+          --template-file ${{ env.TEMPLATE_PATH }} \
+          --stack-name ${{ env.STACK_NAME }} \
+          --parameter-overrides \
+            Environment=test \
+            AwsRegion=${{ env.AWS_REGION }} \
+            UserPoolId=${{ secrets.COGNITO_USER_POOL_ID }} \
+            UserPoolClientId=${{ secrets.COGNITO_USER_POOL_CLIENT_ID }} \
+          --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+          --no-fail-on-empty-changeset
+        EXIT_CODE=$?
+        echo "cloudformation deploy exit code: $EXIT_CODE"
+        exit $EXIT_CODE
+
+    - name: Show Outputs
+      if: always()
+      run: |
+        aws cloudformation describe-stacks \
+          --stack-name ${{ env.STACK_NAME }} \
+          --query 'Stacks[0].Outputs' \
+          --output table || echo "Stack not found or error"
