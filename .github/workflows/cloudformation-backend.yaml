@@ -78,11 +78,11 @@ jobs:
 
     - name: Wait for stack completion
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      run: |
-        aws cloudformation wait stack-create-complete \
-          --stack-name ${{ env.STACK_NAME }} 2>/dev/null || \
-        aws cloudformation wait stack-update-complete \
-          --stack-name ${{ env.STACK_NAME }} 2>/dev/null || true
+      uses: ./.github/actions/wait-cloudformation-stack
+      with:
+        stack-name: ${{ env.STACK_NAME }}
+        max-wait-time: '120'
+        poll-interval: '10'
 
     # FASE 3: Ottieni nome bucket dagli output CloudFormation
     - name: Get S3 bucket name from CloudFormation

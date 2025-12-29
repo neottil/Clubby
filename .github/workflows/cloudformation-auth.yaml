@@ -36,7 +36,7 @@ jobs:
       run: |
         set -e
         CHANGE_SET_NAME="gh-deploy-${GITHUB_RUN_NUMBER}-${GITHUB_SHA}"
-
+        
         # Determina se lo stack esiste
         if aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} 2>/dev/null; then
           CHANGE_SET_TYPE="UPDATE"
@@ -47,56 +47,65 @@ jobs:
         fi
         
         echo "Creating ChangeSet $CHANGE_SET_NAME with type $CHANGE_SET_TYPE"
-
+        
         aws cloudformation create-change-set \
           --stack-name ${{ env.STACK_NAME }} \
           --template-body file://${{ env.TEMPLATE_PATH }} \
           --change-set-name "$CHANGE_SET_NAME" \
           --change-set-type $CHANGE_SET_TYPE \
-          --parameter file://${{ env.PARAMS_PATH }} \
+          --parameters file://${{ env.PARAMS_PATH }} \
           --capabilities CAPABILITY_NAMED_IAM
-
+        
         echo "Waiting for ChangeSet to be created..."
+        # Disabilita set -e temporaneamente per il wait
+        set +e
+        # Cattura il codice di ritorno del wait senza interrompere lo script
         aws cloudformation wait change-set-create-complete \
           --stack-name ${{ env.STACK_NAME }} \
           --change-set-name "$CHANGE_SET_NAME"
+        WAIT_EXIT_CODE=$?
+        set -e  # Riattiva set -e
 
+        echo "Wait exit code: $WAIT_EXIT_CODE"
+        
+        # Controlla sempre lo stato del ChangeSet
         STATUS=$(aws cloudformation describe-change-set \
           --stack-name ${{ env.STACK_NAME }} \
           --change-set-name "$CHANGE_SET_NAME" \
           --query 'Status' \
           --output text)
-
+        
         REASON=$(aws cloudformation describe-change-set \
           --stack-name ${{ env.STACK_NAME }} \
           --change-set-name "$CHANGE_SET_NAME" \
           --query 'StatusReason' \
           --output text || echo "")
-
+        
         echo "ChangeSet status: $STATUS"
         echo "ChangeSet reason: $REASON"
-
+        
         if [ "$STATUS" = "FAILED" ]; then
-          if [[ "$REASON" == *"didn't contain changes"* ]]; then
+          if [[ "$REASON" == *"didn't contain changes"* ]] || [[ "$REASON" == *"No updates are to be performed"* ]]; then
             echo "No changes to apply, exiting successfully."
             exit 0
           else
-            echo "ChangeSet failed for another reason."
+            echo "ChangeSet failed for another reason: $REASON"
             exit 1
           fi
         fi
-
+        
         echo "Executing ChangeSet..."
         aws cloudformation execute-change-set \
           --stack-name ${{ env.STACK_NAME }} \
           --change-set-name "$CHANGE_SET_NAME"
 
-        echo "Waiting for stack to complete..."
-        if [ "$CHANGE_SET_TYPE" = "CREATE" ]; then
-          aws cloudformation wait stack-create-complete --stack-name ${{ env.STACK_NAME }}
-        else
-          aws cloudformation wait stack-update-complete --stack-name ${{ env.STACK_NAME }}
-        fi
+    - name: Wait for stack completion
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: ./.github/actions/wait-cloudformation-stack
+      with:
+        stack-name: ${{ env.STACK_NAME }}
+        max-wait-time: '120'
+        poll-interval: '10'
 
     - name: Show Outputs
       if: always()
