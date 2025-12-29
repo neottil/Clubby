@@ -28,7 +28,7 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        role-session-name: GitHubActions-CF-Auth-${{ github.sha_short }}
+        role-session-name: GitHubActions-CF-Auth-${{ github.run_id }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Create and Execute ChangeSet
@@ -77,7 +77,7 @@ jobs:
         echo "ChangeSet reason: $REASON"
 
         if [ "$STATUS" = "FAILED" ]; then
-          if [[ "$REASON" == *"The submitted information didn't contain changes"* ]]; then
+          if [[ "$REASON" == *"didn't contain changes"* ]]; then
             echo "No changes to apply, exiting successfully."
             exit 0
           else
