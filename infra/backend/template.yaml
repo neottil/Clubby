@@ -150,7 +150,7 @@ Resources:
         - "$request.header.Authorization"
       Name: !Sub clubmanager-jwt-authorizer-${Environment}
       JwtConfiguration:
-        Issuer: !Sub https://cognito-idp.${AwsRegion}.amazonaws.com/${UserPoolId}
+        Issuer: !Sub https://cognito-idp.${AwsRegion}.amazonaws.com/${UserPoolId}/
         Audience:
           - !Ref UserPoolClientId
 
