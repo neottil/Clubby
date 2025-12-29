@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  deploy-auth:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -28,7 +28,7 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        role-session-name: GitHubActions-CF-Auth-${{ github.sha }}
+        role-session-name: GitHubActions-CF-Auth-${{ github.sha_short }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Create and Execute ChangeSet

@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  deploy-backend:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,7 +29,7 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        role-session-name: GitHubActions-CF-Backend-${{ github.sha }}
+        role-session-name: GitHubActions-CF-Backend-${{ github.sha_short }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Setup Node.js
