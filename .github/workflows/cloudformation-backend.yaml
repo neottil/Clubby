@@ -91,7 +91,7 @@ jobs:
             Environment=${{ env.ENV }} \
             AwsRegion=${{ env.AWS_REGION }} \
             UserPoolId=${{ steps.secrets.outputs['user-pool-id'] }} \
-            UserPoolClientId=${{ steps.secrets.outputs['user-pool-client-id'] } \
+            UserPoolClientId=${{ steps.secrets.outputs['user-pool-client-id'] }} \
           --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
           --no-fail-on-empty-changeset
         EXIT_CODE=$?

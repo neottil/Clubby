@@ -6,9 +6,6 @@ on:
     paths:
       - '.github/workflows/cloudformation-auth.yaml'
       - 'infra/auth/**'
-  workflow_run:
-    workflows: ["Deploy CloudFormation Auth"]
-    types: [completed]
 
 env:
   AWS_REGION: eu-central-1
