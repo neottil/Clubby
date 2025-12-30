@@ -53,11 +53,11 @@ jobs:
           --template-body file://${{ env.TEMPLATE_PATH }} \
           --change-set-name "$CHANGE_SET_NAME" \
           --change-set-type $CHANGE_SET_TYPE \
-          --parameter-overrides \
-            Environment=${{ env.ENV }} \
-            AwsRegion=${{ env.AWS_REGION }} \
-            FrontendRedirectUris=http://localhost:5173/callback \
-            FrontendLogoutUris=http://localhost:5173/ \
+          --parameters \
+            ParameterKey=Environment,ParameterValue=${{ env.ENV }} \
+            ParameterKey=AwsRegion,ParameterValue=${{ env.AWS_REGION }} \
+            ParameterKey=FrontendRedirectUris,ParameterValue=http://localhost:5173/callback \
+            ParameterKey=FrontendLogoutUris,ParameterValue=http://localhost:5173/ \
           --capabilities CAPABILITY_NAMED_IAM
         
         echo "Waiting for ChangeSet to be created..."
