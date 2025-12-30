@@ -28,25 +28,7 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     
-    steps:
-    # Scarica outputs da auth
-    - name: Download Auth Outputs
-      uses: actions/download-artifact@v4
-      with:
-        name: auth-outputs
-        path: auth-data/
-
-    - name: Extract Auth Secrets
-      id: secrets
-      run: |
-        USER_POOL_ID=$(cat auth-data/auth-outputs.json | jq -r '.[] | select(.OutputKey=="UserPoolId") | .OutputValue // empty')
-        CLIENT_ID=$(cat auth-data/auth-outputs.json | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue // empty')
-        
-        echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
-        echo "user-pool-client-id=$CLIENT_ID" >> $GITHUB_OUTPUT
-        echo "UserPoolId: $USER_POOL_ID"
-        echo "ClientId: $CLIENT_ID"
-        
+    steps:        
     - name: Checkout
       uses: actions/checkout@v4
 
@@ -56,6 +38,25 @@ jobs:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
         role-session-name: GitHubActions-CF-Backend-${{ github.run_id }}
         aws-region: ${{ env.AWS_REGION }}
+
+    
+    - name: Get Auth Stack Outputs
+      id: auth-outputs
+      run: |
+        AUTH_STACK_NAME="clubmanager-auth-${{ env.ENV }}"
+        
+        USER_POOL_ID=$(aws cloudformation describe-stacks \
+          --stack-name $AUTH_STACK_NAME \
+          --query 'Stacks[0].Outputs[?OutputKey==`UserPoolId`].OutputValue' \
+          --output text)
+        
+        USER_PPOL_CLIENT_ID=$(aws cloudformation describe-stacks \
+          --stack-name $AUTH_STACK_NAME \
+          --query 'Stacks[0].Outputs[?OutputKey==`UserPoolClientId`].OutputValue' \
+          --output text)
+        
+        echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+        echo "user-pool-client-id=$USER_PPOL_CLIENT_ID" >> $GITHUB_OUTPUT
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -90,8 +91,8 @@ jobs:
           --parameter-overrides \
             Environment=${{ env.ENV }} \
             AwsRegion=${{ env.AWS_REGION }} \
-            UserPoolId=${{ steps.secrets.outputs['user-pool-id'] }} \
-            UserPoolClientId=${{ steps.secrets.outputs['user-pool-client-id'] }} \
+            UserPoolId=${{ steps.auth-outputs.outputs['user-pool-id'] }} \
+            UserPoolClientId=${{ steps.auth-outputs.outputs['user-pool-client-id'] }} \
           --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
           --no-fail-on-empty-changeset
         EXIT_CODE=$?
