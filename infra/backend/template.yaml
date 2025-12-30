@@ -89,7 +89,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub clubmanager-backend-${Environment}
-      Runtime: nodejs20.x
+      Runtime: nodejs22.x
       Handler: dist/main.handler
       Role: !GetAtt BackendLambdaRole.Arn
       Code:
