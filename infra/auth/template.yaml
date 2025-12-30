@@ -4,23 +4,15 @@ Description: 'ClubManager Cognito Auth Stack'
 Parameters:
   Environment:
     Type: String
-    Default: test
     Description: Environment name
-  TenantName:
-    Type: String
-    Default: test
-    Description: Tenant name
   AwsRegion:
     Type: String
-    Default: eu-central-1
     Description: AWS Region
   FrontendRedirectUris:
     Type: CommaDelimitedList
-    Default: 'http://localhost:5173/callback'
     Description: Frontend callback URLs
   FrontendLogoutUris:
     Type: CommaDelimitedList
-    Default: 'http://localhost:5173/'
     Description: Frontend logout URLs
 
 Resources:
@@ -28,7 +20,7 @@ Resources:
   ClubManagerUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
-      UserPoolName: !Sub 'clubmanager-${TenantName}-${Environment}'
+      UserPoolName: !Sub 'clubmanager-${Environment}'
       UsernameAttributes:
         - email
       AutoVerifiedAttributes:
@@ -55,7 +47,6 @@ Resources:
             Priority: 1
       UserPoolTags:
         Environment: !Ref Environment
-        Tenant: !Ref TenantName
         Project: ClubManager
 
   # User Pool Client
@@ -63,7 +54,7 @@ Resources:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       UserPoolId: !Ref ClubManagerUserPool
-      ClientName: !Sub 'clubmanager-spa-${TenantName}-${Environment}'
+      ClientName: !Sub 'clubmanager-spa-${Environment}'
       ExplicitAuthFlows:
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
@@ -85,7 +76,7 @@ Resources:
   ClubManagerUserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
-      Domain: !Sub 'clubmanager-${TenantName}-${Environment}'
+      Domain: !Sub 'clubmanager-${Environment}'
       UserPoolId: !Ref ClubManagerUserPool
 
   # Admin Group

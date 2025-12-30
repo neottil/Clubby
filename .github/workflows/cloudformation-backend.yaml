@@ -1,6 +1,11 @@
 name: Deploy CloudFormation Backend
 
 on:
+  workflow_run:
+    workflows: ["Deploy CloudFormation Auth"]
+    types: 
+      - completed
+    branches: [main, develop]
   push:
     branches: [main, develop]
     paths:
@@ -10,7 +15,8 @@ on:
 
 env:
   AWS_REGION: eu-central-1
-  STACK_NAME: clubmanager-backend-test
+  ENV: ${{ github.ref_name }}
+  STACK_NAME: clubmanager-backend-${{ github.ref_name }}
   TEMPLATE_PATH: infra/backend/template.yaml
 
 permissions:
@@ -19,9 +25,28 @@ permissions:
 
 jobs:
   deploy-backend:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     
     steps:
+    # Scarica outputs da auth
+    - name: Download Auth Outputs
+      uses: actions/download-artifact@v4
+      with:
+        name: auth-outputs
+        path: auth-data/
+
+    - name: Extract Auth Secrets
+      id: secrets
+      run: |
+        USER_POOL_ID=$(cat auth-data/auth-outputs.json | jq -r '.[] | select(.OutputKey=="UserPoolId") | .OutputValue // empty')
+        CLIENT_ID=$(cat auth-data/auth-outputs.json | jq -r '.[] | select(.OutputKey=="UserPoolClientId") | .OutputValue // empty')
+        
+        echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+        echo "user-pool-client-id=$CLIENT_ID" >> $GITHUB_OUTPUT
+        echo "UserPoolId: $USER_POOL_ID"
+        echo "ClientId: $CLIENT_ID"
+        
     - name: Checkout
       uses: actions/checkout@v4
 
@@ -63,10 +88,10 @@ jobs:
           --template-file ${{ env.TEMPLATE_PATH }} \
           --stack-name ${{ env.STACK_NAME }} \
           --parameter-overrides \
-            Environment=test \
+            Environment=${{ env.ENV }} \
             AwsRegion=${{ env.AWS_REGION }} \
-            UserPoolId=${{ secrets.COGNITO_USER_POOL_ID }} \
-            UserPoolClientId=${{ secrets.COGNITO_USER_POOL_CLIENT_ID }} \
+            UserPoolId=${{ steps.secrets.outputs['user-pool-id'] }} \
+            UserPoolClientId=${{ steps.secrets.outputs['user-pool-client-id'] } \
           --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
           --no-fail-on-empty-changeset
         EXIT_CODE=$?

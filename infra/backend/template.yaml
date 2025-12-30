@@ -4,11 +4,9 @@ Description: 'ClubManager Backend Stack (Lambda + HTTP API + Cognito JWT Authori
 Parameters:
   Environment:
     Type: String
-    Default: test
     Description: Environment name (dev, test, prod)
   AwsRegion:
     Type: String
-    Default: eu-central-1
     Description: AWS Region
   UserPoolId:
     Type: String

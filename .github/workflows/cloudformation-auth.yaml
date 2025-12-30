@@ -6,12 +6,15 @@ on:
     paths:
       - '.github/workflows/cloudformation-auth.yaml'
       - 'infra/auth/**'
+  workflow_run:
+    workflows: ["Deploy CloudFormation Auth"]
+    types: [completed]
 
 env:
   AWS_REGION: eu-central-1
-  STACK_NAME: clubmanager-auth-test
+  ENV: ${{ github.ref_name }}
+  STACK_NAME: clubmanager-auth-${{ github.ref_name }}
   TEMPLATE_PATH: infra/auth/template.yaml
-  PARAMS_PATH: infra/auth/parameters.json
 
 permissions:
   id-token: write
@@ -53,7 +56,11 @@ jobs:
           --template-body file://${{ env.TEMPLATE_PATH }} \
           --change-set-name "$CHANGE_SET_NAME" \
           --change-set-type $CHANGE_SET_TYPE \
-          --parameters file://${{ env.PARAMS_PATH }} \
+          --parameter-overrides \
+            Environment=${{ env.ENV }} \
+            AwsRegion=${{ env.AWS_REGION }} \
+            FrontendRedirectUris=http://localhost:5173/callback \
+            FrontendLogoutUris=http://localhost:5173/ \
           --capabilities CAPABILITY_NAMED_IAM
         
         echo "Waiting for ChangeSet to be created..."
@@ -114,3 +121,23 @@ jobs:
           --stack-name ${{ env.STACK_NAME }} \
           --query 'Stacks[0].Outputs' \
           --output table
+
+    - name: Export Auth Outputs to file
+      if: always()
+      run: |
+        aws cloudformation describe-stacks \
+          --stack-name ${{ env.STACK_NAME }} \
+          --query 'Stacks[0].Outputs' \
+          --output json > auth-outputs.json || echo '{}' > auth-outputs.json
+        
+        echo "Auth outputs saved to auth-outputs.json"
+        cat auth-outputs.json
+
+    - name: Upload Auth Outputs Artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: auth-outputs
+        path: auth-outputs.json
+
+
