@@ -8,12 +8,6 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  AWS_REGION: eu-central-1
-  ENV: ${{ github.ref_name }}
-  AUTH_STACK_NAME: clubmanager-auth-${{ github.ref_name }}
-  BACKEND_STACK_NAME: clubmanager-backend-${{ github.ref_name }}
-
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
@@ -65,9 +59,9 @@ jobs:
     if: needs.detect-changes.outputs.run-auth == 'true'
     uses: ./.github/workflows/deploy-auth-stack.yaml
     with:
-      environment: ${{ env.ENV }}
+      environment: ${{ github.ref_name }}
       aws-region: eu-central-1
-      stack-name: ${{ env.AUTH_STACK_NAME }}
+      stack-name: clubmanager-auth-${{ github.ref_name }}
       template-path: infra/auth/template.yaml
     secrets:
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
@@ -76,9 +70,9 @@ jobs:
     needs: deploy-auth
     uses: ./.github/workflows/auth-stack-outputs.yaml
     with:
-      environment: ${{ env.ENV }}
+      environment: ${{ github.ref_name }}
       aws-region: eu-central-1
-      stack-name: ${{ env.AUTH_STACK_NAME }}
+      stack-name: clubmanager-auth-${{ github.ref_name }}
     secrets:
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
 
@@ -87,8 +81,8 @@ jobs:
     uses: ./.github/workflows/create-test-user.yaml
     with:
       aws-region: eu-central-1
-      stack-name: ${{ env.AUTH_STACK_NAME }}
-      environment: ${{ env.ENV }}
+      stack-name: clubmanager-auth-${{ github.ref_name }}
+      environment: ${{ github.ref_name }}
       user-pool-id: ${{ needs.auth-stack-outputs.outputs.user-pool-id }}
       user-pool-client-id: ${{ needs.auth-stack-outputs.outputs.user-pool-client-id }}
     secrets:
@@ -99,7 +93,7 @@ jobs:
     uses: ./.github/workflows/show-stack-deployment-outputs.yaml
     with:
       aws-region: eu-central-1
-      stack-name: ${{ env.AUTH_STACK_NAME }}
+      stack-name: clubmanager-auth-${{ github.ref_name }}
     secrets:
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
 
@@ -108,9 +102,9 @@ jobs:
     if: needs.detect-changes.outputs.run-backend == 'true'
     uses: ./.github/workflows/deploy-backend-stack.yaml
     with:
-      environment: ${{ env.ENV }}
+      environment: ${{ github.ref_name }}
       aws-region: eu-central-1
-      stack-name: ${{ env.BACKEND_STACK_NAME }}
+      stack-name: clubmanager-backend-${{ github.ref_name }}
       template-path: infra/backend/template.yaml
       user-pool-id: ${{ needs.auth-stack-outputs.outputs.user-pool-id }}
       user-pool-client-id: ${{ needs.auth-stack-outputs.outputs.user-pool-client-id }}
@@ -122,6 +116,6 @@ jobs:
     uses: ./.github/workflows/show-stack-deployment-outputs.yaml
     with:
       aws-region: eu-central-1
-      stack-name: ${{ env.BACKEND_STACK_NAME }}
+      stack-name: clubmanager-backend-${{ github.ref_name }}
     secrets:
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
