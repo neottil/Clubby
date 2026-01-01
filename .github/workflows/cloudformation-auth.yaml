@@ -138,13 +138,16 @@ jobs:
         
         echo "Checking if user $EMAIL exists..."
         
-        # Verifica se utente esiste
-        if aws cognito-idp admin-get-user \
+        # Verifica se utente esiste (cattura exit code)
+        set +e
+        aws cognito-idp admin-get-user \
           --user-pool-id "$USER_POOL_ID" \
-          --username "$EMAIL" 2>/dev/null; then
-          
-          echo "User $EMAIL already exists, updating password..."
-          
+          --username "$EMAIL" &>/dev/null
+        USER_EXISTS=$?
+        set -e
+        
+        if [ $USER_EXISTS -eq 0 ]; then
+          echo "User $EMAIL already exists, skipping creation"
         else
           echo "Creating new user $EMAIL..."
           
@@ -159,23 +162,24 @@ jobs:
           echo "User created successfully"
         fi
         
-        # Imposta password permanente (funziona sia per utenti nuovi che esistenti)
+        # Imposta password permanente (funziona sempre)
+        echo "Setting permanent password..."
         aws cognito-idp admin-set-user-password \
           --user-pool-id "$USER_POOL_ID" \
           --username "$EMAIL" \
           --password "$PASSWORD" \
           --permanent
         
-        echo "Test user ready: $EMAIL / $PASSWORD"
+        echo "✓ Test user ready: $EMAIL / $PASSWORD"
         
-        # Abilita USER_PASSWORD_AUTH sul client
+        # Abilita auth flows
+        echo "Configuring auth flows..."
         aws cognito-idp update-user-pool-client \
           --user-pool-id "$USER_POOL_ID" \
           --client-id "$CLIENT_ID" \
           --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH
         
-        echo "Auth flow enabled"
-
+        echo "✓ Auth flow enabled"
 
     - name: Show Outputs
       if: always()
