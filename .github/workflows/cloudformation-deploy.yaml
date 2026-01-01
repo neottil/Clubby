@@ -31,7 +31,7 @@ jobs:
           echo "$CHANGED_FILES"
           
           # Controlla modifiche AUTH
-          if echo "$CHANGED_FILES" | grep -qE '^(\.github/workflows/cloudformation-auth\.yaml|infra/auth/)'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(\.github/workflows/|infra/auth/)'; then
             echo "run-auth=true" >> $GITHUB_OUTPUT
             echo "Auth changes detected"
           else
@@ -40,7 +40,7 @@ jobs:
           fi
           
           # Controlla modifiche BACKEND
-          if echo "$CHANGED_FILES" | grep -qE '^(\.github/workflows/cloudformation-backend\.yaml|infra/backend/|backend/)'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(\.github/workflows/|infra/backend/|backend/)'; then
             echo "run-backend=true" >> $GITHUB_OUTPUT
             echo "Backend changes detected"
           else
