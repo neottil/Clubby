@@ -67,7 +67,7 @@ jobs:
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
 
   auth-stack-outputs:
-    needs: deploy-auth
+    needs: [ detect-changes, deploy-auth ]
     if: (needs.deploy-auth.result == 'success' || needs.deploy-auth.result == 'skipped')
     uses: ./.github/workflows/auth-stack-outputs.yaml
     with:
