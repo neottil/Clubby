@@ -3,6 +3,7 @@
   "exclude": ["node_modules", "test", "dist", "**/*spec.ts"],
   "compilerOptions": {
     "outDir": "./dist",
+    "rootDir": "./src",  // ← Rimuove src/ dal path output
     "declaration": false,
     "removeComments": false,
     "sourceMap": false
