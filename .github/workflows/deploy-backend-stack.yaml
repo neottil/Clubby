@@ -150,11 +150,4 @@ jobs:
           aws lambda wait function-updated --function-name $FUNCTION_NAME
           
           echo "Lambda function updated: $FUNCTION_NAME"
-
-      - name: Show Outputs
-        run: |
-          aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack-name }} \
-            --query 'Stacks[0].Outputs' \
-            --output table || echo "Stack not found"
       
