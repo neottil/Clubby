@@ -113,7 +113,7 @@ jobs:
             --change-set-name "$CHANGE_SET_NAME"
 
       - name: Wait for stack completion
-        uses: ./.github/actions/wait-cloudformation-stack.yaml
+        uses: ./.github/actions/wait-cloudformation-stack
         with:
           stack-name: ${{ inputs.stack-name }}
           max-wait-time: '120'
