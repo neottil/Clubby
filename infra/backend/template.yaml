@@ -85,22 +85,16 @@ Resources:
     Properties:
       FunctionName: !Sub clubmanager-backend-${Environment}
       Runtime: nodejs22.x
-      Handler: dist/main.handler
+      Handler: index.handler  # ✅ CORRETTO: placeholder semplice
       Role: !GetAtt BackendLambdaRole.Arn
       Code:
         ZipFile: |
           exports.handler = async (event) => {
-            console.log('Event:', JSON.stringify(event, null, 2));
             return {
-              statusCode: 200,
-              headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-              },
+              statusCode: 503,
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
-                message: 'ClubManager Backend OK!', 
-                path: event.requestContext.http.path,
-                method: event.requestContext.http.method 
+                message: 'Backend deployment in progress - placeholder active'
               })
             };
           };
@@ -157,7 +151,7 @@ Resources:
         Audience:
           - !Ref UserPoolClientId
 
-  # ✅ ROUTE ROOT $default (catch-all)
+  # Route ROOT $default (catch-all)
   HttpApiRootRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -167,7 +161,7 @@ Resources:
       AuthorizationType: JWT
       AuthorizerId: !Ref HttpApiJwtAuthorizer
 
-  # ✅ Route GET /api/soci (esistente)
+  # Route GET /api/soci
   HttpApiRouteGetSoci:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -177,7 +171,7 @@ Resources:
       AuthorizationType: JWT
       AuthorizerId: !Ref HttpApiJwtAuthorizer
 
-  # ✅ Route GET /health (pubblica per test)
+  # Route GET /health (pubblica)
   HttpApiRouteHealth:
     Type: AWS::ApiGatewayV2::Route
     Properties:

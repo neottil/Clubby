@@ -111,6 +111,56 @@ jobs:
         max-wait-time: '120'
         poll-interval: '10'
 
+    - name: Get Auth Stack Outputs
+      id: auth-outputs
+      run: |
+        AUTH_STACK_NAME="clubmanager-auth-${{ env.ENV }}"
+        
+        USER_POOL_ID=$(aws cloudformation describe-stacks \
+          --stack-name $AUTH_STACK_NAME \
+          --query 'Stacks[0].Outputs[?OutputKey==`UserPoolId`].OutputValue' \
+          --output text)
+        
+        USER_PPOL_CLIENT_ID=$(aws cloudformation describe-stacks \
+          --stack-name $AUTH_STACK_NAME \
+          --query 'Stacks[0].Outputs[?OutputKey==`UserPoolClientId`].OutputValue' \
+          --output text)
+        
+        echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+        echo "user-pool-client-id=$USER_PPOL_CLIENT_ID" >> $GITHUB_OUTPUT
+
+    - name: Create Test User in Cognito
+      run: |        
+        EMAIL="test@clubmanager.it"
+        PASSWORD="TestPassword123!"
+        
+        echo "Creating test user: $EMAIL with password: $PASSWORD"
+        
+        # Crea utente (ignora se esiste già)
+        aws cognito-idp admin-create-user \
+          --user-pool-id ${{ steps.auth-outputs.outputs['user-pool-id'] }} \
+          --username $EMAIL \
+          --user-attributes Name=email,Value=$EMAIL Name=email_verified,Value=true \
+          --temporary-password "TempPass123!" \
+          --message-action SUPPRESS 2>/dev/null || echo "User already exists"
+        
+        # Imposta password permanente
+        aws cognito-idp admin-set-user-password \
+          --user-pool-id ${{ steps.auth-outputs.outputs['user-pool-id'] }} \
+          --username $EMAIL \
+          --password $PASSWORD \
+          --permanent
+        
+        echo "✅ Test user ready: $EMAIL"
+        
+        # Abilita USER_PASSWORD_AUTH
+        aws cognito-idp update-user-pool-client \
+          --user-pool-id ${{ steps.auth-outputs.outputs['user-pool-id'] }} \
+          --client-id ${{ steps.auth-outputs.outputs['user-pool-client-id'] }} \
+          --explicit-auth-flows USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH
+        
+        echo "✅ Auth flow enabled"
+
     - name: Show Outputs
       if: always()
       run: |
