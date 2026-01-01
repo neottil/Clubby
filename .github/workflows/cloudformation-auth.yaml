@@ -131,6 +131,8 @@ jobs:
 
     - name: Create Test User in Cognito
       run: |        
+        set -e  # Mantieni set -e attivo
+        
         EMAIL="test@clubmanager.it"
         PASSWORD="TestPassword123!"
         USER_POOL_ID="${{ steps.auth-outputs.outputs['user-pool-id'] }}"
@@ -138,16 +140,13 @@ jobs:
         
         echo "Checking if user $EMAIL exists..."
         
-        # Verifica se utente esiste (cattura exit code)
-        set +e
+        # Cattura exit code anche con set -e attivo
         aws cognito-idp admin-get-user \
           --user-pool-id "$USER_POOL_ID" \
-          --username "$EMAIL" &>/dev/null
-        USER_EXISTS=$?
-        set -e
+          --username "$EMAIL" &>/dev/null && USER_EXISTS=0 || USER_EXISTS=$?
         
         if [ $USER_EXISTS -eq 0 ]; then
-          echo "User $EMAIL already exists, skipping creation"
+          echo "✓ User $EMAIL already exists, skipping creation"
         else
           echo "Creating new user $EMAIL..."
           
@@ -159,10 +158,10 @@ jobs:
             --temporary-password "TempPass123!" \
             --message-action SUPPRESS
           
-          echo "User created successfully"
+          echo "✓ User created successfully"
         fi
         
-        # Imposta password permanente (funziona sempre)
+        # Imposta password permanente
         echo "Setting permanent password..."
         aws cognito-idp admin-set-user-password \
           --user-pool-id "$USER_POOL_ID" \
@@ -170,7 +169,7 @@ jobs:
           --password "$PASSWORD" \
           --permanent
         
-        echo "✓ Test user ready: $EMAIL / $PASSWORD"
+        echo "Test user ready: $EMAIL / $PASSWORD"
         
         # Abilita auth flows
         echo "Configuring auth flows..."
@@ -179,7 +178,7 @@ jobs:
           --client-id "$CLIENT_ID" \
           --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH
         
-        echo "✓ Auth flow enabled"
+        echo "Auth configuration complete"
 
     - name: Show Outputs
       if: always()
