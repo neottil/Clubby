@@ -68,6 +68,7 @@ jobs:
 
   auth-stack-outputs:
     needs: deploy-auth
+    if: (needs.deploy-auth.result == 'success' || needs.deploy-auth.result == 'skipped')
     uses: ./.github/workflows/auth-stack-outputs.yaml
     with:
       environment: ${{ github.ref_name }}
@@ -78,6 +79,7 @@ jobs:
 
   create-test-user:
     needs: auth-stack-outputs
+    if: (needs.auth-stack-outputs.result == 'success')
     uses: ./.github/workflows/create-test-user.yaml
     with:
       aws-region: eu-central-1
