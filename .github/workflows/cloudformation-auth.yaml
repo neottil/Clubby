@@ -172,7 +172,7 @@ jobs:
         aws cognito-idp update-user-pool-client \
           --user-pool-id "$USER_POOL_ID" \
           --client-id "$CLIENT_ID" \
-          --explicit-auth-flows USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH
+          --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH
         
         echo "Auth flow enabled"
 
