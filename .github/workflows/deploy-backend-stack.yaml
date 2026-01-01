@@ -1,31 +1,40 @@
 name: Deploy CloudFormation Backend
 
 on:
-  workflow_run:
-    workflows: ["Deploy CloudFormation Auth"]
-    types:
-      - completed
-    branches: [main, develop]
-  push:
-    branches: [main, develop]
-    paths:
-      - '.github/workflows/cloudformation-backend.yaml'
-      - 'infra/backend/**'
-      - 'backend/**'
-
-env:
-  AWS_REGION: eu-central-1
-  ENV: ${{ github.ref_name }}
-  STACK_NAME: clubmanager-backend-${{ github.ref_name }}
-  TEMPLATE_PATH: infra/backend/template.yaml
+  workflow_call:
+    inputs:
+      aws-region:
+        required: true
+        description: 'AWS Region to deploy the stack'
+        type: string
+      stack-name:
+        required: true
+        description: 'CloudFormation stack name'
+        type: string
+      template-path:
+        required: true
+        description: 'Path to CloudFormation template file'
+        type: string
+      environment:
+        required: true
+        description: 'Deployment environment'
+        type: string
+      user-pool-id:
+        required: true
+        type: string
+      user-pool-client-id:
+        required: true
+        type: string
+    secrets:
+      aws-role-arn:
+        required: true
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  deploy-backend:
-    if: github.event.workflow_run.conclusion == 'success'
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,30 +43,9 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.aws-role-arn }}
           role-session-name: GitHubActions-CF-Backend-${{ github.run_id }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Get Auth Stack Outputs
-        id: auth-outputs
-        run: |
-          AUTH_STACK_NAME="clubmanager-auth-${{ env.ENV }}"
-          
-          USER_POOL_ID=$(aws cloudformation describe-stacks \
-            --stack-name $AUTH_STACK_NAME \
-            --query 'Stacks[0].Outputs[?OutputKey==`UserPoolId`].OutputValue' \
-            --output text)
-          
-          USER_POOL_CLIENT_ID=$(aws cloudformation describe-stacks \
-            --stack-name $AUTH_STACK_NAME \
-            --query 'Stacks[0].Outputs[?OutputKey==`UserPoolClientId`].OutputValue' \
-            --output text)
-          
-          echo "user-pool-id=$USER_POOL_ID" >> $GITHUB_OUTPUT
-          echo "user-pool-client-id=$USER_POOL_CLIENT_ID" >> $GITHUB_OUTPUT
-          
-          echo "UserPoolId: $USER_POOL_ID"
-          echo "ClientId: ${USER_POOL_CLIENT_ID:0:20}..."
+          aws-region: ${{ inputs.aws-region }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -87,13 +75,13 @@ jobs:
         run: |
           set +e
           aws cloudformation deploy \
-            --template-file ${{ env.TEMPLATE_PATH }} \
-            --stack-name ${{ env.STACK_NAME }} \
+            --template-file ${{ inputs.template-path }} \
+            --stack-name ${{ inputs.stack-name }} \
             --parameter-overrides \
-              Environment=${{ env.ENV }} \
-              AwsRegion=${{ env.AWS_REGION }} \
-              UserPoolId=${{ steps.auth-outputs.outputs['user-pool-id'] }} \
-              UserPoolClientId=${{ steps.auth-outputs.outputs['user-pool-client-id'] }} \
+              Environment=${{ inputs.environment }} \
+              AwsRegion=${{ inputs.aws-region }} \
+              UserPoolId=${{ inputs.user-pool-id }} \
+              UserPoolClientId=${{ inputs.user-pool-client-id }} \
             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
           
@@ -105,9 +93,9 @@ jobs:
           fi
 
       - name: Wait for stack completion
-        uses: ./.github/actions/wait-cloudformation-stack
+        uses: ./.github/actions/wait-cloudformation-stack.yaml
         with:
-          stack-name: ${{ env.STACK_NAME }}
+          stack-name: ${{ inputs.stack-name }}
           max-wait-time: '120'
           poll-interval: '10'
 
@@ -116,7 +104,7 @@ jobs:
         id: get-bucket
         run: |
           BUCKET_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
+            --stack-name ${{ inputs.stack-name }} \
             --query 'Stacks[0].Outputs[?OutputKey==`LambdaArtifactsBucketName`].OutputValue' \
             --output text)
           
@@ -139,7 +127,7 @@ jobs:
       - name: Update Lambda function
         run: |
           FUNCTION_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
+            --stack-name ${{ inputs.stack-name }} \
             --query 'Stacks[0].Outputs[?OutputKey==`BackendLambdaArn`].OutputValue' \
             --output text | cut -d: -f7)
           
@@ -164,9 +152,9 @@ jobs:
           echo "Lambda function updated: $FUNCTION_NAME"
 
       - name: Show Outputs
-        if: always()
         run: |
           aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
+            --stack-name ${{ inputs.stack-name }} \
             --query 'Stacks[0].Outputs' \
             --output table || echo "Stack not found"
+      

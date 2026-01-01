@@ -1,0 +1,127 @@
+name: CloudFormation Deploy
+
+on:
+  push:
+    branches: [main, develop]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  ENV: ${{ github.ref_name }}
+  AUTH_STACK_NAME: clubmanager-auth-${{ github.ref_name }}
+  BACKEND_STACK_NAME: clubmanager-backend-${{ github.ref_name }}
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run-auth: ${{ steps.changes.outputs.run-auth }}
+      run-backend: ${{ steps.changes.outputs.run-backend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Detect changes
+        id: changes
+        run: |
+          echo "Analyzing changed files..."
+          
+          # Ottieni lista file modificati
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          # Controlla modifiche AUTH
+          if echo "$CHANGED_FILES" | grep -qE '^(\.github/workflows/cloudformation-auth\.yaml|infra/auth/)'; then
+            echo "run-auth=true" >> $GITHUB_OUTPUT
+            echo "Auth changes detected"
+          else
+            echo "run-auth=false" >> $GITHUB_OUTPUT
+            echo "No auth changes"
+          fi
+          
+          # Controlla modifiche BACKEND
+          if echo "$CHANGED_FILES" | grep -qE '^(\.github/workflows/cloudformation-backend\.yaml|infra/backend/|backend/)'; then
+            echo "run-backend=true" >> $GITHUB_OUTPUT
+            echo "Backend changes detected"
+          else
+            echo "run-backend=false" >> $GITHUB_OUTPUT
+            echo "No backend changes"
+          fi
+      
+      - name: Summary
+        run: |
+          echo "### Deployment Plan" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Auth: ${{ steps.changes.outputs.run-auth }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run Backend: ${{ steps.changes.outputs.run-backend }}" >> $GITHUB_STEP_SUMMARY
+
+  deploy-auth:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.run-auth == 'true'
+    uses: ./.github/workflows/deploy-auth-stack.yaml
+    with:
+      environment: ${{ env.ENV }}
+      aws-region: eu-central-1
+      stack-name: ${{ env.AUTH_STACK_NAME }}
+      template-path: infra/auth/template.yaml
+    secrets:
+      aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
+
+  auth-stack-outputs:
+    needs: deploy-auth
+    uses: ./.github/workflows/auth-stack-outputs.yaml
+    with:
+      environment: ${{ env.ENV }}
+      aws-region: eu-central-1
+      stack-name: ${{ env.AUTH_STACK_NAME }}
+    secrets:
+      aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
+
+  create-test-user:
+    needs: auth-stack-outputs
+    uses: ./.github/workflows/create-test-user.yaml
+    with:
+      aws-region: eu-central-1
+      stack-name: ${{ env.AUTH_STACK_NAME }}
+      environment: ${{ env.ENV }}
+      user-pool-id: ${{ needs.auth-stack-outputs.outputs.user-pool-id }}
+      user-pool-client-id: ${{ needs.auth-stack-outputs.outputs.user-pool-client-id }}
+    secrets:
+      aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
+
+  show-auth-stack-deployment-outputs:
+    needs: deploy-auth
+    uses: ./.github/workflows/show-stack-deployment-outputs.yaml
+    with:
+      aws-region: eu-central-1
+      stack-name: ${{ env.AUTH_STACK_NAME }}
+    secrets:
+      aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
+
+  deploy-backend:
+    needs: auth-stack-outputs
+    if: needs.detect-changes.outputs.run-backend == 'true'
+    uses: ./.github/workflows/deploy-backend-stack.yaml
+    with:
+      environment: ${{ env.ENV }}
+      aws-region: eu-central-1
+      stack-name: ${{ env.BACKEND_STACK_NAME }}
+      template-path: infra/backend/template.yaml
+      user-pool-id: ${{ needs.auth-stack-outputs.outputs.user-pool-id }}
+      user-pool-client-id: ${{ needs.auth-stack-outputs.outputs.user-pool-client-id }}
+    secrets:
+      aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
+
+  show-backend-stack-deployment-outputs:
+    needs: deploy-backend
+    uses: ./.github/workflows/show-stack-deployment-outputs.yaml
+    with:
+      aws-region: eu-central-1
+      stack-name: ${{ env.BACKEND_STACK_NAME }}
+    secrets:
+      aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
