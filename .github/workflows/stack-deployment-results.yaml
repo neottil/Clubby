@@ -33,9 +33,10 @@ jobs:
           role-session-name: GitHubActions-CF-Auth-${{ github.run_id }}
           aws-region: ${{ inputs.aws-region }}
           
-      - name: Show Stack Deployment Results
+      - name: Stack Deployment Results
         run: |
+          echo "# Stack Deployment Results" >> $GITHUB_STEP_SUMMARY
           aws cloudformation describe-stacks \
             --stack-name ${{ inputs.stack-name }} \
             --query 'Stacks[0].Outputs' \
-            --output table
+            --output table >> $GITHUB_STEP_SUMMARY

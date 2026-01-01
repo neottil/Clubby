@@ -50,7 +50,7 @@ jobs:
       
       - name: Summary
         run: |
-          echo "### Deployment Plan" >> $GITHUB_STEP_SUMMARY
+          echo "# Deployment Plan" >> $GITHUB_STEP_SUMMARY
           echo "- Run Auth: ${{ steps.changes.outputs.run-auth }}" >> $GITHUB_STEP_SUMMARY
           echo "- Run Backend: ${{ steps.changes.outputs.run-backend }}" >> $GITHUB_STEP_SUMMARY
 
@@ -87,9 +87,9 @@ jobs:
     secrets:
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
 
-  show-auth-stack-deployment-outputs:
+  auth-stack-deployment-results:
     needs: deploy-auth
-    uses: ./.github/workflows/show-stack-deployment-outputs.yaml
+    uses: ./.github/workflows/stack-deployment-results.yaml
     with:
       aws-region: eu-central-1
       stack-name: clubmanager-auth-${{ github.ref_name }}
@@ -110,9 +110,9 @@ jobs:
     secrets:
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
 
-  show-backend-stack-deployment-outputs:
+  backend-stack-deployment-results:
     needs: deploy-backend
-    uses: ./.github/workflows/show-stack-deployment-outputs.yaml
+    uses: ./.github/workflows/stack-deployment-results.yaml
     with:
       aws-region: eu-central-1
       stack-name: clubmanager-backend-${{ github.ref_name }}
