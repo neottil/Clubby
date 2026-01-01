@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  produce-outputs:
     runs-on: ubuntu-latest
     outputs:
       user-pool-id: ${{ steps.auth-outputs.outputs.user-pool-id }}

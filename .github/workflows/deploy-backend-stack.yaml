@@ -128,7 +128,7 @@ jobs:
         run: |
           FUNCTION_NAME=$(aws cloudformation describe-stacks \
             --stack-name ${{ inputs.stack-name }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`BackendLambdaArn`].OutputValue' \
+            --query 'Stacks[0].Outputs[?OutputKey==`BackendSociLambdaArn`].OutputValue' \
             --output text | cut -d: -f7)
           
           echo "Updating Lambda: $FUNCTION_NAME"
@@ -144,7 +144,7 @@ jobs:
           # Update HANDLER per NestJS
           aws lambda update-function-configuration \
             --function-name $FUNCTION_NAME \
-            --handler dist/lambda.handler
+            --handler dist/handlers/soci.handler
           
           # Aspetta update config
           aws lambda wait function-updated --function-name $FUNCTION_NAME

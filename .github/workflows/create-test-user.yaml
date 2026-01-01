@@ -30,7 +30,7 @@ env:
   USER_PASSWORD: TestPassword123!
 
 jobs:
-  deploy:
+  create:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials

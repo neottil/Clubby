@@ -80,18 +80,18 @@ Resources:
           Value: ClubManager
 
   # Lambda function (Node.js 22)
-  BackendLambdaFunction:
+  BackendSociLambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub clubmanager-backend-${Environment}
+      FunctionName: !Sub clubmanager-backend-soci-${Environment}
       Runtime: nodejs22.x
-      Handler: index.handler  # ✅ CORRETTO: placeholder semplice
+      Handler: index.handler
       Role: !GetAtt BackendLambdaRole.Arn
       Code:
         ZipFile: |
           exports.handler = async (event) => {
             return {
-              statusCode: 503,
+              statusCode: 501,
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
                 message: 'Backend deployment in progress - placeholder active'
@@ -129,12 +129,12 @@ Resources:
           - Content-Type
 
   # Integrazione Lambda
-  HttpApiIntegration:
+  HttpApiSociIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
       ApiId: !Ref HttpApi
       IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AwsRegion}:lambda:path/2015-03-31/functions/${BackendLambdaFunction.Arn}/invocations
+      IntegrationUri: !Sub arn:aws:apigateway:${AwsRegion}:lambda:path/2015-03-31/functions/${BackendSociLambdaFunction.Arn}/invocations
       PayloadFormatVersion: "2.0"
 
   # JWT Authorizer Cognito
@@ -151,34 +151,25 @@ Resources:
         Audience:
           - !Ref UserPoolClientId
 
-  # Route ROOT $default (catch-all)
-  HttpApiRootRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref HttpApi
-      RouteKey: $default
-      Target: !Sub integrations/${HttpApiIntegration}
-      AuthorizationType: JWT
-      AuthorizerId: !Ref HttpApiJwtAuthorizer
-
   # Route GET /api/soci
   HttpApiRouteGetSoci:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
       RouteKey: "GET /api/soci"
-      Target: !Sub integrations/${HttpApiIntegration}
+      Target: !Sub integrations/${HttpApiSociIntegration}
       AuthorizationType: JWT
       AuthorizerId: !Ref HttpApiJwtAuthorizer
 
-  # Route GET /health (pubblica)
-  HttpApiRouteHealth:
+  # Route POST /api/soci
+  HttpApiRoutePostSoci:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
-      RouteKey: "GET /health"
-      Target: !Sub integrations/${HttpApiIntegration}
-      AuthorizationType: NONE
+      RouteKey: "POST /api/soci"
+      Target: !Sub integrations/${HttpApiSociIntegration}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
 
   # Stage default
   HttpApiStage:
@@ -192,7 +183,7 @@ Resources:
   LambdaInvokePermissionForHttpApi:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref BackendLambdaFunction
+      FunctionName: !Ref BackendSociLambdaFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*
@@ -208,11 +199,11 @@ Outputs:
     Value: !Sub 'https://${HttpApi}.execute-api.${AwsRegion}.amazonaws.com'
     Export:
       Name: !Sub '${AWS::StackName}-HttpApiInvokeUrl'
-  BackendLambdaArn:
+  BackendSociLambdaArn:
     Description: Backend Lambda ARN
-    Value: !GetAtt BackendLambdaFunction.Arn
+    Value: !GetAtt BackendSociLambdaFunction.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-BackendLambdaArn'
+      Name: !Sub '${AWS::StackName}-BackendSociLambdaArn'
   LambdaArtifactsBucketName:
     Description: S3 bucket per Lambda artifacts
     Value: !Ref LambdaArtifactsBucket
