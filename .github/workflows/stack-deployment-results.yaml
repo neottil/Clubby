@@ -35,8 +35,16 @@ jobs:
           
       - name: Summary
         run: |
-          echo "# Stack Deployment Results" >> $GITHUB_STEP_SUMMARY
+          echo "## Stack Deployment Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Output Key | Output Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|--------------|" >> $GITHUB_STEP_SUMMARY
+          
           aws cloudformation describe-stacks \
             --stack-name ${{ inputs.stack-name }} \
             --query 'Stacks[0].Outputs' \
-            --output table >> $GITHUB_STEP_SUMMARY
+            --output json | \
+          jq -r '.[] | "| \(.OutputKey) | \(.OutputValue) |"' >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Deployment completed successfully" >> $GITHUB_STEP_SUMMARY
