@@ -18,10 +18,10 @@ on:
     outputs:
       user-pool-id:
         description: "Cognito User Pool ID"
-        value: ${{ jobs.deploy.outputs.user-pool-id }}
+        value: ${{ jobs.produce-outputs.outputs.user-pool-id }}
       user-pool-client-id:
         description: "Cognito User Pool Client ID"
-        value: ${{ jobs.deploy.outputs.user-pool-client-id }}
+        value: ${{ jobs.produce-outputs.outputs.user-pool-client-id }}
     secrets:
       aws-role-arn:
         required: true
