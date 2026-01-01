@@ -82,7 +82,6 @@ jobs:
     with:
       aws-region: eu-central-1
       stack-name: clubmanager-auth-${{ github.ref_name }}
-      environment: ${{ github.ref_name }}
       user-pool-id: ${{ needs.auth-stack-outputs.outputs.user-pool-id }}
       user-pool-client-id: ${{ needs.auth-stack-outputs.outputs.user-pool-client-id }}
     secrets:

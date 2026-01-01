@@ -11,14 +11,6 @@ on:
         required: true
         description: 'CloudFormation stack name'
         type: string
-      template-path:
-        required: true
-        description: 'Path to CloudFormation template file'
-        type: string
-      environment:
-        required: true
-        description: 'Deployment environment'
-        type: string
       user-pool-id:
         required: true
         type: string
