@@ -133,33 +133,49 @@ jobs:
       run: |        
         EMAIL="test@clubmanager.it"
         PASSWORD="TestPassword123!"
+        USER_POOL_ID="${{ steps.auth-outputs.outputs['user-pool-id'] }}"
+        CLIENT_ID="${{ steps.auth-outputs.outputs['user-pool-client-id'] }}"
         
-        echo "Creating test user: $EMAIL with password: $PASSWORD"
+        echo "Checking if user $EMAIL exists..."
         
-        # Crea utente (ignora se esiste già)
-        aws cognito-idp admin-create-user \
-          --user-pool-id ${{ steps.auth-outputs.outputs['user-pool-id'] }} \
-          --username $EMAIL \
-          --user-attributes Name=email,Value=$EMAIL Name=email_verified,Value=true \
-          --temporary-password "TempPass123!" \
-          --message-action SUPPRESS 2>/dev/null || echo "User already exists"
+        # Verifica se utente esiste
+        if aws cognito-idp admin-get-user \
+          --user-pool-id "$USER_POOL_ID" \
+          --username "$EMAIL" 2>/dev/null; then
+          
+          echo "User $EMAIL already exists, updating password..."
+          
+        else
+          echo "Creating new user $EMAIL..."
+          
+          # Crea utente
+          aws cognito-idp admin-create-user \
+            --user-pool-id "$USER_POOL_ID" \
+            --username "$EMAIL" \
+            --user-attributes Name=email,Value="$EMAIL" Name=email_verified,Value=true \
+            --temporary-password "TempPass123!" \
+            --message-action SUPPRESS
+          
+          echo "User created successfully"
+        fi
         
-        # Imposta password permanente
+        # Imposta password permanente (funziona sia per utenti nuovi che esistenti)
         aws cognito-idp admin-set-user-password \
-          --user-pool-id ${{ steps.auth-outputs.outputs['user-pool-id'] }} \
-          --username $EMAIL \
-          --password $PASSWORD \
+          --user-pool-id "$USER_POOL_ID" \
+          --username "$EMAIL" \
+          --password "$PASSWORD" \
           --permanent
         
-        echo "✅ Test user ready: $EMAIL"
+        echo "Test user ready: $EMAIL / $PASSWORD"
         
-        # Abilita USER_PASSWORD_AUTH
+        # Abilita USER_PASSWORD_AUTH sul client
         aws cognito-idp update-user-pool-client \
-          --user-pool-id ${{ steps.auth-outputs.outputs['user-pool-id'] }} \
-          --client-id ${{ steps.auth-outputs.outputs['user-pool-client-id'] }} \
+          --user-pool-id "$USER_POOL_ID" \
+          --client-id "$CLIENT_ID" \
           --explicit-auth-flows USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH
         
-        echo "✅ Auth flow enabled"
+        echo "Auth flow enabled"
+
 
     - name: Show Outputs
       if: always()
