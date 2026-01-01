@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import * as packageJson from '../package.json';
 
 @Controller('health')
 export class AppController {
@@ -8,7 +9,7 @@ export class AppController {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      version: '1.0.0' // TODO - retrieve dynamically from package.json
+      version: packageJson.version
     };
   }
 }

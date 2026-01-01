@@ -144,7 +144,7 @@ jobs:
           # Update HANDLER per NestJS
           aws lambda update-function-configuration \
             --function-name $FUNCTION_NAME \
-            --handler dist/main.handler
+            --handler dist/lambda.handler
           
           # Aspetta update config
           aws lambda wait function-updated --function-name $FUNCTION_NAME

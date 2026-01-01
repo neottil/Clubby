@@ -1,27 +1,15 @@
 import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter } from '@nestjs/platform-fastify';
-import { Server } from 'http';
-import { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, Context } from 'aws-lambda';
-import serverless from 'serverless-http';
-
+import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
 
-let cachedServer: Server;
-
-async function bootstrap(): Promise<Server> {
-  const app = await NestFactory.create(AppModule, new FastifyAdapter());
-  await app.init();
-  return app.getHttpServer();
+async function bootstrap() {
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ logger: true })
+  );
+  
+  const port = process.env.PORT || 3000;
+  await app.listen(port, '0.0.0.0');
 }
 
-export const handler = async (
-  event: APIGatewayProxyEventV2,
-  context: Context,
-): Promise<APIGatewayProxyStructuredResultV2> => {
-  // Lazy init per evitare cold start ripetuti
-  if (!cachedServer) {
-    cachedServer = await bootstrap();
-  }
-
-  return serverless(cachedServer)(event, context);
-};
+bootstrap();
