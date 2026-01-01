@@ -150,6 +150,9 @@ jobs:
             --s3-bucket ${{ steps.get-bucket.outputs.bucket }} \
             --s3-key backend-lambda-${{ github.sha }}.zip
 
+          # Aspetta update code
+          aws lambda wait function-updated --function-name $FUNCTION_NAME
+
           # Update HANDLER per NestJS
           aws lambda update-function-configuration \
             --function-name $FUNCTION_NAME \
