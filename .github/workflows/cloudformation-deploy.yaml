@@ -68,7 +68,7 @@ jobs:
 
   auth-stack-outputs:
     needs: [ detect-changes, deploy-auth ]
-    if: (needs.deploy-auth.result == 'success' || needs.deploy-auth.result == 'skipped')
+    if: always() && (needs.deploy-auth.result == 'success' || needs.deploy-auth.result == 'skipped')
     uses: ./.github/workflows/auth-stack-outputs.yaml
     with:
       environment: ${{ github.ref_name }}
@@ -91,6 +91,7 @@ jobs:
 
   auth-stack-deployment-results:
     needs: deploy-auth
+    if: always()
     uses: ./.github/workflows/stack-deployment-results.yaml
     with:
       aws-region: eu-central-1
@@ -114,6 +115,7 @@ jobs:
 
   backend-stack-deployment-results:
     needs: deploy-backend
+    if: always()
     uses: ./.github/workflows/stack-deployment-results.yaml
     with:
       aws-region: eu-central-1
