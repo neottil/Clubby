@@ -2,28 +2,33 @@
   "name": "clubmanager-backend",
   "version": "1.0.0",
   "description": "ClubManager API - Lambda handlers",
+  "type": "module",
   "scripts": {
-    "build": "tsc",
-    "build:watch": "tsc --watch",
-    "test": "jest"
+    "build": "tsc -p tsconfig.build.json",
+    "build:watch": "tsc -p tsconfig.build.json --watch",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "dev": "ts-node --esm src/local/server.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.812.0",
+    "@aws-sdk/client-rds-data": "^3.812.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.159",
     "@types/jest": "^30.0.0",
-    "@types/node": "^25.0.3",
-    "@types/serverless": "^3.12.27",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
-    "jest": "^30.2.0",
+    "jest": "^30.0.0",
     "jest-mock-extended": "^4.0.0",
+    "pg": "^8.13.0",
     "prettier": "^3.7.4",
-    "source-map-support": "^0.5.21",
-    "supertest": "^7.1.4",
     "ts-jest": "^29.4.6",
-    "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3"

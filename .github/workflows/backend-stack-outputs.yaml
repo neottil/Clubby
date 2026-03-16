@@ -1,0 +1,43 @@
+name: Backend Stack Outputs
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        required: true
+        type: string
+      stack-name:
+        required: true
+        type: string
+    outputs:
+      api-invoke-url:
+        value: ${{ jobs.produce-outputs.outputs.api-invoke-url }}
+    secrets:
+      aws-role-arn:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  produce-outputs:
+    runs-on: ubuntu-latest
+    outputs:
+      api-invoke-url: ${{ steps.outputs.outputs.api-invoke-url }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws-role-arn }}
+          role-session-name: GitHubActions-Backend-Outputs-${{ github.run_id }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Get Backend Stack Outputs
+        id: outputs
+        run: |
+          URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack-name }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`HttpApiInvokeUrl`].OutputValue' \
+            --output text)
+          echo "api-invoke-url=$URL" >> $GITHUB_OUTPUT

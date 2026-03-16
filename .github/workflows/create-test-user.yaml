@@ -1,15 +1,13 @@
-name: Deploy CloudFormation Auth
+name: Create Test User in Cognito
 
 on:
   workflow_call:
     inputs:
       aws-region:
         required: true
-        description: 'AWS Region to deploy the stack'
         type: string
       stack-name:
         required: true
-        description: 'CloudFormation stack name'
         type: string
       user-pool-id:
         required: true
@@ -20,14 +18,16 @@ on:
     secrets:
       aws-role-arn:
         required: true
+      # Opzionale: email e password vengono prese da secrets se disponibili,
+      # altrimenti usano i valori di default (solo per dev/test)
+      test-user-email:
+        required: false
+      test-user-password:
+        required: false
 
 permissions:
   id-token: write
   contents: read
-
-env:
-  EMAIL:  test@clubmanager.it
-  USER_PASSWORD: TestPassword123!
 
 jobs:
   create:
@@ -37,41 +37,49 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.aws-role-arn }}
-          role-session-name: GitHubActions-CF-Auth-${{ github.run_id }}
+          role-session-name: GitHubActions-TestUser-${{ github.run_id }}
           aws-region: ${{ inputs.aws-region }}
 
-      - name: Create Test User in Cognito
-        run: |        
-          EMAIL=${{ env.EMAIL }}
-          PASSWORD=${{ env.USER_PASSWORD }}
-          USER_POOL_ID=${{ inputs.user-pool-id }}
-          CLIENT_ID=${{ inputs.user-pool-client-id }}
+      - name: Create or update test user in Cognito
+        run: |
+          # Usa secrets se disponibili, altrimenti default (solo dev)
+          EMAIL="${{ secrets.test-user-email || 'admin@clubmanager.local' }}"
+          PASSWORD="${{ secrets.test-user-password || 'Admin123!@#' }}"
+          USER_POOL_ID="${{ inputs.user-pool-id }}"
+          CLIENT_ID="${{ inputs.user-pool-client-id }}"
 
-          echo "Managing user $EMAIL..."
-          
-          # Prova a creare, ignora se esiste già
+          echo "Managing user $EMAIL in pool $USER_POOL_ID..."
+
+          # Crea utente (ignora se esiste già)
           aws cognito-idp admin-create-user \
             --user-pool-id "$USER_POOL_ID" \
             --username "$EMAIL" \
-            --user-attributes Name=email,Value="$EMAIL" Name=email_verified,Value=true \
+            --user-attributes \
+              Name=email,Value="$EMAIL" \
+              Name=email_verified,Value=true \
             --temporary-password "TempPass123!" \
             --message-action SUPPRESS 2>&1 | grep -v "UsernameExistsException" || true
-          
-          echo "Setting password..."
-          
-          # Imposta password (funziona sempre)
+
+          # Imposta password permanente
           aws cognito-idp admin-set-user-password \
             --user-pool-id "$USER_POOL_ID" \
             --username "$EMAIL" \
             --password "$PASSWORD" \
             --permanent
-          
-          echo "Configuring client..."
-          
-          # Configura auth flows
+
+          # Aggiunge al gruppo admin
+          aws cognito-idp admin-add-user-to-group \
+            --user-pool-id "$USER_POOL_ID" \
+            --username "$EMAIL" \
+            --group-name admin || true
+
+          # Configura auth flows sul client
           aws cognito-idp update-user-pool-client \
             --user-pool-id "$USER_POOL_ID" \
             --client-id "$CLIENT_ID" \
             --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH
-          
-          echo "Done: $EMAIL / $PASSWORD"
+
+          echo "Test admin user ready: $EMAIL"
+          echo "## Test User" >> $GITHUB_STEP_SUMMARY
+          echo "- Email: $EMAIL" >> $GITHUB_STEP_SUMMARY
+          echo "- Pool: $USER_POOL_ID" >> $GITHUB_STEP_SUMMARY

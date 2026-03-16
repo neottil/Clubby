@@ -1,10 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ClubManager Backend Stack (Lambda + HTTP API + Cognito JWT Authorizer)'
+Description: 'ClubManager Backend Stack - Lambda + HTTP API + Cognito JWT Authorizer + RDS Data API'
 
 Parameters:
   Environment:
     Type: String
     Description: Environment name (dev, test, prod)
+  TenantId:
+    Type: String
+    Description: Tenant identifier (e.g. asd1, asd2)
+    Default: asd1
   AwsRegion:
     Type: String
     Description: AWS Region
@@ -14,13 +18,32 @@ Parameters:
   UserPoolClientId:
     Type: String
     Description: Cognito User Pool App Client ID
+  DBClusterArn:
+    Type: String
+    Description: Aurora Cluster ARN (from DB stack)
+  DBSecretArn:
+    Type: String
+    Description: Secret ARN for DB credentials (from DB stack)
+  DBName:
+    Type: String
+    Description: Database name
+    Default: clubmanager
+  LambdaSubnetIds:
+    Type: CommaDelimitedList
+    Description: Subnet IDs for Lambda VPC config (from DB stack)
+  LambdaSecurityGroupId:
+    Type: String
+    Description: Security Group ID for Lambda (from DB stack)
 
 Resources:
+
+  # ---------------------------------------------------------------
   # S3 Bucket per Lambda artifacts
+  # ---------------------------------------------------------------
   LambdaArtifactsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub clubmanager-lambda-artifacts-${Environment}-${AWS::Region}
+      BucketName: !Sub clubmanager-lambda-artifacts-${TenantId}-${Environment}-${AWS::Region}
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -32,92 +55,232 @@ Resources:
         Rules:
           - Id: DeleteOldArtifacts
             Status: Enabled
-            ExpirationInDays: 7
             NoncurrentVersionExpirationInDays: 7
 
-  LambdaArtifactsBucketPolicy:
-    Type: AWS::S3::BucketPolicy
+  # ---------------------------------------------------------------
+  # IAM Role per Lambda
+  # ---------------------------------------------------------------
+  BackendLambdaRole:
+    Type: AWS::IAM::Role
     Properties:
-      Bucket: !Ref LambdaArtifactsBucket
-      PolicyDocument:
+      RoleName: !Sub clubmanager-lambda-role-${TenantId}-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
               Service: lambda.amazonaws.com
-            Action:
-              - s3:GetObject
-            Resource: !Sub '${LambdaArtifactsBucket.Arn}/*'
-
-  # IAM role per Lambda
-  BackendLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub clubmanager-backend-lambda-role-${Environment}
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
+            Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
-        - PolicyName: S3ArtifactsAccess
+        - PolicyName: RDSDataApiAccess
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
+              - Effect: Allow
+                Action:
+                  - rds-data:ExecuteStatement
+                  - rds-data:BatchExecuteStatement
+                  - rds-data:BeginTransaction
+                  - rds-data:CommitTransaction
+                  - rds-data:RollbackTransaction
+                Resource: !Ref DBClusterArn
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DBSecretArn
               - Effect: Allow
                 Action:
                   - s3:GetObject
                 Resource: !Sub '${LambdaArtifactsBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminRemoveUserFromGroup
+                  - cognito-idp:AdminListGroupsForUser
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:ListUsers
+                Resource: !Sub 'arn:aws:cognito-idp:${AwsRegion}:${AWS::AccountId}:userpool/${UserPoolId}'
       Tags:
         - Key: Environment
           Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
         - Key: Project
           Value: ClubManager
 
-  # Lambda function (Node.js 22)
-  BackendSociLambdaFunction:
+  # ---------------------------------------------------------------
+  # Variabili d'ambiente comuni per le Lambda
+  # ---------------------------------------------------------------
+  # (iniettate singolarmente in ogni Lambda tramite Environment)
+
+  # ---------------------------------------------------------------
+  # Lambda: soci
+  # ---------------------------------------------------------------
+  LambdaSoci:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub clubmanager-backend-soci-${Environment}
+      FunctionName: !Sub clubmanager-soci-${TenantId}-${Environment}
       Runtime: nodejs22.x
-      Handler: index.handler
+      Handler: dist/handlers/soci.handler
       Role: !GetAtt BackendLambdaRole.Arn
       Code:
         ZipFile: |
-          exports.handler = async (event) => {
-            return {
-              statusCode: 501,
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                message: 'Backend deployment in progress - placeholder active'
-              })
-            };
-          };
+          exports.handler = async () => ({
+            statusCode: 200,
+            body: JSON.stringify({ message: 'placeholder - deploy in progress' })
+          });
       MemorySize: 256
-      Timeout: 10
+      Timeout: 15
+      VpcConfig:
+        SubnetIds: !Ref LambdaSubnetIds
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
       Environment:
         Variables:
           NODE_ENV: !Ref Environment
+          TENANT_ID: !Ref TenantId
+          DB_CLUSTER_ARN: !Ref DBClusterArn
+          DB_SECRET_ARN: !Ref DBSecretArn
+          DB_NAME: !Ref DBName
+          COGNITO_USER_POOL_ID: !Ref UserPoolId
+          AWS_REGION_NAME: !Ref AwsRegion
       Tags:
         - Key: Environment
           Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
         - Key: Project
           Value: ClubManager
 
+  # ---------------------------------------------------------------
+  # Lambda: incontri
+  # ---------------------------------------------------------------
+  LambdaIncontri:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub clubmanager-incontri-${TenantId}-${Environment}
+      Runtime: nodejs22.x
+      Handler: dist/handlers/incontri.handler
+      Role: !GetAtt BackendLambdaRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({
+            statusCode: 200,
+            body: JSON.stringify({ message: 'placeholder - deploy in progress' })
+          });
+      MemorySize: 256
+      Timeout: 15
+      VpcConfig:
+        SubnetIds: !Ref LambdaSubnetIds
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+          TENANT_ID: !Ref TenantId
+          DB_CLUSTER_ARN: !Ref DBClusterArn
+          DB_SECRET_ARN: !Ref DBSecretArn
+          DB_NAME: !Ref DBName
+          AWS_REGION_NAME: !Ref AwsRegion
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  # ---------------------------------------------------------------
+  # Lambda: buoni
+  # ---------------------------------------------------------------
+  LambdaBuoni:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub clubmanager-buoni-${TenantId}-${Environment}
+      Runtime: nodejs22.x
+      Handler: dist/handlers/buoni.handler
+      Role: !GetAtt BackendLambdaRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({
+            statusCode: 200,
+            body: JSON.stringify({ message: 'placeholder - deploy in progress' })
+          });
+      MemorySize: 256
+      Timeout: 15
+      VpcConfig:
+        SubnetIds: !Ref LambdaSubnetIds
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+          TENANT_ID: !Ref TenantId
+          DB_CLUSTER_ARN: !Ref DBClusterArn
+          DB_SECRET_ARN: !Ref DBSecretArn
+          DB_NAME: !Ref DBName
+          AWS_REGION_NAME: !Ref AwsRegion
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  # ---------------------------------------------------------------
+  # Lambda: admin
+  # ---------------------------------------------------------------
+  LambdaAdmin:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub clubmanager-admin-${TenantId}-${Environment}
+      Runtime: nodejs22.x
+      Handler: dist/handlers/admin.handler
+      Role: !GetAtt BackendLambdaRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({
+            statusCode: 200,
+            body: JSON.stringify({ message: 'placeholder - deploy in progress' })
+          });
+      MemorySize: 256
+      Timeout: 15
+      VpcConfig:
+        SubnetIds: !Ref LambdaSubnetIds
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+          TENANT_ID: !Ref TenantId
+          DB_CLUSTER_ARN: !Ref DBClusterArn
+          DB_SECRET_ARN: !Ref DBSecretArn
+          DB_NAME: !Ref DBName
+          COGNITO_USER_POOL_ID: !Ref UserPoolId
+          AWS_REGION_NAME: !Ref AwsRegion
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  # ---------------------------------------------------------------
   # HTTP API Gateway
+  # ---------------------------------------------------------------
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: !Sub clubmanager-http-api-${Environment}
+      Name: !Sub clubmanager-api-${TenantId}-${Environment}
       ProtocolType: HTTP
       CorsConfiguration:
         AllowOrigins:
-          - "*"
+          - '*'
         AllowMethods:
           - GET
           - POST
@@ -127,15 +290,7 @@ Resources:
         AllowHeaders:
           - Authorization
           - Content-Type
-
-  # Integrazione Lambda
-  HttpApiSociIntegration:
-    Type: AWS::ApiGatewayV2::Integration
-    Properties:
-      ApiId: !Ref HttpApi
-      IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AwsRegion}:lambda:path/2015-03-31/functions/${BackendSociLambdaFunction.Arn}/invocations
-      PayloadFormatVersion: "2.0"
+        MaxAge: 300
 
   # JWT Authorizer Cognito
   HttpApiJwtAuthorizer:
@@ -144,49 +299,273 @@ Resources:
       ApiId: !Ref HttpApi
       AuthorizerType: JWT
       IdentitySource:
-        - "$request.header.Authorization"
-      Name: !Sub clubmanager-jwt-authorizer-${Environment}
+        - '$request.header.Authorization'
+      Name: !Sub clubmanager-jwt-${TenantId}-${Environment}
       JwtConfiguration:
-        Issuer: !Sub https://cognito-idp.${AwsRegion}.amazonaws.com/${UserPoolId}
+        Issuer: !Sub 'https://cognito-idp.${AwsRegion}.amazonaws.com/${UserPoolId}'
         Audience:
           - !Ref UserPoolClientId
-
-  # Route GET /api/soci
-  HttpApiRouteGetSoci:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref HttpApi
-      RouteKey: "GET /api/soci"
-      Target: !Sub integrations/${HttpApiSociIntegration}
-      AuthorizationType: JWT
-      AuthorizerId: !Ref HttpApiJwtAuthorizer
-
-  # Route POST /api/soci
-  HttpApiRoutePostSoci:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref HttpApi
-      RouteKey: "POST /api/soci"
-      Target: !Sub integrations/${HttpApiSociIntegration}
-      AuthorizationType: JWT
-      AuthorizerId: !Ref HttpApiJwtAuthorizer
 
   # Stage default
   HttpApiStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
       ApiId: !Ref HttpApi
-      StageName: "$default"
+      StageName: '$default'
       AutoDeploy: true
 
-  # Permesso per API Gateway
-  LambdaInvokePermissionForHttpApi:
+  # ---------------------------------------------------------------
+  # Integrazioni Lambda
+  # ---------------------------------------------------------------
+  IntegrationSoci:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AwsRegion}:lambda:path/2015-03-31/functions/${LambdaSoci.Arn}/invocations'
+      PayloadFormatVersion: '2.0'
+
+  IntegrationIncontri:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AwsRegion}:lambda:path/2015-03-31/functions/${LambdaIncontri.Arn}/invocations'
+      PayloadFormatVersion: '2.0'
+
+  IntegrationBuoni:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AwsRegion}:lambda:path/2015-03-31/functions/${LambdaBuoni.Arn}/invocations'
+      PayloadFormatVersion: '2.0'
+
+  IntegrationAdmin:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AwsRegion}:lambda:path/2015-03-31/functions/${LambdaAdmin.Arn}/invocations'
+      PayloadFormatVersion: '2.0'
+
+  # ---------------------------------------------------------------
+  # Routes - Soci
+  # ---------------------------------------------------------------
+  RouteGetSoci:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /api/soci'
+      Target: !Sub 'integrations/${IntegrationSoci}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteGetSocioById:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /api/soci/{id}'
+      Target: !Sub 'integrations/${IntegrationSoci}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RoutePostSocio:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'POST /api/soci'
+      Target: !Sub 'integrations/${IntegrationSoci}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RoutePutSocio:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'PUT /api/soci/{id}'
+      Target: !Sub 'integrations/${IntegrationSoci}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteDeleteSocio:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'DELETE /api/soci/{id}'
+      Target: !Sub 'integrations/${IntegrationSoci}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  # ---------------------------------------------------------------
+  # Routes - Incontri
+  # ---------------------------------------------------------------
+  RouteGetIncontri:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /api/incontri'
+      Target: !Sub 'integrations/${IntegrationIncontri}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteGetIncontroById:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /api/incontri/{id}'
+      Target: !Sub 'integrations/${IntegrationIncontri}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RoutePostIncontro:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'POST /api/incontri'
+      Target: !Sub 'integrations/${IntegrationIncontri}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RoutePutIncontro:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'PUT /api/incontri/{id}'
+      Target: !Sub 'integrations/${IntegrationIncontri}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteDeleteIncontro:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'DELETE /api/incontri/{id}'
+      Target: !Sub 'integrations/${IntegrationIncontri}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  # ---------------------------------------------------------------
+  # Routes - Buoni + Movimenti
+  # ---------------------------------------------------------------
+  RouteGetBuoni:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /api/buoni'
+      Target: !Sub 'integrations/${IntegrationBuoni}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteGetBuonoById:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /api/buoni/{id}'
+      Target: !Sub 'integrations/${IntegrationBuoni}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RoutePostBuono:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'POST /api/buoni'
+      Target: !Sub 'integrations/${IntegrationBuoni}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteGetMovimenti:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /api/buoni/{id}/movimenti'
+      Target: !Sub 'integrations/${IntegrationBuoni}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RoutePostMovimento:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'POST /api/buoni/{id}/movimenti'
+      Target: !Sub 'integrations/${IntegrationBuoni}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  # ---------------------------------------------------------------
+  # Routes - Admin
+  # ---------------------------------------------------------------
+  RouteAdminUsers:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /api/admin/users'
+      Target: !Sub 'integrations/${IntegrationAdmin}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteAdminAssociaViewer:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'POST /api/admin/associa-viewer'
+      Target: !Sub 'integrations/${IntegrationAdmin}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteAdminDisassociaViewer:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'DELETE /api/admin/associa-viewer/{socioId}'
+      Target: !Sub 'integrations/${IntegrationAdmin}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  RouteAdminPromote:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'POST /api/admin/promuovi'
+      Target: !Sub 'integrations/${IntegrationAdmin}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiJwtAuthorizer
+
+  # ---------------------------------------------------------------
+  # Permessi Lambda → API Gateway
+  # ---------------------------------------------------------------
+  PermissionSoci:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref BackendSociLambdaFunction
+      FunctionName: !Ref LambdaSoci
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*
+      SourceArn: !Sub 'arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*'
+
+  PermissionIncontri:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaIncontri
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*'
+
+  PermissionBuoni:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaBuoni
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*'
+
+  PermissionAdmin:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaAdmin
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AwsRegion}:${AWS::AccountId}:${HttpApi}/*/*'
 
 Outputs:
   HttpApiId:
@@ -194,18 +573,39 @@ Outputs:
     Value: !Ref HttpApi
     Export:
       Name: !Sub '${AWS::StackName}-HttpApiId'
+
   HttpApiInvokeUrl:
-    Description: HTTP API invoke URL
+    Description: HTTP API invoke URL (base URL for all API calls)
     Value: !Sub 'https://${HttpApi}.execute-api.${AwsRegion}.amazonaws.com'
     Export:
       Name: !Sub '${AWS::StackName}-HttpApiInvokeUrl'
-  BackendSociLambdaArn:
-    Description: Backend Lambda ARN
-    Value: !GetAtt BackendSociLambdaFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-BackendSociLambdaArn'
+
   LambdaArtifactsBucketName:
     Description: S3 bucket per Lambda artifacts
     Value: !Ref LambdaArtifactsBucket
     Export:
       Name: !Sub '${AWS::StackName}-LambdaArtifactsBucket'
+
+  LambdaSociArn:
+    Description: Lambda Soci ARN
+    Value: !GetAtt LambdaSoci.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaSociArn'
+
+  LambdaIncontriArn:
+    Description: Lambda Incontri ARN
+    Value: !GetAtt LambdaIncontri.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaIncontriArn'
+
+  LambdaBuoniArn:
+    Description: Lambda Buoni ARN
+    Value: !GetAtt LambdaBuoni.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaBuoniArn'
+
+  LambdaAdminArn:
+    Description: Lambda Admin ARN
+    Value: !GetAtt LambdaAdmin.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaAdminArn'

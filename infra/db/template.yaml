@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ClubManager DB Stack - Aurora Serverless v2 + Secret Manager'
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name (dev, test, prod)
+  TenantId:
+    Type: String
+    Description: Tenant identifier (e.g. asd1, asd2)
+    Default: asd1
+  MinAcu:
+    Type: Number
+    Description: Minimum Aurora Capacity Units
+    Default: 0.5
+  MaxAcu:
+    Type: Number
+    Description: Maximum Aurora Capacity Units
+    Default: 4
+  DbName:
+    Type: String
+    Description: Database name
+    Default: clubmanager
+
+Resources:
+
+  # ---------------------------------------------------------------
+  # VPC + Networking (Aurora Serverless v2 richiede una VPC)
+  # ---------------------------------------------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub clubmanager-vpc-${TenantId}-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub clubmanager-private-1-${TenantId}-${Environment}
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub clubmanager-private-2-${TenantId}-${Environment}
+
+  LambdaSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.10.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub clubmanager-lambda-1-${TenantId}-${Environment}
+
+  LambdaSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub clubmanager-lambda-2-${TenantId}-${Environment}
+
+  # Security Group per Aurora
+  AuroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Aurora Serverless
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub clubmanager-aurora-sg-${TenantId}-${Environment}
+
+  # Security Group per Lambda
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Lambda functions
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub clubmanager-lambda-sg-${TenantId}-${Environment}
+
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub ClubManager Aurora subnet group ${TenantId}-${Environment}
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  # ---------------------------------------------------------------
+  # Secret Manager - credenziali DB
+  # ---------------------------------------------------------------
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub clubmanager-db-secret-${TenantId}-${Environment}
+      Description: !Sub Aurora credentials for ClubManager ${TenantId} ${Environment}
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "clubmanager_${TenantId}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  # ---------------------------------------------------------------
+  # Aurora Serverless v2 Cluster
+  # ---------------------------------------------------------------
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBClusterIdentifier: !Sub clubmanager-${TenantId}-${Environment}
+      Engine: aurora-postgresql
+      EngineMode: provisioned
+      EngineVersion: '16.6'
+      DatabaseName: !Ref DbName
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref AuroraSecurityGroup
+      EnableHttpEndpoint: true
+      BackupRetentionPeriod: 30
+      PreferredBackupWindow: '02:00-03:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      StorageEncrypted: true
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref MinAcu
+        MaxCapacity: !Ref MaxAcu
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: CostCenter
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      PubliclyAccessible: false
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  # Aggiorna il secret con l'ARN del cluster (per RDS Data API)
+  DBSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DBSecret
+      TargetId: !Ref AuroraCluster
+      TargetType: AWS::RDS::DBCluster
+
+Outputs:
+  DBClusterArn:
+    Description: Aurora Cluster ARN
+    Value: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster:${AuroraCluster}'
+    Export:
+      Name: !Sub '${AWS::StackName}-DBClusterArn'
+
+  DBClusterIdentifier:
+    Description: Aurora Cluster Identifier
+    Value: !Ref AuroraCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-DBClusterIdentifier'
+
+  DBSecretArn:
+    Description: Secret ARN for DB credentials
+    Value: !Ref DBSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-DBSecretArn'
+
+  DBName:
+    Description: Database name
+    Value: !Ref DbName
+    Export:
+      Name: !Sub '${AWS::StackName}-DBName'
+
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcId'
+
+  LambdaSubnetIds:
+    Description: Subnet IDs for Lambda (comma separated)
+    Value: !Sub '${LambdaSubnet1},${LambdaSubnet2}'
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaSubnetIds'
+
+  LambdaSecurityGroupId:
+    Description: Security Group ID for Lambda
+    Value: !Ref LambdaSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaSecurityGroupId'

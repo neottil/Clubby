@@ -1,0 +1,133 @@
+version: "3.9"
+
+# ============================================================
+# ClubManager - Ambiente di sviluppo locale
+# ============================================================
+# Avvio:  docker compose up -d
+# Stop:   docker compose down
+# Reset:  docker compose down -v  (cancella tutti i dati)
+# Logs:   docker compose logs -f
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # PostgreSQL locale (Aurora-compatible)
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: clubmanager-postgres
+    environment:
+      POSTGRES_DB:       clubmanager
+      POSTGRES_USER:     clubmanager
+      POSTGRES_PASSWORD: clubmanager_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks:
+      - localnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clubmanager"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ----------------------------------------------------------
+  # LocalStack: simula AWS (Lambda, API Gateway, S3, Cognito, Secrets Manager)
+  # ----------------------------------------------------------
+  localstack:
+    image: localstack/localstack:latest
+    container_name: clubmanager-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES:       lambda,apigateway,s3,secretsmanager,cognito-idp
+      DEFAULT_REGION: eu-central-1
+      DATA_DIR:       /var/lib/localstack/data
+      DEBUG:          0
+      LAMBDA_EXECUTOR: docker
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/01-init.sh:ro
+    networks:
+      - localnet
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # ----------------------------------------------------------
+  # Backend: esegue le Lambda in locale tramite ts-node
+  # Mappa le variabili d'ambiente come se fossero iniettate da CloudFormation
+  # ----------------------------------------------------------
+  backend:
+    image: node:22-alpine
+    container_name: clubmanager-backend
+    working_dir: /app
+    command: sh -c "npm install && npx ts-node --esm src/local/server.ts"
+    environment:
+      NODE_ENV:             development
+      TENANT_ID:            asd1
+      # Postgres locale (bypass RDS Data API in dev)
+      DB_LOCAL:             "true"
+      DB_HOST:              postgres
+      DB_PORT:              "5432"
+      DB_NAME:              clubmanager
+      DB_USER:              clubmanager
+      DB_PASSWORD:          clubmanager_dev
+      # Finti ARN (non usati in locale)
+      DB_CLUSTER_ARN:       arn:aws:rds:eu-central-1:000000000000:cluster:local
+      DB_SECRET_ARN:        arn:aws:secretsmanager:eu-central-1:000000000000:secret:local
+      # Cognito mock (LocalStack)
+      COGNITO_USER_POOL_ID: local_pool_id
+      AWS_REGION_NAME:      eu-central-1
+      AWS_ENDPOINT:         http://localstack:4566
+      AWS_ACCESS_KEY_ID:    test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - localnet
+
+  # ----------------------------------------------------------
+  # Frontend: Vite dev server con hot reload
+  # ----------------------------------------------------------
+  frontend:
+    image: node:22-alpine
+    container_name: clubmanager-frontend
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_BASE_URL:         http://localhost:3000
+      VITE_COGNITO_USER_POOL_ID: local_pool_id
+      VITE_COGNITO_CLIENT_ID:    local_client_id
+      VITE_COGNITO_DOMAIN:       localhost
+      VITE_AWS_REGION:           eu-central-1
+      VITE_TENANT_ID:            asd1
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - localnet
+
+volumes:
+  postgres_data:
+  localstack_data:
+
+networks:
+  localnet:
+    driver: bridge

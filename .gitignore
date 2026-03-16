@@ -1,2 +1,42 @@
-# Local Hitory
+# Local history (IDE)
 .lh/
+.idea/
+.vscode/
+
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build output
+dist/
+*/dist/
+build/
+*/build/
+
+# TypeScript incremental
+*.tsbuildinfo
+
+# Env files con segreti
+*.local.env
+.env.local
+.env.*.local
+
+# AWS credentials
+.aws/
+
+# Lambda build packages
+*.zip
+
+# LocalStack data (locale)
+localstack/
+.localstack/
+
+# Logs
+*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
+
+# Frontend
+frontend/.vite/

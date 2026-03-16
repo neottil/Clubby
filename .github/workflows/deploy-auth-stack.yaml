@@ -5,19 +5,18 @@ on:
     inputs:
       aws-region:
         required: true
-        description: 'AWS Region to deploy the stack'
         type: string
       stack-name:
         required: true
-        description: 'CloudFormation stack name'
         type: string
       template-path:
         required: true
-        description: 'Path to CloudFormation template file'
         type: string
       environment:
         required: true
-        description: 'Deployment environment'
+        type: string
+      tenant-config:
+        required: true
         type: string
     secrets:
       aws-role-arn:
@@ -41,80 +40,75 @@ jobs:
           role-session-name: GitHubActions-CF-Auth-${{ github.run_id }}
           aws-region: ${{ inputs.aws-region }}
 
+      - name: Load tenant config
+        id: tenant
+        run: |
+          source "infra/tenants/${{ inputs.tenant-config }}.env"
+          echo "tenant-id=$TENANT_ID" >> $GITHUB_OUTPUT
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "frontend-redirect-uris=$FRONTEND_REDIRECT_URIS" >> $GITHUB_OUTPUT
+          echo "frontend-logout-uris=$FRONTEND_LOGOUT_URIS" >> $GITHUB_OUTPUT
+
       - name: Create and Execute ChangeSet
         run: |
           set -e
-          CHANGE_SET_NAME="gh-deploy-${GITHUB_RUN_NUMBER}-${GITHUB_SHA}"
-          
-          # Determina se lo stack esiste
-          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack-name }} 2>/dev/null; then
+          CHANGE_SET_NAME="gh-deploy-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:8}"
+          STACK_NAME="${{ inputs.stack-name }}"
+
+          if aws cloudformation describe-stacks --stack-name "$STACK_NAME" 2>/dev/null; then
             CHANGE_SET_TYPE="UPDATE"
-            echo "Stack exists, using UPDATE change set type"
           else
             CHANGE_SET_TYPE="CREATE"
-            echo "Stack does not exist, using CREATE change set type"
           fi
-          
-          echo "Creating ChangeSet $CHANGE_SET_NAME with type $CHANGE_SET_TYPE"
-          
-          aws cloudformation create-change-set \
-            --stack-name ${{ inputs.stack-name }} \
-            --template-body file://${{ inputs.template-path }} \
-            --change-set-name "$CHANGE_SET_NAME" \
-            --change-set-type $CHANGE_SET_TYPE \
-            --parameters \
-              ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
-              ParameterKey=AwsRegion,ParameterValue=${{ inputs.aws-region }} \
-              ParameterKey=FrontendRedirectUris,ParameterValue=http://localhost:5173/callback \
-              ParameterKey=FrontendLogoutUris,ParameterValue=http://localhost:5173/ \
-            --capabilities CAPABILITY_NAMED_IAM
-          
-          echo "Waiting for ChangeSet to be created..."
-          # Disabilita set -e temporaneamente per il wait
-          set +e
-          # Cattura il codice di ritorno del wait senza interrompere lo script
-          aws cloudformation wait change-set-create-complete \
-            --stack-name ${{ inputs.stack-name }} \
-            --change-set-name "$CHANGE_SET_NAME"
-          WAIT_EXIT_CODE=$?
-          set -e  # Riattiva set -e
 
-          echo "Wait exit code: $WAIT_EXIT_CODE"
-          
-          # Controlla sempre lo stato del ChangeSet
+          echo "Creating ChangeSet ($CHANGE_SET_TYPE)..."
+
+          aws cloudformation create-change-set \
+            --stack-name "$STACK_NAME" \
+            --template-body "file://${{ inputs.template-path }}" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --change-set-type "$CHANGE_SET_TYPE" \
+            --parameters \
+              ParameterKey=Environment,ParameterValue=${{ steps.tenant.outputs.environment }} \
+              ParameterKey=AwsRegion,ParameterValue=${{ inputs.aws-region }} \
+              ParameterKey=FrontendRedirectUris,ParameterValue="${{ steps.tenant.outputs.frontend-redirect-uris }}" \
+              ParameterKey=FrontendLogoutUris,ParameterValue="${{ steps.tenant.outputs.frontend-logout-uris }}" \
+            --capabilities CAPABILITY_NAMED_IAM
+
+          set +e
+          aws cloudformation wait change-set-create-complete \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME"
+          WAIT_EXIT=$?
+          set -e
+
           STATUS=$(aws cloudformation describe-change-set \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
-            --query 'Status' \
-            --output text)
-          
+            --query 'Status' --output text)
+
           REASON=$(aws cloudformation describe-change-set \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
-            --query 'StatusReason' \
-            --output text || echo "")
-          
-          echo "ChangeSet status: $STATUS"
-          echo "ChangeSet reason: $REASON"
-          
+            --query 'StatusReason' --output text 2>/dev/null || echo "")
+
+          echo "ChangeSet status: $STATUS — $REASON"
+
           if [ "$STATUS" = "FAILED" ]; then
-            if [[ "$REASON" == *"didn't contain changes"* ]] || [[ "$REASON" == *"No updates are to be performed"* ]]; then
-              echo "No changes to apply, exiting successfully."
+            if [[ "$REASON" == *"didn't contain changes"* ]] || [[ "$REASON" == *"No updates"* ]]; then
+              echo "No changes to apply."
               exit 0
-            else
-              echo "ChangeSet failed for another reason: $REASON"
-              exit 1
             fi
+            exit 1
           fi
-          
-          echo "Executing ChangeSet..."
+
           aws cloudformation execute-change-set \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME"
 
       - name: Wait for stack completion
         uses: ./.github/actions/wait-cloudformation-stack
         with:
           stack-name: ${{ inputs.stack-name }}
-          max-wait-time: '120'
+          max-wait-time: '300'
           poll-interval: '10'
