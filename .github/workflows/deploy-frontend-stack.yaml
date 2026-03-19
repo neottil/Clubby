@@ -27,6 +27,7 @@ on:
       cognito-domain:
         required: true
         type: string
+        description: 'Cognito domain prefix (es. clubmanager-asd1-prod) — usato per comporre VITE_COGNITO_ENDPOINT'
       api-base-url:
         required: true
         type: string
@@ -120,8 +121,8 @@ jobs:
           VITE_API_BASE_URL:         ${{ inputs.api-base-url }}
           VITE_COGNITO_USER_POOL_ID: ${{ inputs.user-pool-id }}
           VITE_COGNITO_CLIENT_ID:    ${{ inputs.user-pool-client-id }}
-          VITE_COGNITO_DOMAIN:       ${{ inputs.cognito-domain }}
-          VITE_AWS_REGION:           ${{ inputs.aws-region }}
+          # URL base OAuth completo: https://<domain>.auth.<region>.amazoncognito.com
+          VITE_COGNITO_ENDPOINT:     https://${{ inputs.cognito-domain }}.auth.${{ inputs.aws-region }}.amazoncognito.com
           VITE_TENANT_ID:            ${{ steps.tenant.outputs.tenant-id }}
         run: |
           npm ci

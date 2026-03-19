@@ -2,7 +2,7 @@
  * Database client
  *
  * In produzione (NODE_ENV != development): usa RDS Data API (Aurora Serverless v2)
- * In sviluppo locale (DB_LOCAL=true):       usa pg direttamente su Postgres
+ * In sviluppo locale (DB_LOCAL=true):       usa pg direttamente su Postgres locale
  *
  * L'interfaccia query() è identica in entrambi i casi.
  */
@@ -14,11 +14,15 @@ import {
   SqlParameter,
 } from '@aws-sdk/client-rds-data';
 
-const IS_LOCAL     = process.env.DB_LOCAL === 'true';
+const IS_LOCAL       = process.env.DB_LOCAL === 'true';
 const DB_CLUSTER_ARN = process.env.DB_CLUSTER_ARN!;
 const DB_SECRET_ARN  = process.env.DB_SECRET_ARN!;
 const DB_NAME        = process.env.DB_NAME ?? 'clubmanager';
 const AWS_REGION     = process.env.AWS_REGION_NAME ?? 'eu-central-1';
+
+// AWS_ENDPOINT è settato solo in locale (es. http://localstack:4566).
+// In produzione la variabile non esiste e il client usa l'endpoint AWS reale.
+const AWS_ENDPOINT   = process.env.AWS_ENDPOINT;
 
 export interface QueryResult {
   rows: Record<string, unknown>[];
@@ -30,7 +34,10 @@ export interface QueryResult {
 // ---------------------------------------------------------------
 const rdsClient = IS_LOCAL
   ? null
-  : new RDSDataClient({ region: AWS_REGION });
+  : new RDSDataClient({
+      region: AWS_REGION,
+      ...(AWS_ENDPOINT ? { endpoint: AWS_ENDPOINT } : {}),
+    });
 
 async function queryRds(sql: string, params: Record<string, unknown>): Promise<QueryResult> {
   const parameters: SqlParameter[] = Object.entries(params).map(([name, value]) => ({
@@ -62,7 +69,7 @@ async function queryRds(sql: string, params: Record<string, unknown>): Promise<Q
 }
 
 // ---------------------------------------------------------------
-// pg client (sviluppo locale)
+// pg client (sviluppo locale con Postgres diretto)
 // ---------------------------------------------------------------
 let pgPool: any = null;
 

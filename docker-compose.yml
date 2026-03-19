@@ -3,16 +3,23 @@ version: "3.9"
 # ============================================================
 # ClubManager - Ambiente di sviluppo locale
 # ============================================================
-# Avvio:  docker compose up -d
+#
+# AVVIO COMPLETO (tutto via Docker):
+#   docker compose up -d
+#
+# AVVIO SOLO INFRA (per debug FE/BE nativi):
+#   docker compose up -d postgres localstack
+#   # poi avvia BE e FE con i comandi descritti nel README
+#
 # Stop:   docker compose down
 # Reset:  docker compose down -v  (cancella tutti i dati)
-# Logs:   docker compose logs -f
+# Logs:   docker compose logs -f [service]
 # ============================================================
 
 services:
 
   # ----------------------------------------------------------
-  # PostgreSQL locale (Aurora-compatible)
+  # PostgreSQL locale (Aurora-compatible schema)
   # ----------------------------------------------------------
   postgres:
     image: postgres:16-alpine
@@ -35,7 +42,9 @@ services:
       retries: 10
 
   # ----------------------------------------------------------
-  # LocalStack: simula AWS (Lambda, API Gateway, S3, Cognito, Secrets Manager)
+  # LocalStack: simula Cognito (e altri servizi AWS se necessario)
+  # Al termine dell'init scrive /shared/localstack.env con
+  # COGNITO_USER_POOL_ID e COGNITO_CLIENT_ID generati.
   # ----------------------------------------------------------
   localstack:
     image: localstack/localstack:latest
@@ -43,14 +52,13 @@ services:
     ports:
       - "4566:4566"
     environment:
-      SERVICES:       lambda,apigateway,s3,secretsmanager,cognito-idp
+      SERVICES:       cognito-idp,secretsmanager
       DEFAULT_REGION: eu-central-1
       DATA_DIR:       /var/lib/localstack/data
       DEBUG:          0
-      LAMBDA_EXECUTOR: docker
     volumes:
       - localstack_data:/var/lib/localstack
-      - /var/run/docker.sock:/var/run/docker.sock
+      - localstack_shared:/shared
       - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/01-init.sh:ro
     networks:
       - localnet
@@ -61,29 +69,38 @@ services:
       retries: 20
 
   # ----------------------------------------------------------
-  # Backend: esegue le Lambda in locale tramite ts-node
-  # Mappa le variabili d'ambiente come se fossero iniettate da CloudFormation
+  # Backend: server locale che mappa le request alle Lambda handler
+  # Usa Postgres diretto (DB_LOCAL=true) e Cognito su LocalStack
+  # (AWS_ENDPOINT punta a LocalStack per CognitoIdentityProviderClient)
   # ----------------------------------------------------------
   backend:
     image: node:22-alpine
     container_name: clubmanager-backend
     working_dir: /app
-    command: sh -c "npm install && npx tsx src/local/server.ts"
+    command: >
+      sh -c "
+        echo 'Attendo localstack.env...' &&
+        while [ ! -f /shared/localstack.env ]; do sleep 2; done &&
+        export \$(cat /shared/localstack.env | xargs) &&
+        echo \"Pool: \$$COGNITO_USER_POOL_ID\" &&
+        npm install &&
+        npx tsx src/local/server.ts
+      "
     environment:
       NODE_ENV:             development
       TENANT_ID:            asd1
-      # Postgres locale (bypass RDS Data API in dev)
+      # Postgres locale (bypassa RDS Data API)
       DB_LOCAL:             "true"
       DB_HOST:              postgres
       DB_PORT:              "5432"
       DB_NAME:              clubmanager
       DB_USER:              clubmanager
       DB_PASSWORD:          clubmanager_dev
-      # Finti ARN (non usati in locale)
+      # Finti ARN (non usati quando DB_LOCAL=true)
       DB_CLUSTER_ARN:       arn:aws:rds:eu-central-1:000000000000:cluster:local
       DB_SECRET_ARN:        arn:aws:secretsmanager:eu-central-1:000000000000:secret:local
-      # Cognito mock (LocalStack)
-      COGNITO_USER_POOL_ID: local_pool_id
+      # Cognito: l'ID reale viene caricato da /shared/localstack.env al runtime
+      # AWS_ENDPOINT fa puntare CognitoIdentityProviderClient a LocalStack
       AWS_REGION_NAME:      eu-central-1
       AWS_ENDPOINT:         http://localstack:4566
       AWS_ACCESS_KEY_ID:    test
@@ -93,32 +110,44 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+      - localstack_shared:/shared
     depends_on:
       postgres:
+        condition: service_healthy
+      localstack:
         condition: service_healthy
     networks:
       - localnet
 
   # ----------------------------------------------------------
   # Frontend: Vite dev server con hot reload
+  # Legge VITE_* da env Docker; POOL_ID e CLIENT_ID sono
+  # statici perché Vite li compila al build time.
+  # Per valori dinamici (dopo primo avvio LocalStack) usa
+  # il target "frontend-config" per generare .env.local.
   # ----------------------------------------------------------
   frontend:
     image: node:22-alpine
     container_name: clubmanager-frontend
     working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    environment:
-      VITE_API_BASE_URL:         http://localhost:3000
-      VITE_COGNITO_USER_POOL_ID: local_pool_id
-      VITE_COGNITO_CLIENT_ID:    local_client_id
-      VITE_COGNITO_DOMAIN:       localhost
-      VITE_AWS_REGION:           eu-central-1
-      VITE_TENANT_ID:            asd1
+    command: >
+      sh -c "
+        while [ ! -f /shared/localstack.env ]; do sleep 2; done &&
+        export \$(cat /shared/localstack.env | xargs) &&
+        echo \"VITE_API_BASE_URL=http://localhost:3000\" > .env.local &&
+        echo \"VITE_COGNITO_USER_POOL_ID=\$$COGNITO_USER_POOL_ID\" >> .env.local &&
+        echo \"VITE_COGNITO_CLIENT_ID=\$$COGNITO_CLIENT_ID\" >> .env.local &&
+        echo \"VITE_COGNITO_ENDPOINT=http://localhost:4566\" >> .env.local &&
+        echo \"VITE_TENANT_ID=asd1\" >> .env.local &&
+        npm install &&
+        npm run dev -- --host 0.0.0.0
+      "
     ports:
       - "5173:5173"
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      - localstack_shared:/shared
     depends_on:
       - backend
     networks:
@@ -127,6 +156,7 @@ services:
 volumes:
   postgres_data:
   localstack_data:
+  localstack_shared:
 
 networks:
   localnet:

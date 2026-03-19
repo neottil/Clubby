@@ -16,7 +16,14 @@ import { associaViewer, disassociaViewer, getSocioById } from './soci.service.js
 const USER_POOL_ID = process.env.COGNITO_USER_POOL_ID!;
 const AWS_REGION   = process.env.AWS_REGION_NAME ?? 'eu-central-1';
 
-const cognito = new CognitoIdentityProviderClient({ region: AWS_REGION });
+// AWS_ENDPOINT è settato solo in locale (es. http://localstack:4566).
+// In produzione la variabile non esiste e il client usa l'endpoint AWS reale.
+const AWS_ENDPOINT = process.env.AWS_ENDPOINT;
+
+const cognito = new CognitoIdentityProviderClient({
+  region: AWS_REGION,
+  ...(AWS_ENDPOINT ? { endpoint: AWS_ENDPOINT } : {}),
+});
 
 export interface CognitoUser {
   sub: string;

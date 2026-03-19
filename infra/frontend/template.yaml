@@ -31,12 +31,12 @@ Parameters:
   CognitoClientId:
     Type: String
     Description: Cognito App Client ID
-  CognitoDomain:
+  CognitoEndpoint:
     Type: String
-    Description: Cognito hosted UI domain (e.g. clubmanager-dev)
-  AwsRegion:
-    Type: String
-    Description: AWS Region
+    Description: >
+      URL base OAuth Cognito completo.
+      Es. https://clubmanager-dev.auth.eu-central-1.amazoncognito.com
+      Locale (LocalStack): http://localhost:4566
 
 Conditions:
   HasCustomDomain: !And
@@ -170,8 +170,7 @@ Resources:
           "VITE_API_BASE_URL": "${ApiBaseUrl}",
           "VITE_COGNITO_USER_POOL_ID": "${CognitoUserPoolId}",
           "VITE_COGNITO_CLIENT_ID": "${CognitoClientId}",
-          "VITE_COGNITO_DOMAIN": "${CognitoDomain}",
-          "VITE_AWS_REGION": "${AwsRegion}",
+          "VITE_COGNITO_ENDPOINT": "${CognitoEndpoint}",
           "VITE_TENANT_ID": "${TenantId}"
         }
       Description: !Sub Frontend config for ClubManager ${TenantId} ${Environment}

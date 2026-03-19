@@ -2,6 +2,8 @@
 # ============================================================
 # Script di inizializzazione LocalStack
 # Crea un Cognito User Pool mock e un utente admin di test
+# Scrive gli ID in /tmp/localstack-outputs.txt e in
+# /shared/localstack.env (montato nel container frontend)
 # ============================================================
 
 set -e
@@ -19,12 +21,18 @@ POOL_ID=$(aws --endpoint-url=$ENDPOINT cognito-idp create-user-pool \
 
 echo "Created User Pool: $POOL_ID"
 
-# Crea App Client
+# Crea App Client (con OAuth flows abilitati)
 CLIENT_ID=$(aws --endpoint-url=$ENDPOINT cognito-idp create-user-pool-client \
   --user-pool-id "$POOL_ID" \
   --client-name "clubmanager-spa-local" \
   --no-generate-secret \
-  --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH \
+  --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH ALLOW_USER_SRP_AUTH \
+  --supported-identity-providers COGNITO \
+  --callback-urls "http://localhost:5173/callback" \
+  --logout-urls "http://localhost:5173/" \
+  --allowed-o-auth-flows code \
+  --allowed-o-auth-scopes openid email profile \
+  --allowed-o-auth-flows-user-pool-client \
   --region $REGION \
   --query 'UserPoolClient.ClientId' --output text)
 
@@ -63,8 +71,17 @@ echo "User Pool ID: $POOL_ID"
 echo "Client ID:    $CLIENT_ID"
 echo "Admin user:   admin@clubmanager.local / Admin123!@#"
 
-# Scrivi i valori in un file per riferimento
+# Scrivi i valori in file di output condivisi
 cat > /tmp/localstack-outputs.txt << EOF
 USER_POOL_ID=$POOL_ID
 CLIENT_ID=$CLIENT_ID
 EOF
+
+# Scrivi anche in cartella condivisa (montata nel container backend)
+mkdir -p /shared
+cat > /shared/localstack.env << EOF
+COGNITO_USER_POOL_ID=$POOL_ID
+COGNITO_CLIENT_ID=$CLIENT_ID
+EOF
+
+echo "Written to /shared/localstack.env"

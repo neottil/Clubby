@@ -16,10 +16,12 @@ build/
 # TypeScript incremental
 *.tsbuildinfo
 
-# Env files con segreti
+# Env files con segreti (i file .example vanno in repo, quelli reali no)
 *.local.env
 .env.local
 .env.*.local
+backend/.env
+frontend/.env.local
 
 # AWS credentials
 .aws/

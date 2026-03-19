@@ -178,6 +178,8 @@ jobs:
       user-pool-client-id: ${{ needs.auth-stack-outputs.outputs.user-pool-client-id }}
       cognito-domain:      ${{ needs.auth-stack-outputs.outputs.cognito-domain }}
       api-base-url:        ${{ needs.backend-stack-outputs.outputs.api-invoke-url }}
+      # cognito-domain è il prefisso (es. clubmanager-asd1-prod);
+      # deploy-frontend-stack.yaml compone VITE_COGNITO_ENDPOINT = https://<domain>.auth.<region>.amazoncognito.com
     secrets:
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
 
