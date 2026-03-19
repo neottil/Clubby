@@ -132,7 +132,7 @@ export default function SociPage() {
               <td style={styles.td}>{s.nome}</td>
               <td style={styles.td}>{s.email ?? '—'}</td>
               <td style={styles.td}>{s.telefono ?? '—'}</td>
-              <td style={styles.td}>{s.data_iscrizione}</td>
+              <td style={styles.td}>{String(s.data_iscrizione).split('T')[0]}</td>
               {user?.isAdmin && (
                 <td style={styles.td}>
                   <button style={styles.btnSmall} onClick={() => openEdit(s)}>Modifica</button>

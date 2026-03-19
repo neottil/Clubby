@@ -68,7 +68,7 @@ export default function AdminPage() {
 
   if (loading) return <div style={styles.loading}>Caricamento...</div>;
 
-  const socioLabel = (id: string) => { const s = soci.find(x => x.id === id); return s ? `${s.cognome} ${s.nome}` : id; };
+
 
   return (
     <div style={styles.page}>

@@ -25,13 +25,17 @@ export interface UpdateIncontroInput {
   note?: string;
 }
 
+function toIncontro(row: unknown): Incontro {
+  return row as Incontro;
+}
+
 export async function listIncontri(socioId?: string): Promise<Incontro[]> {
   if (socioId) {
     const result = await query(
       `SELECT * FROM incontro WHERE socio_id = :socioId ORDER BY data_incontro DESC`,
       { socioId }
     );
-    return result.rows as Incontro[];
+    return result.rows.map(toIncontro);
   }
 
   const result = await query(
@@ -40,7 +44,7 @@ export async function listIncontri(socioId?: string): Promise<Incontro[]> {
      JOIN socio s ON s.id = i.socio_id
      ORDER BY i.data_incontro DESC`
   );
-  return result.rows as Incontro[];
+  return result.rows.map(toIncontro);
 }
 
 export async function getIncontroById(id: string): Promise<Incontro> {
@@ -51,7 +55,7 @@ export async function getIncontroById(id: string): Promise<Incontro> {
   if (result.rows.length === 0) {
     throw new NotFoundError(`Incontro con id ${id} non trovato`);
   }
-  return result.rows[0] as Incontro;
+  return toIncontro(result.rows[0]);
 }
 
 export async function createIncontro(input: CreateIncontroInput): Promise<Incontro> {
@@ -61,7 +65,6 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
     throw new BadRequestError('costo deve essere >= 0');
   }
 
-  // Verifica esistenza socio
   await getSocioById(input.socio_id);
 
   const result = await query(
@@ -76,7 +79,7 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
     }
   );
 
-  return result.rows[0] as Incontro;
+  return toIncontro(result.rows[0]);
 }
 
 export async function updateIncontro(id: string, input: UpdateIncontroInput): Promise<Incontro> {
@@ -106,7 +109,7 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
     params
   );
 
-  return result.rows[0] as Incontro;
+  return toIncontro(result.rows[0]);
 }
 
 export async function deleteIncontro(id: string): Promise<void> {

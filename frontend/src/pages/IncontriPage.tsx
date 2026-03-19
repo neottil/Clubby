@@ -124,7 +124,7 @@ export default function IncontriPage() {
           {incontri.map(i => (
             <tr key={i.id} style={styles.tr}>
               <td style={styles.td}>{i.cognome && i.nome ? `${i.cognome} ${i.nome}` : socioLabel(i.socio_id)}</td>
-              <td style={styles.td}>{i.data_incontro}</td>
+              <td style={styles.td}>{String(i.data_incontro).split('T')[0]}</td>
               <td style={styles.td}>€ {Number(i.costo).toFixed(2)}</td>
               <td style={styles.td}>{i.note ?? '—'}</td>
               {user?.isAdmin && (

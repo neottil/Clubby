@@ -7,7 +7,7 @@ export interface Buono {
   socio_id: string;
   data_creazione: string;
   saldo_iniziale: number;
-  saldo_residuo: number;   // calcolato
+  saldo_residuo: number;
   attivo: boolean;
   note: string | null;
   created_at: string;
@@ -34,6 +34,14 @@ export interface CreateMovimentoInput {
   descrizione?: string;
 }
 
+function toBuono(row: unknown): Buono {
+  return row as Buono;
+}
+
+function toMovimento(row: unknown): MovimentoBuono {
+  return row as MovimentoBuono;
+}
+
 // ---------------------------------------------------------------
 // Buoni
 // ---------------------------------------------------------------
@@ -56,7 +64,7 @@ export async function listBuoni(socioId?: string): Promise<Buono[]> {
 
   const params = socioId ? { socioId } : {};
   const result = await query(sql, params);
-  return result.rows as Buono[];
+  return result.rows.map(toBuono);
 }
 
 export async function getBuonoById(id: string): Promise<Buono> {
@@ -72,7 +80,7 @@ export async function getBuonoById(id: string): Promise<Buono> {
   if (result.rows.length === 0) {
     throw new NotFoundError(`Buono con id ${id} non trovato`);
   }
-  return result.rows[0] as Buono;
+  return toBuono(result.rows[0]);
 }
 
 export async function createBuono(input: CreateBuonoInput): Promise<Buono> {
@@ -94,7 +102,7 @@ export async function createBuono(input: CreateBuonoInput): Promise<Buono> {
     }
   );
 
-  return result.rows[0] as Buono;
+  return toBuono(result.rows[0]);
 }
 
 // ---------------------------------------------------------------
@@ -102,7 +110,6 @@ export async function createBuono(input: CreateBuonoInput): Promise<Buono> {
 // ---------------------------------------------------------------
 
 export async function listMovimenti(buonoId: string): Promise<MovimentoBuono[]> {
-  // verifica esistenza buono
   await getBuonoById(buonoId);
 
   const result = await query(
@@ -111,7 +118,7 @@ export async function listMovimenti(buonoId: string): Promise<MovimentoBuono[]> 
      ORDER BY data_movimento DESC`,
     { buonoId }
   );
-  return result.rows as MovimentoBuono[];
+  return result.rows.map(toMovimento);
 }
 
 export async function createMovimento(
@@ -128,12 +135,11 @@ export async function createMovimento(
     throw new BadRequestError('importo è obbligatorio');
   }
 
-  // Verifica che il saldo non diventi negativo per addebitit
   if (input.importo < 0) {
     const nuovoSaldo = Number(buono.saldo_residuo) + Number(input.importo);
     if (nuovoSaldo < 0) {
       throw new BadRequestError(
-        `Saldo insufficiente. Saldo residuo: ${buono.saldo_residuo.toFixed(2)}, importo richiesto: ${Math.abs(input.importo).toFixed(2)}`
+        `Saldo insufficiente. Saldo residuo: ${Number(buono.saldo_residuo).toFixed(2)}, importo richiesto: ${Math.abs(input.importo).toFixed(2)}`
       );
     }
   }
@@ -149,5 +155,5 @@ export async function createMovimento(
     }
   );
 
-  return result.rows[0] as MovimentoBuono;
+  return toMovimento(result.rows[0]);
 }

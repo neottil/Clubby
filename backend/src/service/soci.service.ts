@@ -31,11 +31,15 @@ export interface UpdateSocioInput {
   note?: string;
 }
 
+function toSocio(row: unknown): Socio {
+  return row as Socio;
+}
+
 export async function listSoci(): Promise<Socio[]> {
   const result = await query(
     `SELECT * FROM socio ORDER BY cognome, nome`
   );
-  return result.rows as Socio[];
+  return result.rows.map(toSocio);
 }
 
 export async function getSocioById(id: string): Promise<Socio> {
@@ -46,7 +50,7 @@ export async function getSocioById(id: string): Promise<Socio> {
   if (result.rows.length === 0) {
     throw new NotFoundError(`Socio con id ${id} non trovato`);
   }
-  return result.rows[0] as Socio;
+  return toSocio(result.rows[0]);
 }
 
 export async function getSocioByViewerId(viewerId: string): Promise<Socio | null> {
@@ -54,7 +58,7 @@ export async function getSocioByViewerId(viewerId: string): Promise<Socio | null
     `SELECT * FROM socio WHERE id_viewer = :viewerId`,
     { viewerId }
   );
-  return result.rows.length > 0 ? (result.rows[0] as Socio) : null;
+  return result.rows.length > 0 ? toSocio(result.rows[0]) : null;
 }
 
 export async function createSocio(input: CreateSocioInput): Promise<Socio> {
@@ -76,11 +80,10 @@ export async function createSocio(input: CreateSocioInput): Promise<Socio> {
     }
   );
 
-  return result.rows[0] as Socio;
+  return toSocio(result.rows[0]);
 }
 
 export async function updateSocio(id: string, input: UpdateSocioInput): Promise<Socio> {
-  // Verifica esistenza
   await getSocioById(id);
 
   const setClauses: string[] = [];
@@ -116,16 +119,15 @@ export async function updateSocio(id: string, input: UpdateSocioInput): Promise<
     params
   );
 
-  return result.rows[0] as Socio;
+  return toSocio(result.rows[0]);
 }
 
 export async function deleteSocio(id: string): Promise<void> {
-  await getSocioById(id); // 404 se non esiste
+  await getSocioById(id);
   await query(`DELETE FROM socio WHERE id = :id`, { id });
 }
 
 export async function associaViewer(socioId: string, viewerId: string): Promise<Socio> {
-  // Verifica che il viewer non sia già associato a un altro socio
   const existing = await getSocioByViewerId(viewerId);
   if (existing && existing.id !== socioId) {
     throw new BadRequestError(
@@ -142,7 +144,7 @@ export async function associaViewer(socioId: string, viewerId: string): Promise<
     throw new NotFoundError(`Socio con id ${socioId} non trovato`);
   }
 
-  return result.rows[0] as Socio;
+  return toSocio(result.rows[0]);
 }
 
 export async function disassociaViewer(socioId: string): Promise<Socio> {
@@ -155,5 +157,5 @@ export async function disassociaViewer(socioId: string): Promise<Socio> {
     throw new NotFoundError(`Socio con id ${socioId} non trovato`);
   }
 
-  return result.rows[0] as Socio;
+  return toSocio(result.rows[0]);
 }

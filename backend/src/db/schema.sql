@@ -108,3 +108,16 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- ============================================================
+-- Permessi: assicura che l'utente applicativo abbia accesso
+-- (rilevante quando lo schema è creato da un superuser)
+-- ============================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'clubmanager') THEN
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO clubmanager;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO clubmanager;
+  END IF;
+END;
+$$;
