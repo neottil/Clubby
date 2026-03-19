@@ -8,8 +8,8 @@ version: "3.9"
 #   docker compose up -d
 #
 # AVVIO SOLO INFRA (per debug FE/BE nativi):
-#   docker compose up -d postgres localstack
-#   # poi avvia BE e FE con i comandi descritti nel README
+#   docker compose up -d postgres localstack localstack-init
+#   # poi avvia BE e FE nativamente (vedi README / .env.example)
 #
 # Stop:   docker compose down
 # Reset:  docker compose down -v  (cancella tutti i dati)
@@ -42,9 +42,9 @@ services:
       retries: 10
 
   # ----------------------------------------------------------
-  # LocalStack: simula Cognito (e altri servizi AWS se necessario)
-  # Al termine dell'init scrive /shared/localstack.env con
-  # COGNITO_USER_POOL_ID e COGNITO_CLIENT_ID generati.
+  # LocalStack: simula Cognito
+  # NON usiamo init/ready.d (fragile, problemi di permessi).
+  # L'init lo fa il container dedicato localstack-init.
   # ----------------------------------------------------------
   localstack:
     image: localstack/localstack:latest
@@ -58,20 +58,42 @@ services:
       DEBUG:          0
     volumes:
       - localstack_data:/var/lib/localstack
-      - localstack_shared:/shared
-      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/01-init.sh:ro
     networks:
       - localnet
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ----------------------------------------------------------
+  # Init container: gira una volta, crea le risorse Cognito su
+  # LocalStack e scrive gli ID nel volume condiviso.
+  # Usa l'immagine ufficiale AWS CLI (include awslocal).
+  # ----------------------------------------------------------
+  localstack-init:
+    image: amazon/aws-cli:latest
+    container_name: clubmanager-localstack-init
+    restart: "no"
+    environment:
+      AWS_ACCESS_KEY_ID:     test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION:    eu-central-1
+    volumes:
+      - localstack_shared:/shared
+      - ./scripts/localstack-init.sh:/localstack-init.sh:ro
+    # entrypoint che rende eseguibile lo script (bypass permessi mount :ro)
+    entrypoint: ["/bin/sh", "-c", "cp /localstack-init.sh /tmp/init.sh && chmod +x /tmp/init.sh && /tmp/init.sh"]
+    depends_on:
+      localstack:
+        condition: service_healthy
+    networks:
+      - localnet
 
   # ----------------------------------------------------------
   # Backend: server locale che mappa le request alle Lambda handler
-  # Usa Postgres diretto (DB_LOCAL=true) e Cognito su LocalStack
-  # (AWS_ENDPOINT punta a LocalStack per CognitoIdentityProviderClient)
+  # Usa Postgres diretto (DB_LOCAL=true) e Cognito su LocalStack.
+  # Aspetta /shared/localstack.env scritto dall'init container.
   # ----------------------------------------------------------
   backend:
     image: node:22-alpine
@@ -81,29 +103,29 @@ services:
       sh -c "
         echo 'Attendo localstack.env...' &&
         while [ ! -f /shared/localstack.env ]; do sleep 2; done &&
-        export \$(cat /shared/localstack.env | xargs) &&
-        echo \"Pool: \$$COGNITO_USER_POOL_ID\" &&
+        export $(cat /shared/localstack.env | xargs) &&
+        echo \"COGNITO_USER_POOL_ID=$$COGNITO_USER_POOL_ID\" &&
         npm install &&
         npx tsx src/local/server.ts
       "
     environment:
-      NODE_ENV:             development
-      TENANT_ID:            asd1
+      NODE_ENV:              development
+      TENANT_ID:             asd1
       # Postgres locale (bypassa RDS Data API)
-      DB_LOCAL:             "true"
-      DB_HOST:              postgres
-      DB_PORT:              "5432"
-      DB_NAME:              clubmanager
-      DB_USER:              clubmanager
-      DB_PASSWORD:          clubmanager_dev
+      DB_LOCAL:              "true"
+      DB_HOST:               postgres
+      DB_PORT:               "5432"
+      DB_NAME:               clubmanager
+      DB_USER:               clubmanager
+      DB_PASSWORD:           clubmanager_dev
       # Finti ARN (non usati quando DB_LOCAL=true)
-      DB_CLUSTER_ARN:       arn:aws:rds:eu-central-1:000000000000:cluster:local
-      DB_SECRET_ARN:        arn:aws:secretsmanager:eu-central-1:000000000000:secret:local
-      # Cognito: l'ID reale viene caricato da /shared/localstack.env al runtime
-      # AWS_ENDPOINT fa puntare CognitoIdentityProviderClient a LocalStack
-      AWS_REGION_NAME:      eu-central-1
-      AWS_ENDPOINT:         http://localstack:4566
-      AWS_ACCESS_KEY_ID:    test
+      DB_CLUSTER_ARN:        arn:aws:rds:eu-central-1:000000000000:cluster:local
+      DB_SECRET_ARN:         arn:aws:secretsmanager:eu-central-1:000000000000:secret:local
+      # Cognito: COGNITO_USER_POOL_ID viene caricato da /shared/localstack.env
+      # AWS_ENDPOINT punta CognitoIdentityProviderClient a LocalStack
+      AWS_REGION_NAME:       eu-central-1
+      AWS_ENDPOINT:          http://localstack:4566
+      AWS_ACCESS_KEY_ID:     test
       AWS_SECRET_ACCESS_KEY: test
     ports:
       - "3000:3000"
@@ -114,17 +136,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      localstack:
-        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
     networks:
       - localnet
 
   # ----------------------------------------------------------
-  # Frontend: Vite dev server con hot reload
-  # Legge VITE_* da env Docker; POOL_ID e CLIENT_ID sono
-  # statici perché Vite li compila al build time.
-  # Per valori dinamici (dopo primo avvio LocalStack) usa
-  # il target "frontend-config" per generare .env.local.
+  # Frontend: Vite dev server con hot reload.
+  # Legge POOL_ID e CLIENT_ID dal volume condiviso e genera
+  # .env.local prima di avviare Vite (valori compile-time).
   # ----------------------------------------------------------
   frontend:
     image: node:22-alpine
@@ -133,12 +153,12 @@ services:
     command: >
       sh -c "
         while [ ! -f /shared/localstack.env ]; do sleep 2; done &&
-        export \$(cat /shared/localstack.env | xargs) &&
-        echo \"VITE_API_BASE_URL=http://localhost:3000\" > .env.local &&
-        echo \"VITE_COGNITO_USER_POOL_ID=\$$COGNITO_USER_POOL_ID\" >> .env.local &&
-        echo \"VITE_COGNITO_CLIENT_ID=\$$COGNITO_CLIENT_ID\" >> .env.local &&
-        echo \"VITE_COGNITO_ENDPOINT=http://localhost:4566\" >> .env.local &&
-        echo \"VITE_TENANT_ID=asd1\" >> .env.local &&
+        export $(cat /shared/localstack.env | xargs) &&
+        echo 'VITE_API_BASE_URL=http://localhost:3000'           >  .env.local &&
+        echo \"VITE_COGNITO_USER_POOL_ID=$$COGNITO_USER_POOL_ID\" >> .env.local &&
+        echo \"VITE_COGNITO_CLIENT_ID=$$COGNITO_CLIENT_ID\"        >> .env.local &&
+        echo 'VITE_COGNITO_ENDPOINT=http://localhost:4566'       >> .env.local &&
+        echo 'VITE_TENANT_ID=asd1'                               >> .env.local &&
         npm install &&
         npm run dev -- --host 0.0.0.0
       "
