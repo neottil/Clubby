@@ -100,7 +100,7 @@ kc_api POST "/$REALM/clients" "{
   \"enabled\": true,
   \"publicClient\": true,
   \"standardFlowEnabled\": true,
-  \"directAccessGrantsEnabled\": false,
+  \"directAccessGrantsEnabled\": true,
   \"rootUrl\": \"http://localhost:5173\",
   \"baseUrl\": \"/\",
   \"redirectUris\": [\"http://localhost:5173/*\", \"http://localhost:4173/*\"],
