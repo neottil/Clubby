@@ -153,6 +153,7 @@ kc_api POST "/$REALM/users" "{
   \"email\": \"admin@clubmanager.local\",
   \"emailVerified\": true,
   \"enabled\": true,
+  \"requiredActions\": [],
   \"credentials\": [{
     \"type\": \"password\",
     \"value\": \"Admin1234!\",
@@ -175,6 +176,7 @@ kc_api POST "/$REALM/users" "{
   \"email\": \"viewer@clubmanager.local\",
   \"emailVerified\": true,
   \"enabled\": true,
+  \"requiredActions\": [],
   \"credentials\": [{
     \"type\": \"password\",
     \"value\": \"Viewer1234!\",
