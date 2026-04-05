@@ -1,7 +1,7 @@
 /**
- * Server HTTP locale per sviluppo (NON usato in produzione Lambda).
+ * Server HTTP locale per sviluppo (NON usato in produzione).
  * Usa http module nativo per evitare dipendenze aggiuntive.
- * Mappa le request HTTP alle stesse Lambda handler di produzione.
+ * Mappa le request HTTP alle stesse handler di produzione.
  *
  * Carica automaticamente backend/.env se presente.
  * Avvio: npx tsx src/local/server.ts
@@ -28,7 +28,7 @@ if (existsSync(envPath)) {
 }
 
 import http from 'http';
-import { verifyToken, type KeycloakClaims } from '../middleware/auth.js';
+import { verifyToken, type RequestEvent } from '../middleware/auth.js';
 import { handler as sociHandler } from '../handlers/soci.js';
 import { handler as incontriHandler } from '../handlers/incontri.js';
 import { handler as buoniHandler } from '../handlers/buoni.js';
@@ -36,8 +36,8 @@ import { handler as adminHandler } from '../handlers/admin.js';
 
 const PORT = process.env.PORT ?? 3000;
 
-// Costruisce un APIGatewayProxyEventV2 fake dall'HTTP request
-async function buildEvent(req: http.IncomingMessage, body: string, pathParams: Record<string, string> = {}, claims: any): Promise<any> {
+// Costruisce un RequestEvent fake dall'HTTP request
+async function buildEvent(req: http.IncomingMessage, body: string, pathParams: Record<string, string> = {}, claims: any): Promise<RequestEvent> {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const queryStringParameters: Record<string, string> = {};
   url.searchParams.forEach((v, k) => { queryStringParameters[k] = v; });
@@ -65,10 +65,12 @@ async function buildEvent(req: http.IncomingMessage, body: string, pathParams: R
 
 // Mock admin claims in Keycloak format
 const MOCK_ADMIN_CLAIMS = {
-  sub: 'local-admin-sub',
-  preferred_username: 'admin',
+  sub: 'local-admin-00000000',
+  preferred_username: 'local-admin',
   email: 'admin@clubmanager.local',
   realm_access: { roles: ['admin'] },
+  iat: Math.floor(Date.now() / 1000),
+  exp: Math.floor(Date.now() / 1000) + 3600,
 };
 
 // Routing

@@ -1,9 +1,0 @@
-# ============================================================
-# DEPRECATED: Cognito Auth Stack
-# ============================================================
-# This stack has been replaced by Keycloak (see infra/keycloak/).
-# Authentication is now handled by Keycloak running on ECS Fargate.
-# This file is kept for reference only — do NOT deploy it.
-# ============================================================
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'DEPRECATED - ClubManager Cognito Auth Stack (replaced by Keycloak)'

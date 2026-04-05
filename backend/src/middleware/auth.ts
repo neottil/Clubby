@@ -2,11 +2,10 @@
  * Middleware di autenticazione e autorizzazione
  *
  * Estrae i claims JWT dal token Keycloak.
- * In Lambda: API Gateway JWT Authorizer valida firma e scadenza prima di invocare Lambda.
+ * In prod: API Gateway / Ingress JWT Authorizer valida firma e scadenza.
  * In locale: il server verifica via JWKS.
  */
 
-import { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 export interface KeycloakClaims {
@@ -25,6 +24,29 @@ export interface AuthContext {
   email: string;
   groups: string[];
   role: UserRole;
+}
+
+/** Minimal request event interface (compatible with API Gateway v2 shape) */
+export interface RequestEvent {
+  version?: string;
+  routeKey?: string;
+  rawPath?: string;
+  rawQueryString?: string;
+  headers?: Record<string, string>;
+  queryStringParameters?: Record<string, string>;
+  pathParameters?: Record<string, string>;
+  body?: string;
+  requestContext: {
+    http: { method: string; path: string };
+    authorizer?: { jwt?: { claims?: any } };
+  };
+}
+
+/** Minimal response interface */
+export interface ResponseResult {
+  statusCode: number;
+  headers?: Record<string, string>;
+  body?: string;
 }
 
 const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://localhost:8080';
@@ -46,11 +68,11 @@ export async function verifyToken(token: string): Promise<KeycloakClaims> {
 }
 
 /**
- * Estrae e decodifica i claims JWT dall'evento Lambda.
- * API Gateway HTTP API v2 inietta i claims in requestContext.authorizer.jwt.claims
+ * Estrae e decodifica i claims JWT dall'evento.
+ * API Gateway HTTP API v2 / Ingress inietta i claims in requestContext.authorizer.jwt.claims
  */
-export function getAuthContext(event: APIGatewayProxyEventV2): AuthContext {
-  const claims = (event.requestContext as any)?.authorizer?.jwt?.claims;
+export function getAuthContext(event: RequestEvent): AuthContext {
+  const claims = event.requestContext?.authorizer?.jwt?.claims;
 
   if (!claims) {
     throw new UnauthorizedError('Token non presente o non valido');

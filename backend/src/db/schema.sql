@@ -1,9 +1,8 @@
 -- ============================================================
--- ClubManager - Schema SQL
--- Aurora Serverless v2 (PostgreSQL 16)
+-- ClubManager - Schema SQL (PostgreSQL 16)
 -- ============================================================
--- Questo script viene eseguito dalla Lambda di migrazione
--- (o manualmente tramite RDS Query Editor / psql)
+-- Montato automaticamente da docker-compose in
+-- /docker-entrypoint-initdb.d/01-schema.sql
 -- È idempotente: può essere ri-eseguito senza danni.
 -- ============================================================
 
@@ -20,7 +19,7 @@ CREATE TABLE IF NOT EXISTS socio (
   email           VARCHAR(255),
   telefono        VARCHAR(50),
   data_iscrizione DATE NOT NULL DEFAULT CURRENT_DATE,
-  id_viewer       VARCHAR(255) NULL,   -- Cognito sub del viewer associato
+  id_viewer       VARCHAR(255) NULL,   -- Keycloak user ID del viewer associato
   note            TEXT,
   created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMP NOT NULL DEFAULT NOW()

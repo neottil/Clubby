@@ -1,5 +1,5 @@
 /**
- * API client per le chiamate al backend Lambda
+ * API client per le chiamate al backend
  */
 
 import { config } from '../config';

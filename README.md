@@ -1,80 +1,90 @@
-# ClubManager - Gestione ASD
+# ClubManager
 
-Applicazione web per la gestione degli incontri e dei buoni prepagati dei soci di una Associazione Sportiva Dilettantistica (ASD).
-Ogni ASD dispone di un'**istanza indipendente** del sistema (frontend, backend e database separati), gestita tramite **deploy dedicato** su AWS.
+Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantistiche (ASD).
 
----
+## Funzionalità
 
-## Architettura
+- Gestione soci
+- Gestione incontri
+- Buoni prepagati
 
-### Infrastruttura
-- **Frontend**: SPA React (Vite), deploy su S3 + CloudFront
-- **Backend**: AWS Lambda (Node.js 22) + API Gateway HTTP API
-- **Database**: Amazon Aurora Serverless v2 (PostgreSQL 16)
-- **Autenticazione**: Keycloak 26.1 (OIDC, PKCE, realm roles)
-  - Locale: Docker Compose
-  - Produzione: ECS Fargate + RDS Postgres + ALB
-- **Infra-as-code**: CloudFormation (SAM templates)
-- **CI/CD**: GitHub Actions
+## Stack
 
-### Multi-tenant
-Ogni tenant (ASD) e' isolato:
-```
-asd1.dominio.com -> Stack: Lambda + API + Aurora + Keycloak + S3 dedicati
-asd2.dominio.com -> Stack: Lambda + API + Aurora + Keycloak + S3 dedicati
-```
-
-### Ruoli utente
-- **admin**: gestisce soci, incontri, buoni, utenti
-- **viewer**: puo' visualizzare solo i dati del socio associato
-
-L'associazione tra `viewer` e `socio` e' effettuata da un `admin` tramite il pannello admin.
-
----
+- **Frontend**: React 19 + Vite + TypeScript
+- **Backend**: Node.js 22 + Express (local) / handler compatibili con API Gateway
+- **Database**: PostgreSQL 16
+- **Autenticazione**: Keycloak 26 (OIDC, PKCE, realm roles)
+- **Deploy target**: Docker / Kubernetes su VPC privata
 
 ## Sviluppo locale
 
 ### Prerequisiti
-- Node.js >= 20
+
 - Docker + Docker Compose
+- Node.js 22+
+- npm
 - `curl` e `jq` (per init-keycloak.sh)
 
-### Setup
+### Avvio
 
-```bash
-# 1. Avvia i container (Postgres + Keycloak)
-make up
+1. Avvia l'infrastruttura locale:
+   ```bash
+   docker compose up -d
+   ```
 
-# 2. Configura realm, client, ruoli e utente admin di test
-#    Genera automaticamente frontend/.env.local e backend/.env
-make init
+2. Attendi che Keycloak sia pronto (circa 60-90 secondi), poi inizializza realm e utenti:
+   ```bash
+   bash scripts/init-keycloak.sh
+   ```
+   Questo script crea il realm `clubmanager`, i client, i ruoli e gli utenti di test,
+   e scrive automaticamente `backend/.env` e `frontend/.env.local`.
 
-# 3. Avvia il backend
-make be
+3. Avvia il backend:
+   ```bash
+   cd backend
+   npm install
+   npm run dev
+   ```
 
-# 4. In un altro terminale, avvia il frontend
-make fe
-```
+4. Avvia il frontend (in un altro terminale):
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
-### URL locali
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:3000
-- Keycloak Admin Console: http://localhost:8080 (admin / admin)
-- Utente test: admin@clubmanager.local / Admin123!
+5. Apri http://localhost:5173
+
+### Credenziali di test
+
+| Utente | Password | Ruolo |
+|--------|----------|-------|
+| admin@clubmanager.local | Admin1234! | admin |
+| viewer@clubmanager.local | Viewer1234! | viewer |
+
+### Keycloak Admin UI
+
+http://localhost:8080 → admin / admin
 
 ### Comandi Make
+
 | Comando | Descrizione |
 |---------|-------------|
-| `make up` | Avvia Postgres + Keycloak (Docker) |
-| `make down` | Ferma i container |
-| `make reset` | Reset completo (cancella volumi) |
-| `make init` | Configura Keycloak (una volta) |
-| `make be` | Avvia backend locale |
-| `make fe` | Avvia frontend dev server |
+| `make infra-up` | Avvia Postgres + Keycloak (Docker) |
+| `make infra-down` | Ferma i container |
+| `make infra-reset` | Reset completo (cancella volumi) |
+| `make init-keycloak` | Configura Keycloak (una volta) |
+| `make dev` | Avvia infra + init keycloak |
+| `make dev-backend` | Avvia backend locale |
+| `make dev-frontend` | Avvia frontend dev server |
 | `make logs-kc` | Log Keycloak |
 | `make logs-pg` | Log PostgreSQL |
 
----
+## Multi-tenant
+
+Ogni tenant (ASD) è isolato. La configurazione del tenant avviene tramite variabili d'ambiente:
+- `TENANT` / `VITE_TENANT_ID`: identificativo del tenant
+- Ogni tenant ha il proprio realm Keycloak, database e deploy
 
 ## Struttura progetto
 
@@ -82,7 +92,7 @@ make fe
 ClubManager/
 ├── backend/
 │   ├── src/
-│   │   ├── handlers/       # Lambda handlers (soci, incontri, buoni, admin)
+│   │   ├── handlers/       # Handler HTTP (soci, incontri, buoni, admin)
 │   │   ├── service/        # Business logic
 │   │   ├── middleware/      # Auth (Keycloak JWT), response helpers, error classes
 │   │   ├── db/             # Database client (pg Pool) + schema SQL
@@ -97,19 +107,11 @@ ClubManager/
 │   │   ├── components/     # Layout
 │   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID)
 │   └── package.json
-├── infra/
-│   ├── keycloak/           # ECS Fargate + RDS per Keycloak
-│   ├── backend/            # Lambda + API Gateway + JWT Authorizer
-│   ├── db/                 # Aurora Serverless v2
-│   ├── frontend/           # S3 + CloudFront
-│   └── tenants/            # Configurazioni per-tenant per-environment
 ├── scripts/
 │   └── init-keycloak.sh    # Setup Keycloak locale
 ├── docker-compose.yml
 └── Makefile
 ```
-
----
 
 ## API Endpoints
 
@@ -129,15 +131,17 @@ ClubManager/
 
 Tutte le API richiedono un JWT Keycloak valido (Bearer token).
 
----
+## Deploy (VPC / Kubernetes)
 
-## Deploy produzione
+Per il deploy in produzione:
 
-Ogni stack e' parametrizzato per tenant e ambiente tramite i file in `infra/tenants/`.
-I template CloudFormation sono in `infra/*/template.yaml`.
+- **Keycloak**: impostare `KC_PROXY=edge` (TLS termination a livello load balancer), `KC_HOSTNAME=https://auth.yourdomain.com`
+- **Backend**: connessione diretta a Postgres via pg (`DB_HOST` punta al servizio Postgres nel cluster)
+- **JWT verification**: API Gateway o ingress controller verifica il token JWT via JWKS di Keycloak
+- **Secrets**: usare il secret manager del provider cloud scelto
+- **Database**: PostgreSQL 16 gestito (RDS, Cloud SQL, o self-hosted)
 
-Ordine di deploy:
-1. `infra/db/template.yaml` — VPC + Aurora
-2. `infra/keycloak/template.yaml` — Keycloak ECS + RDS
-3. `infra/backend/template.yaml` — Lambda + API Gateway (JWT Authorizer punta a Keycloak)
-4. `infra/frontend/template.yaml` — S3 + CloudFront
+Variabili d'ambiente da configurare per ogni ambiente:
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `KEYCLOAK_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_ADMIN_CLIENT_ID`, `KEYCLOAK_ADMIN_CLIENT_SECRET`
+- `VITE_KEYCLOAK_URL`, `VITE_KEYCLOAK_REALM`, `VITE_KEYCLOAK_CLIENT_ID`, `VITE_API_BASE_URL`

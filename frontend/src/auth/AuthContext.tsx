@@ -42,7 +42,7 @@ function decodeJwt(token: string): Record<string, unknown> {
 
 function parseUser(idToken: string): AuthUser {
   const claims = decodeJwt(idToken) as any;
-  // Keycloak uses realm_access.roles instead of cognito:groups
+  // Keycloak uses realm_access.roles
   let groups: string[] = [];
   if (claims.realm_access?.roles) {
     groups = Array.isArray(claims.realm_access.roles)

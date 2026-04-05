@@ -1,14 +1,14 @@
 {
   "name": "clubmanager-backend",
   "version": "1.0.0",
-  "description": "ClubManager API - Lambda handlers",
+  "description": "ClubManager API",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:watch": "tsc -p tsconfig.build.json --watch",
     "test": "jest",
     "lint": "eslint src --ext .ts",
-    "dev": "ts-node --esm src/local/server.ts"
+    "dev": "npx tsx src/local/server.ts"
   },
   "dependencies": {
     "jose": "^5.9.6",
@@ -16,10 +16,9 @@
     "dotenv": "^16.4.7"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.159",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
-    "@types/pg": "^8.11.0",
+    "@types/pg": "^8.11.11",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",
     "eslint": "^9.39.2",
@@ -27,7 +26,6 @@
     "eslint-plugin-prettier": "^5.5.4",
     "jest": "^30.0.0",
     "jest-mock-extended": "^4.0.0",
-    "@types/pg": "^8.11.11",
     "prettier": "^3.7.4",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",

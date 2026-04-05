@@ -1,9 +1,8 @@
 /**
- * Helper per costruire risposte HTTP standardizzate per API Gateway v2
+ * Helper per costruire risposte HTTP standardizzate
  */
 
-import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { HttpError } from './auth.js';
+import { HttpError, type ResponseResult } from './auth.js';
 
 const CORS_HEADERS = {
   'Content-Type': 'application/json',
@@ -12,7 +11,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
 };
 
-export function ok(data: unknown, statusCode = 200): APIGatewayProxyStructuredResultV2 {
+export function ok(data: unknown, statusCode = 200): ResponseResult {
   return {
     statusCode,
     headers: CORS_HEADERS,
@@ -20,11 +19,11 @@ export function ok(data: unknown, statusCode = 200): APIGatewayProxyStructuredRe
   };
 }
 
-export function created(data: unknown): APIGatewayProxyStructuredResultV2 {
+export function created(data: unknown): ResponseResult {
   return ok(data, 201);
 }
 
-export function noContent(): APIGatewayProxyStructuredResultV2 {
+export function noContent(): ResponseResult {
   return {
     statusCode: 204,
     headers: CORS_HEADERS,
@@ -32,7 +31,7 @@ export function noContent(): APIGatewayProxyStructuredResultV2 {
   };
 }
 
-export function errorResponse(error: unknown): APIGatewayProxyStructuredResultV2 {
+export function errorResponse(error: unknown): ResponseResult {
   if (error instanceof HttpError) {
     return {
       statusCode: error.statusCode,
@@ -53,9 +52,9 @@ export function errorResponse(error: unknown): APIGatewayProxyStructuredResultV2
  * Wrapper che gestisce automaticamente le eccezioni di un handler
  */
 export function withErrorHandling(
-  fn: (...args: any[]) => Promise<APIGatewayProxyStructuredResultV2>
+  fn: (...args: any[]) => Promise<ResponseResult>
 ) {
-  return async (...args: any[]): Promise<APIGatewayProxyStructuredResultV2> => {
+  return async (...args: any[]): Promise<ResponseResult> => {
     try {
       return await fn(...args);
     } catch (error) {

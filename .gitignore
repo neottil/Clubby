@@ -22,18 +22,11 @@ build/
 .env.*.local
 backend/.env
 frontend/.env.local
-# File .env radice (contiene LOCALSTACK_AUTH_TOKEN e altri segreti locali)
+# File .env radice
 .env
 
-# AWS credentials
-.aws/
-
-# Lambda build packages
+# Build packages
 *.zip
-
-# LocalStack data (locale)
-localstack/
-.localstack/
 
 # Logs
 *.log

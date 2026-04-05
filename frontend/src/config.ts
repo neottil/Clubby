@@ -1,7 +1,6 @@
 /**
  * Configurazione runtime del frontend.
- * I valori vengono iniettati come variabili d'ambiente Vite al build time
- * (recuperate da SSM Parameter Store durante la CI/CD).
+ * I valori vengono iniettati come variabili d'ambiente Vite al build time.
  *
  * Variabili necessarie:
  *
@@ -12,8 +11,8 @@
  *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa
  *   VITE_TENANT_ID             = asd1
  *
- * Produzione (iniettate da CI/CD da SSM):
- *   VITE_API_BASE_URL          = https://xxxxxx.execute-api.eu-central-1.amazonaws.com
+ * Produzione:
+ *   VITE_API_BASE_URL          = https://api.<dominio>
  *   VITE_KEYCLOAK_URL          = https://auth.<dominio>
  *   VITE_KEYCLOAK_REALM        = clubmanager
  *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa

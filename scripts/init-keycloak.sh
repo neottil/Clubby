@@ -103,8 +103,8 @@ kc_api POST "/$REALM/clients" "{
   \"directAccessGrantsEnabled\": false,
   \"rootUrl\": \"http://localhost:5173\",
   \"baseUrl\": \"/\",
-  \"redirectUris\": [\"http://localhost:5173/*\"],
-  \"webOrigins\": [\"http://localhost:5173\"],
+  \"redirectUris\": [\"http://localhost:5173/*\", \"http://localhost:4173/*\"],
+  \"webOrigins\": [\"http://localhost:5173\", \"http://localhost:4173\"],
   \"attributes\": {
     \"pkce.code.challenge.method\": \"S256\"
   },
@@ -155,7 +155,7 @@ kc_api POST "/$REALM/users" "{
   \"enabled\": true,
   \"credentials\": [{
     \"type\": \"password\",
-    \"value\": \"Admin123!\",
+    \"value\": \"Admin1234!\",
     \"temporary\": false
   }]
 }" 2>/dev/null || echo "  (utente admin già esistente, salto)"
@@ -166,6 +166,28 @@ ADMIN_ROLE_JSON=$(kc_api GET "/$REALM/roles/admin")
 if [ -n "$ADMIN_KC_USER_ID" ] && [ "$ADMIN_KC_USER_ID" != "null" ]; then
   kc_api POST "/$REALM/users/$ADMIN_KC_USER_ID/role-mappings/realm" "[$ADMIN_ROLE_JSON]" 2>/dev/null || true
   echo "  Utente admin creato e ruolo assegnato."
+fi
+
+# Crea utente viewer di test
+echo "▶ Creo utente viewer di test (viewer@clubmanager.local)..."
+kc_api POST "/$REALM/users" "{
+  \"username\": \"viewer@clubmanager.local\",
+  \"email\": \"viewer@clubmanager.local\",
+  \"emailVerified\": true,
+  \"enabled\": true,
+  \"credentials\": [{
+    \"type\": \"password\",
+    \"value\": \"Viewer1234!\",
+    \"temporary\": false
+  }]
+}" 2>/dev/null || echo "  (utente viewer già esistente, salto)"
+
+# Assegna ruolo viewer all'utente
+VIEWER_KC_USER_ID=$(kc_api GET "/$REALM/users?email=viewer@clubmanager.local" | jq -r '.[0].id')
+VIEWER_ROLE_JSON=$(kc_api GET "/$REALM/roles/viewer")
+if [ -n "$VIEWER_KC_USER_ID" ] && [ "$VIEWER_KC_USER_ID" != "null" ]; then
+  kc_api POST "/$REALM/users/$VIEWER_KC_USER_ID/role-mappings/realm" "[$VIEWER_ROLE_JSON]" 2>/dev/null || true
+  echo "  Utente viewer creato e ruolo assegnato."
 fi
 
 # Scrivi frontend/.env.local
@@ -179,17 +201,19 @@ EOF
 
 # Scrivi backend/.env
 cat > "$ROOT_DIR/backend/.env" << EOF
-NODE_ENV=development
-TENANT_ID=asd1
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=clubmanager
 DB_USER=clubmanager
-DB_PASSWORD=clubmanager_dev
+DB_PASSWORD=clubmanager
+
 KEYCLOAK_URL=http://localhost:8080
 KEYCLOAK_REALM=clubmanager
 KEYCLOAK_ADMIN_CLIENT_ID=clubmanager-backend
 KEYCLOAK_ADMIN_CLIENT_SECRET=clubmanager-backend-secret
+
+TENANT=local
+PORT=3000
 EOF
 
 echo ""
@@ -197,7 +221,11 @@ echo "=== Fatto! ==="
 echo ""
 echo "  Keycloak URL : $KEYCLOAK_URL"
 echo "  Realm        : $REALM"
-echo "  Admin user   : admin@clubmanager.local / Admin123!"
+echo ""
+echo "  Credenziali di test:"
+echo "    admin@clubmanager.local  / Admin1234!  (ruolo: admin)"
+echo "    viewer@clubmanager.local / Viewer1234! (ruolo: viewer)"
+echo ""
 echo "  Admin console: $KEYCLOAK_URL/admin (admin / admin)"
 echo ""
 echo "  Scritti:"
@@ -205,6 +233,7 @@ echo "    frontend/.env.local"
 echo "    backend/.env"
 echo ""
 echo "  Prossimi passi:"
-echo "    1. cd backend  && npx tsx src/local/server.ts"
-echo "    2. cd frontend && npm run dev"
+echo "    1. cd backend  && npm install && npm run dev"
+echo "    2. cd frontend && npm install && npm run dev"
+echo "    3. Apri http://localhost:5173"
 echo ""

@@ -1,6 +1,5 @@
 /**
  * Database client — uses pg Pool directly (both local and production).
- * Production connects to Aurora Postgres endpoint via pg.
  *
  * The query() interface uses named parameters (:name) for compatibility
  * with the existing service layer, converting them to $1, $2, etc.

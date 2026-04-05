@@ -1,10 +1,11 @@
 /**
- * Lambda handler: /api/soci e /api/soci/{id}
+ * Handler: /api/soci e /api/soci/{id}
  * Ruoli: admin (tutti), viewer (solo il proprio socio)
  */
 
-import { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
+  type RequestEvent,
+  type ResponseResult,
   getAuthContext,
   requireAdmin,
   requireAdminOrSelf,
@@ -20,8 +21,8 @@ import {
 } from '../service/soci.service.js';
 
 export const handler = async (
-  event: APIGatewayProxyEventV2
-): Promise<APIGatewayProxyStructuredResultV2> => {
+  event: RequestEvent
+): Promise<ResponseResult> => {
   try {
     const auth    = getAuthContext(event);
     const method  = event.requestContext.http.method;

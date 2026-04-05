@@ -1,10 +1,9 @@
 /**
- * Lambda handler: /api/admin/*
+ * Handler: /api/admin/*
  * Ruoli: solo admin
  */
 
-import { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { getAuthContext, requireAdmin } from '../middleware/auth.js';
+import { type RequestEvent, type ResponseResult, getAuthContext, requireAdmin } from '../middleware/auth.js';
 import { ok, noContent, errorResponse } from '../middleware/response.js';
 import {
   listKeycloakUsers,
@@ -14,8 +13,8 @@ import {
 } from '../service/admin.service.js';
 
 export const handler = async (
-  event: APIGatewayProxyEventV2
-): Promise<APIGatewayProxyStructuredResultV2> => {
+  event: RequestEvent
+): Promise<ResponseResult> => {
   try {
     const auth   = getAuthContext(event);
     requireAdmin(auth); // tutte le route admin richiedono ruolo admin
