@@ -1,9 +1,9 @@
 /**
- * Contesto di autenticazione Cognito (Authorization Code Flow + PKCE)
+ * Contesto di autenticazione Keycloak (Authorization Code Flow + PKCE)
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { config, getCognitoAuthorizeUrl, getCognitoLogoutUrl, getCognitoTokenUrl } from '../config';
+import { config, getKeycloakAuthorizeUrl, getKeycloakLogoutUrl, getKeycloakTokenUrl } from '../config';
 
 interface TokenSet {
   accessToken: string;
@@ -33,7 +33,7 @@ const TOKEN_KEY = 'cm_tokens';
 const REDIRECT_URI = `${window.location.origin}/callback`;
 
 // ---------------------------------------------------------------
-// JWT decode (payload only, no signature check - già validato da Cognito)
+// JWT decode (payload only, no signature check — già validato da Keycloak)
 // ---------------------------------------------------------------
 function decodeJwt(token: string): Record<string, unknown> {
   const payload = token.split('.')[1];
@@ -42,15 +42,16 @@ function decodeJwt(token: string): Record<string, unknown> {
 
 function parseUser(idToken: string): AuthUser {
   const claims = decodeJwt(idToken) as any;
+  // Keycloak uses realm_access.roles instead of cognito:groups
   let groups: string[] = [];
-  if (claims['cognito:groups']) {
-    groups = Array.isArray(claims['cognito:groups'])
-      ? claims['cognito:groups']
-      : [claims['cognito:groups']];
+  if (claims.realm_access?.roles) {
+    groups = Array.isArray(claims.realm_access.roles)
+      ? claims.realm_access.roles
+      : [claims.realm_access.roles];
   }
   return {
     sub:     claims.sub ?? '',
-    email:   claims.email ?? '',
+    email:   claims.email ?? claims.preferred_username ?? '',
     groups,
     isAdmin: groups.includes('admin'),
   };
@@ -99,13 +100,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const body = new URLSearchParams({
         grant_type:    'authorization_code',
-        client_id:     config.cognitoClientId,
+        client_id:     config.keycloakClientId,
         code,
         redirect_uri:  REDIRECT_URI,
         code_verifier: verifier,
       });
 
-      const res = await fetch(getCognitoTokenUrl(), {
+      const res = await fetch(getKeycloakTokenUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),
@@ -142,13 +143,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const verifier   = await generateCodeVerifier();
     const challenge  = await generateCodeChallenge(verifier);
     sessionStorage.setItem('cm_pkce_verifier', verifier);
-    window.location.href = getCognitoAuthorizeUrl(REDIRECT_URI) +
+    window.location.href = getKeycloakAuthorizeUrl(REDIRECT_URI) +
       `&code_challenge=${challenge}&code_challenge_method=S256`;
   }, []);
 
   const logout = useCallback(() => {
     clearTokens();
-    window.location.href = getCognitoLogoutUrl(`${window.location.origin}/`);
+    window.location.href = getKeycloakLogoutUrl(`${window.location.origin}/`);
   }, []);
 
   const user   = tokenSet ? parseUser(tokenSet.idToken) : null;

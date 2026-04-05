@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ClubManager Backend Stack - Lambda + HTTP API + Cognito JWT Authorizer + RDS Data API'
+Description: 'ClubManager Backend Stack - Lambda + HTTP API + Keycloak JWT Authorizer'
 
 Parameters:
   Environment:
@@ -12,22 +12,48 @@ Parameters:
   AwsRegion:
     Type: String
     Description: AWS Region
-  UserPoolId:
+  KeycloakIssuerUrl:
     Type: String
-    Description: Cognito User Pool ID
-  UserPoolClientId:
+    Description: >
+      Keycloak OIDC issuer URL.
+      Example: https://auth.miodominio.com/realms/clubmanager
+  KeycloakClientId:
     Type: String
-    Description: Cognito User Pool App Client ID
-  DBClusterArn:
+    Description: Keycloak SPA client ID (audience for JWT validation)
+    Default: clubmanager-spa
+  KeycloakUrl:
     Type: String
-    Description: Aurora Cluster ARN (from DB stack)
-  DBSecretArn:
+    Description: Keycloak base URL (for backend admin API calls)
+  KeycloakRealm:
     Type: String
-    Description: Secret ARN for DB credentials (from DB stack)
+    Description: Keycloak realm name
+    Default: clubmanager
+  KeycloakAdminClientId:
+    Type: String
+    Description: Keycloak backend (confidential) client ID
+    Default: clubmanager-backend
+  KeycloakAdminClientSecret:
+    Type: String
+    Description: Keycloak backend client secret
+    NoEcho: true
+  DBHost:
+    Type: String
+    Description: Database host (Aurora endpoint)
+  DBPort:
+    Type: String
+    Description: Database port
+    Default: '5432'
   DBName:
     Type: String
     Description: Database name
     Default: clubmanager
+  DBUser:
+    Type: String
+    Description: Database user
+  DBPassword:
+    Type: String
+    Description: Database password
+    NoEcho: true
   LambdaSubnetIds:
     Type: CommaDelimitedList
     Description: Subnet IDs for Lambda VPC config (from DB stack)
@@ -75,34 +101,14 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
-        - PolicyName: RDSDataApiAccess
+        - PolicyName: S3ArtifactsAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - rds-data:ExecuteStatement
-                  - rds-data:BatchExecuteStatement
-                  - rds-data:BeginTransaction
-                  - rds-data:CommitTransaction
-                  - rds-data:RollbackTransaction
-                Resource: !Ref DBClusterArn
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref DBSecretArn
-              - Effect: Allow
-                Action:
                   - s3:GetObject
                 Resource: !Sub '${LambdaArtifactsBucket.Arn}/*'
-              - Effect: Allow
-                Action:
-                  - cognito-idp:AdminAddUserToGroup
-                  - cognito-idp:AdminRemoveUserFromGroup
-                  - cognito-idp:AdminListGroupsForUser
-                  - cognito-idp:AdminGetUser
-                  - cognito-idp:ListUsers
-                Resource: !Sub 'arn:aws:cognito-idp:${AwsRegion}:${AWS::AccountId}:userpool/${UserPoolId}'
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -110,11 +116,6 @@ Resources:
           Value: !Ref TenantId
         - Key: Project
           Value: ClubManager
-
-  # ---------------------------------------------------------------
-  # Variabili d'ambiente comuni per le Lambda
-  # ---------------------------------------------------------------
-  # (iniettate singolarmente in ogni Lambda tramite Environment)
 
   # ---------------------------------------------------------------
   # Lambda: soci
@@ -142,11 +143,13 @@ Resources:
         Variables:
           NODE_ENV: !Ref Environment
           TENANT_ID: !Ref TenantId
-          DB_CLUSTER_ARN: !Ref DBClusterArn
-          DB_SECRET_ARN: !Ref DBSecretArn
+          DB_HOST: !Ref DBHost
+          DB_PORT: !Ref DBPort
           DB_NAME: !Ref DBName
-          COGNITO_USER_POOL_ID: !Ref UserPoolId
-          AWS_REGION_NAME: !Ref AwsRegion
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          KEYCLOAK_URL: !Ref KeycloakUrl
+          KEYCLOAK_REALM: !Ref KeycloakRealm
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -181,10 +184,13 @@ Resources:
         Variables:
           NODE_ENV: !Ref Environment
           TENANT_ID: !Ref TenantId
-          DB_CLUSTER_ARN: !Ref DBClusterArn
-          DB_SECRET_ARN: !Ref DBSecretArn
+          DB_HOST: !Ref DBHost
+          DB_PORT: !Ref DBPort
           DB_NAME: !Ref DBName
-          AWS_REGION_NAME: !Ref AwsRegion
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          KEYCLOAK_URL: !Ref KeycloakUrl
+          KEYCLOAK_REALM: !Ref KeycloakRealm
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -219,10 +225,13 @@ Resources:
         Variables:
           NODE_ENV: !Ref Environment
           TENANT_ID: !Ref TenantId
-          DB_CLUSTER_ARN: !Ref DBClusterArn
-          DB_SECRET_ARN: !Ref DBSecretArn
+          DB_HOST: !Ref DBHost
+          DB_PORT: !Ref DBPort
           DB_NAME: !Ref DBName
-          AWS_REGION_NAME: !Ref AwsRegion
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          KEYCLOAK_URL: !Ref KeycloakUrl
+          KEYCLOAK_REALM: !Ref KeycloakRealm
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -257,11 +266,15 @@ Resources:
         Variables:
           NODE_ENV: !Ref Environment
           TENANT_ID: !Ref TenantId
-          DB_CLUSTER_ARN: !Ref DBClusterArn
-          DB_SECRET_ARN: !Ref DBSecretArn
+          DB_HOST: !Ref DBHost
+          DB_PORT: !Ref DBPort
           DB_NAME: !Ref DBName
-          COGNITO_USER_POOL_ID: !Ref UserPoolId
-          AWS_REGION_NAME: !Ref AwsRegion
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          KEYCLOAK_URL: !Ref KeycloakUrl
+          KEYCLOAK_REALM: !Ref KeycloakRealm
+          KEYCLOAK_ADMIN_CLIENT_ID: !Ref KeycloakAdminClientId
+          KEYCLOAK_ADMIN_CLIENT_SECRET: !Ref KeycloakAdminClientSecret
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -292,7 +305,7 @@ Resources:
           - Content-Type
         MaxAge: 300
 
-  # JWT Authorizer Cognito
+  # JWT Authorizer — Keycloak OIDC
   HttpApiJwtAuthorizer:
     Type: AWS::ApiGatewayV2::Authorizer
     Properties:
@@ -302,9 +315,9 @@ Resources:
         - '$request.header.Authorization'
       Name: !Sub clubmanager-jwt-${TenantId}-${Environment}
       JwtConfiguration:
-        Issuer: !Sub 'https://cognito-idp.${AwsRegion}.amazonaws.com/${UserPoolId}'
+        Issuer: !Ref KeycloakIssuerUrl
         Audience:
-          - !Ref UserPoolClientId
+          - !Ref KeycloakClientId
 
   # Stage default
   HttpApiStage:
@@ -533,7 +546,7 @@ Resources:
       AuthorizerId: !Ref HttpApiJwtAuthorizer
 
   # ---------------------------------------------------------------
-  # Permessi Lambda → API Gateway
+  # Permessi Lambda -> API Gateway
   # ---------------------------------------------------------------
   PermissionSoci:
     Type: AWS::Lambda::Permission

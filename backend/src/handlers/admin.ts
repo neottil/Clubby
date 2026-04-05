@@ -7,7 +7,7 @@ import { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-l
 import { getAuthContext, requireAdmin } from '../middleware/auth.js';
 import { ok, noContent, errorResponse } from '../middleware/response.js';
 import {
-  listCognitoUsers,
+  listKeycloakUsers,
   promuoviAdmin,
   associaViewerASocio,
   disassociaViewerDaSocio,
@@ -25,20 +25,20 @@ export const handler = async (
     const socioId = event.pathParameters?.socioId;
 
     // -----------------------------------------------------------
-    // GET /api/admin/users  - Lista utenti Cognito
+    // GET /api/admin/users  - Lista utenti Keycloak
     // -----------------------------------------------------------
     if (method === 'GET' && path.endsWith('/users')) {
-      const users = await listCognitoUsers();
+      const users = await listKeycloakUsers();
       return ok(users);
     }
 
     // -----------------------------------------------------------
     // POST /api/admin/associa-viewer
-    // Body: { socio_id, cognito_username }
+    // Body: { socio_id, keycloak_user_id }
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/associa-viewer')) {
       const body = JSON.parse(event.body ?? '{}');
-      await associaViewerASocio(body.socio_id, body.cognito_username);
+      await associaViewerASocio(body.socio_id, body.keycloak_user_id);
       return ok({ message: 'Viewer associato con successo' });
     }
 
@@ -52,12 +52,12 @@ export const handler = async (
 
     // -----------------------------------------------------------
     // POST /api/admin/promuovi
-    // Body: { cognito_username }
+    // Body: { keycloak_user_id }
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/promuovi')) {
       const body = JSON.parse(event.body ?? '{}');
-      await promuoviAdmin(body.cognito_username);
-      return ok({ message: `Utente ${body.cognito_username} promosso ad admin` });
+      await promuoviAdmin(body.keycloak_user_id);
+      return ok({ message: `Utente promosso ad admin` });
     }
 
     return errorResponse({ statusCode: 404, message: 'Route non trovata' });

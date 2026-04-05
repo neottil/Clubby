@@ -11,8 +11,9 @@
     "dev": "ts-node --esm src/local/server.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-cognito-identity-provider": "^3.812.0",
-    "@aws-sdk/client-rds-data": "^3.812.0"
+    "jose": "^5.9.6",
+    "pg": "^8.13.1",
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.159",
@@ -26,7 +27,7 @@
     "eslint-plugin-prettier": "^5.5.4",
     "jest": "^30.0.0",
     "jest-mock-extended": "^4.0.0",
-    "pg": "^8.13.0",
+    "@types/pg": "^8.11.11",
     "prettier": "^3.7.4",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",

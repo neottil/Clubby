@@ -1,18 +1,21 @@
 /**
  * Middleware di autenticazione e autorizzazione
  *
- * Estrae i claims JWT dal token Cognito già validato da API Gateway.
- * API Gateway JWT Authorizer valida firma e scadenza prima di invocare Lambda,
- * quindi qui decodifichiamo solo il payload (no verifica firma necessaria).
+ * Estrae i claims JWT dal token Keycloak.
+ * In Lambda: API Gateway JWT Authorizer valida firma e scadenza prima di invocare Lambda.
+ * In locale: il server verifica via JWKS.
  */
 
 import { APIGatewayProxyEventV2 } from 'aws-lambda';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 
-export interface CognitoClaims {
-  sub: string;          // Cognito user ID
-  email: string;
-  'cognito:groups': string[];
-  'cognito:username': string;
+export interface KeycloakClaims {
+  sub: string;
+  preferred_username: string;
+  email?: string;
+  realm_access: { roles: string[] };
+  iat: number;
+  exp: number;
 }
 
 export type UserRole = 'admin' | 'viewer';
@@ -22,6 +25,24 @@ export interface AuthContext {
   email: string;
   groups: string[];
   role: UserRole;
+}
+
+const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://localhost:8080';
+const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'clubmanager';
+
+const jwksUrl = new URL(
+  `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`
+);
+const JWKS = createRemoteJWKSet(jwksUrl);
+
+/**
+ * Verify JWT via JWKS — used in local server mode.
+ */
+export async function verifyToken(token: string): Promise<KeycloakClaims> {
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`,
+  });
+  return payload as unknown as KeycloakClaims;
 }
 
 /**
@@ -35,21 +56,20 @@ export function getAuthContext(event: APIGatewayProxyEventV2): AuthContext {
     throw new UnauthorizedError('Token non presente o non valido');
   }
 
-  // cognito:groups può essere una stringa JSON array o undefined
-  let groups: string[] = [];
-  if (claims['cognito:groups']) {
-    try {
-      groups = JSON.parse(claims['cognito:groups']);
-    } catch {
-      groups = [claims['cognito:groups']];
-    }
+  // realm_access may come as a JSON string from API Gateway
+  let realmAccess: { roles: string[] } = { roles: [] };
+  if (claims.realm_access) {
+    realmAccess = typeof claims.realm_access === 'string'
+      ? JSON.parse(claims.realm_access)
+      : claims.realm_access;
   }
 
+  const groups = realmAccess.roles ?? [];
   const role: UserRole = groups.includes('admin') ? 'admin' : 'viewer';
 
   return {
     userId: claims.sub,
-    email: claims.email ?? '',
+    email: claims.email ?? claims.preferred_username ?? '',
     groups,
     role,
   };

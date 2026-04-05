@@ -1,0 +1,288 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ClubManager Keycloak Stack - ECS Fargate + RDS Postgres'
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name (dev, test, prod)
+  TenantId:
+    Type: String
+    Description: Tenant identifier (e.g. asd1, asd2)
+    Default: asd1
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID (from DB stack)
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Public subnet IDs for Keycloak ALB
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for Keycloak ECS tasks
+  KeycloakImage:
+    Type: String
+    Description: Keycloak container image
+    Default: quay.io/keycloak/keycloak:26.1
+  KeycloakAdminPassword:
+    Type: String
+    Description: Keycloak admin password
+    NoEcho: true
+  KeycloakDbPassword:
+    Type: String
+    Description: Keycloak database password
+    NoEcho: true
+  DomainName:
+    Type: String
+    Description: >
+      Custom domain for Keycloak (e.g. auth.miodominio.com).
+      Leave empty to use ALB default DNS.
+    Default: ''
+  AcmCertificateArn:
+    Type: String
+    Description: >
+      ARN of ACM certificate for HTTPS. Required if DomainName is set.
+    Default: ''
+
+Conditions:
+  HasCustomDomain: !And
+    - !Not [!Equals [!Ref DomainName, '']]
+    - !Not [!Equals [!Ref AcmCertificateArn, '']]
+
+Resources:
+
+  # ---------------------------------------------------------------
+  # RDS Postgres per Keycloak
+  # ---------------------------------------------------------------
+  KeycloakDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub Keycloak DB subnet group ${TenantId}-${Environment}
+      SubnetIds: !Ref PrivateSubnetIds
+
+  KeycloakDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Keycloak DB security group
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref KeycloakECSSecurityGroup
+
+  KeycloakDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub clubmanager-keycloak-${TenantId}-${Environment}
+      Engine: postgres
+      EngineVersion: '16.6'
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: 20
+      MasterUsername: keycloak
+      MasterUserPassword: !Ref KeycloakDbPassword
+      DBName: keycloak
+      VPCSecurityGroups:
+        - !Ref KeycloakDBSecurityGroup
+      DBSubnetGroupName: !Ref KeycloakDBSubnetGroup
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Tenant
+          Value: !Ref TenantId
+        - Key: Project
+          Value: ClubManager
+
+  # ---------------------------------------------------------------
+  # ECS Cluster + Fargate Service for Keycloak
+  # ---------------------------------------------------------------
+  KeycloakCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub clubmanager-keycloak-${TenantId}-${Environment}
+
+  KeycloakTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  KeycloakLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/clubmanager-keycloak-${TenantId}-${Environment}
+      RetentionInDays: 30
+
+  KeycloakTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub clubmanager-keycloak-${TenantId}-${Environment}
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt KeycloakTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: keycloak
+          Image: !Ref KeycloakImage
+          Essential: true
+          Command: ['start', '--optimized']
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: KC_DB
+              Value: postgres
+            - Name: KC_DB_URL
+              Value: !Sub jdbc:postgresql://${KeycloakDB.Endpoint.Address}:5432/keycloak
+            - Name: KC_DB_USERNAME
+              Value: keycloak
+            - Name: KC_DB_PASSWORD
+              Value: !Ref KeycloakDbPassword
+            - Name: KC_HOSTNAME
+              Value: !If [HasCustomDomain, !Ref DomainName, '']
+            - Name: KC_PROXY_HEADERS
+              Value: xforwarded
+            - Name: KC_HTTP_ENABLED
+              Value: 'true'
+            - Name: KEYCLOAK_ADMIN
+              Value: admin
+            - Name: KEYCLOAK_ADMIN_PASSWORD
+              Value: !Ref KeycloakAdminPassword
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref KeycloakLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: keycloak
+
+  KeycloakECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Keycloak ECS tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref KeycloakALBSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  KeycloakALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Keycloak ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  KeycloakALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub cm-kc-${TenantId}-${Environment}
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups:
+        - !Ref KeycloakALBSecurityGroup
+      Scheme: internet-facing
+      Type: application
+
+  KeycloakTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckPath: /health/ready
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+
+  KeycloakHTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCustomDomain
+    Properties:
+      LoadBalancerArn: !Ref KeycloakALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref AcmCertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref KeycloakTargetGroup
+
+  KeycloakHTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref KeycloakALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - !If
+          - HasCustomDomain
+          - Type: redirect
+            RedirectConfig:
+              Protocol: HTTPS
+              Port: '443'
+              StatusCode: HTTP_301
+          - Type: forward
+            TargetGroupArn: !Ref KeycloakTargetGroup
+
+  KeycloakService:
+    Type: AWS::ECS::Service
+    DependsOn: KeycloakHTTPListener
+    Properties:
+      Cluster: !Ref KeycloakCluster
+      TaskDefinition: !Ref KeycloakTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups:
+            - !Ref KeycloakECSSecurityGroup
+      LoadBalancers:
+        - ContainerName: keycloak
+          ContainerPort: 8080
+          TargetGroupArn: !Ref KeycloakTargetGroup
+
+Outputs:
+  KeycloakUrl:
+    Description: Keycloak base URL
+    Value: !If
+      - HasCustomDomain
+      - !Sub 'https://${DomainName}'
+      - !Sub 'http://${KeycloakALB.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-KeycloakUrl'
+
+  KeycloakIssuerUrl:
+    Description: Keycloak OIDC Issuer URL (for JWT Authorizer)
+    Value: !If
+      - HasCustomDomain
+      - !Sub 'https://${DomainName}/realms/clubmanager'
+      - !Sub 'http://${KeycloakALB.DNSName}/realms/clubmanager'
+    Export:
+      Name: !Sub '${AWS::StackName}-KeycloakIssuerUrl'
+
+  KeycloakALBDnsName:
+    Description: ALB DNS name
+    Value: !GetAtt KeycloakALB.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-KeycloakALBDnsName'

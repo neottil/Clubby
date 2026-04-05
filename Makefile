@@ -1,6 +1,6 @@
-.PHONY: up down reset init logs-ls logs-pg be fe
+.PHONY: up down reset init logs-kc logs-pg be fe
 
-# Avvia Postgres e LocalStack in background
+# Avvia Postgres, Keycloak-DB e Keycloak in background
 up:
 	docker compose up -d
 
@@ -12,14 +12,15 @@ down:
 reset:
 	docker compose down -v
 
-# Crea risorse Cognito su LocalStack e genera frontend/.env.local e backend/.env
+# Configura realm Keycloak, client, ruoli e utente admin di test.
+# Genera frontend/.env.local e backend/.env.
 # Da eseguire UNA VOLTA dopo "make up" (o quando si fa reset)
 init:
-	chmod +x scripts/init-localstack.sh && ./scripts/init-localstack.sh
+	chmod +x scripts/init-keycloak.sh && ./scripts/init-keycloak.sh
 
 # Log dei container
-logs-ls:
-	docker compose logs -f localstack
+logs-kc:
+	docker compose logs -f keycloak
 
 logs-pg:
 	docker compose logs -f postgres

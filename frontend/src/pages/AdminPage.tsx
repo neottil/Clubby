@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
 
-interface CognitoUser { sub: string; email: string; groups: string[]; enabled: boolean; }
+interface KeycloakUser { sub: string; email: string; groups: string[]; enabled: boolean; }
 interface Socio { id: string; nome: string; cognome: string; id_viewer: string | null; }
 
 export default function AdminPage() {
@@ -11,15 +11,15 @@ export default function AdminPage() {
   const navigate = useNavigate();
   const api = createApiClient(token);
 
-  const [cognitoUsers, setCognitoUsers] = useState<CognitoUser[]>([]);
-  const [soci, setSoci]                 = useState<Socio[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [error, setError]               = useState('');
-  const [successMsg, setSuccessMsg]     = useState('');
+  const [keycloakUsers, setKeycloakUsers] = useState<KeycloakUser[]>([]);
+  const [soci, setSoci]                   = useState<Socio[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [error, setError]                 = useState('');
+  const [successMsg, setSuccessMsg]       = useState('');
 
   // Form associa viewer
-  const [assocForm, setAssocForm]       = useState({ socio_id: '', cognito_username: '' });
-  const [saving, setSaving]             = useState(false);
+  const [assocForm, setAssocForm]         = useState({ socio_id: '', keycloak_user_id: '' });
+  const [saving, setSaving]               = useState(false);
 
   useEffect(() => {
     if (!user?.isAdmin) { navigate('/soci'); return; }
@@ -30,7 +30,7 @@ export default function AdminPage() {
     setLoading(true);
     try {
       const [u, s] = await Promise.all([api.getAdminUsers(), api.getSoci()]);
-      setCognitoUsers(u);
+      setKeycloakUsers(u);
       setSoci(s);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
@@ -42,7 +42,7 @@ export default function AdminPage() {
     try {
       await api.associaViewer(assocForm);
       setSuccessMsg('Viewer associato con successo');
-      setAssocForm({ socio_id: '', cognito_username: '' });
+      setAssocForm({ socio_id: '', keycloak_user_id: '' });
       load();
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
@@ -57,11 +57,11 @@ export default function AdminPage() {
     } catch (e: any) { setError(e.message); }
   };
 
-  const promuovi = async (cognitoUsername: string) => {
-    if (!confirm(`Promuovere ${cognitoUsername} ad admin?`)) return;
+  const promuovi = async (userEmail: string) => {
+    if (!confirm(`Promuovere ${userEmail} ad admin?`)) return;
     try {
-      await api.promuoviAdmin({ cognito_username: cognitoUsername });
-      setSuccessMsg(`${cognitoUsername} promosso ad admin`);
+      await api.promuoviAdmin({ keycloak_user_id: userEmail });
+      setSuccessMsg(`${userEmail} promosso ad admin`);
       load();
     } catch (e: any) { setError(e.message); }
   };
@@ -80,7 +80,7 @@ export default function AdminPage() {
       {/* Associa viewer a socio */}
       <section style={styles.section}>
         <h3 style={styles.sectionTitle}>Associa viewer a socio</h3>
-        <p style={styles.hint}>Seleziona il socio e inserisci l'email (username Cognito) del viewer da associare.</p>
+        <p style={styles.hint}>Seleziona il socio e inserisci l'email (utente Keycloak) del viewer da associare.</p>
         <div style={styles.row}>
           <div style={{ flex: 1 }}>
             <label style={styles.label}>Socio</label>
@@ -90,16 +90,16 @@ export default function AdminPage() {
             </select>
           </div>
           <div style={{ flex: 1 }}>
-            <label style={styles.label}>Username Cognito (email)</label>
-            <select style={styles.input} value={assocForm.cognito_username} onChange={e => setAssocForm({ ...assocForm, cognito_username: e.target.value })}>
+            <label style={styles.label}>Utente Keycloak (email)</label>
+            <select style={styles.input} value={assocForm.keycloak_user_id} onChange={e => setAssocForm({ ...assocForm, keycloak_user_id: e.target.value })}>
               <option value=''>— Seleziona utente —</option>
-              {cognitoUsers.filter(u => !u.groups.includes('admin')).map(u => (
+              {keycloakUsers.filter(u => !u.groups.includes('admin')).map(u => (
                 <option key={u.sub} value={u.email}>{u.email}</option>
               ))}
             </select>
           </div>
           <div style={{ alignSelf: 'flex-end' }}>
-            <button style={styles.btn} onClick={associa} disabled={saving || !assocForm.socio_id || !assocForm.cognito_username}>
+            <button style={styles.btn} onClick={associa} disabled={saving || !assocForm.socio_id || !assocForm.keycloak_user_id}>
               {saving ? '...' : 'Associa'}
             </button>
           </div>
@@ -112,7 +112,7 @@ export default function AdminPage() {
         <table style={styles.table}>
           <thead>
             <tr>
-              {['Socio', 'Viewer (Cognito sub)', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              {['Socio', 'Viewer (Keycloak sub)', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -130,17 +130,17 @@ export default function AdminPage() {
         {soci.filter(s => s.id_viewer).length === 0 && <p style={styles.empty}>Nessun viewer associato.</p>}
       </section>
 
-      {/* Lista utenti Cognito */}
+      {/* Lista utenti Keycloak */}
       <section style={styles.section}>
-        <h3 style={styles.sectionTitle}>Utenti Cognito</h3>
+        <h3 style={styles.sectionTitle}>Utenti Keycloak</h3>
         <table style={styles.table}>
           <thead>
             <tr>
-              {['Email', 'Gruppi', 'Stato', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              {['Email', 'Ruoli', 'Stato', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {cognitoUsers.map(u => (
+            {keycloakUsers.map(u => (
               <tr key={u.sub} style={styles.tr}>
                 <td style={styles.td}>{u.email}</td>
                 <td style={styles.td}>{u.groups.join(', ') || 'viewer'}</td>

@@ -25,18 +25,17 @@ Parameters:
     Type: String
     Description: Backend API base URL (HTTP API Gateway invoke URL)
     Default: ''
-  CognitoUserPoolId:
+  KeycloakUrl:
     Type: String
-    Description: Cognito User Pool ID
-  CognitoClientId:
+    Description: Keycloak base URL (e.g. https://auth.miodominio.com)
+  KeycloakRealm:
     Type: String
-    Description: Cognito App Client ID
-  CognitoEndpoint:
+    Description: Keycloak realm name
+    Default: clubmanager
+  KeycloakClientId:
     Type: String
-    Description: >
-      URL base OAuth Cognito completo.
-      Es. https://clubmanager-dev.auth.eu-central-1.amazoncognito.com
-      Locale (LocalStack): http://localhost:4566
+    Description: Keycloak SPA client ID
+    Default: clubmanager-spa
 
 Conditions:
   HasCustomDomain: !And
@@ -69,7 +68,7 @@ Resources:
         - Key: Project
           Value: ClubManager
 
-  # Origin Access Control per CloudFront → S3
+  # Origin Access Control per CloudFront -> S3
   CloudFrontOAC:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -135,7 +134,7 @@ Resources:
           AllowedMethods: [GET, HEAD, OPTIONS]
           Compress: true
 
-        # SPA routing: errori 403/404 → index.html
+        # SPA routing: errori 403/404 -> index.html
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 200
@@ -168,9 +167,9 @@ Resources:
       Value: !Sub |
         {
           "VITE_API_BASE_URL": "${ApiBaseUrl}",
-          "VITE_COGNITO_USER_POOL_ID": "${CognitoUserPoolId}",
-          "VITE_COGNITO_CLIENT_ID": "${CognitoClientId}",
-          "VITE_COGNITO_ENDPOINT": "${CognitoEndpoint}",
+          "VITE_KEYCLOAK_URL": "${KeycloakUrl}",
+          "VITE_KEYCLOAK_REALM": "${KeycloakRealm}",
+          "VITE_KEYCLOAK_CLIENT_ID": "${KeycloakClientId}",
           "VITE_TENANT_ID": "${TenantId}"
         }
       Description: !Sub Frontend config for ClubManager ${TenantId} ${Environment}

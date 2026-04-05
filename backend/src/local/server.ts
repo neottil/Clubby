@@ -28,6 +28,7 @@ if (existsSync(envPath)) {
 }
 
 import http from 'http';
+import { verifyToken, type KeycloakClaims } from '../middleware/auth.js';
 import { handler as sociHandler } from '../handlers/soci.js';
 import { handler as incontriHandler } from '../handlers/incontri.js';
 import { handler as buoniHandler } from '../handlers/buoni.js';
@@ -36,17 +37,10 @@ import { handler as adminHandler } from '../handlers/admin.js';
 const PORT = process.env.PORT ?? 3000;
 
 // Costruisce un APIGatewayProxyEventV2 fake dall'HTTP request
-async function buildEvent(req: http.IncomingMessage, body: string, pathParams: Record<string, string> = {}): Promise<any> {
+async function buildEvent(req: http.IncomingMessage, body: string, pathParams: Record<string, string> = {}, claims: any): Promise<any> {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const queryStringParameters: Record<string, string> = {};
   url.searchParams.forEach((v, k) => { queryStringParameters[k] = v; });
-
-  // Simula un utente admin in locale (nessun JWT reale)
-  const mockClaims = {
-    sub: 'local-admin-sub',
-    email: 'admin@clubmanager.local',
-    'cognito:groups': '["admin"]',
-  };
 
   return {
     version: '2.0',
@@ -63,11 +57,19 @@ async function buildEvent(req: http.IncomingMessage, body: string, pathParams: R
         path:   url.pathname,
       },
       authorizer: {
-        jwt: { claims: mockClaims },
+        jwt: { claims },
       },
     },
   };
 }
+
+// Mock admin claims in Keycloak format
+const MOCK_ADMIN_CLAIMS = {
+  sub: 'local-admin-sub',
+  preferred_username: 'admin',
+  email: 'admin@clubmanager.local',
+  realm_access: { roles: ['admin'] },
+};
 
 // Routing
 function route(path: string, method: string): { handler: Function; params: Record<string, string> } | null {
@@ -121,8 +123,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Auth: try to verify real JWT, fall back to mock admin
+  let claims: any = MOCK_ADMIN_CLAIMS;
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      const keycloakClaims = await verifyToken(authHeader.slice(7));
+      claims = keycloakClaims;
+    } catch (err) {
+      console.warn('JWT verification failed, using mock admin:', (err as Error).message);
+    }
+  }
+
   try {
-    const event = await buildEvent(req, body, match.params);
+    const event = await buildEvent(req, body, match.params, claims);
     const result = await match.handler(event) as any;
 
     const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', ...result.headers };
@@ -137,6 +151,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`ClubManager local server running on http://localhost:${PORT}`);
+  console.log('Using Keycloak JWT verification (falls back to mock admin)');
   console.log('Endpoints:');
   console.log('  GET/POST   /api/soci');
   console.log('  GET/PUT/DELETE /api/soci/:id');
