@@ -1,0 +1,23 @@
+# Forza LF per tutti i file di testo
+* text=auto eol=lf
+
+# Script shell: LF obbligatorio (altrimenti /bin/bash^M su Linux/macOS)
+*.sh text eol=lf
+
+# File di testo espliciti
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.sql text eol=lf
+*.env text eol=lf
+*.example text eol=lf
+Makefile text eol=lf
+
+# File binari: nessuna conversione
+*.png binary
+*.jpg binary
+*.ico binary

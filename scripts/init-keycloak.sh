@@ -31,7 +31,7 @@ echo ""
 # Attendi che Keycloak sia pronto
 echo "▶ Attendo Keycloak su $KEYCLOAK_URL..."
 for i in $(seq 1 60); do
-  if curl -sf "$KEYCLOAK_URL/health/ready" > /dev/null 2>&1; then
+  if curl -sf "http://localhost:9000/health/ready" > /dev/null 2>&1; then
     echo "  Keycloak pronto."
     break
   fi
