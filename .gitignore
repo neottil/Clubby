@@ -22,6 +22,8 @@ build/
 .env.*.local
 backend/.env
 frontend/.env.local
+# File .env radice (contiene LOCALSTACK_AUTH_TOKEN e altri segreti locali)
+.env
 
 # AWS credentials
 .aws/

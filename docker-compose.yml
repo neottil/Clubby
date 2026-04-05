@@ -40,6 +40,10 @@ services:
     ports:
       - "4566:4566"
     environment:
+      # Token account LocalStack Hobby (gratuito per uso non commerciale).
+      # Ottienilo su https://app.localstack.cloud/workspace/auth-tokens
+      # e mettilo nel file .env nella root del progetto (non committare).
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN}
       SERVICES:    cognito-idp,secretsmanager
       PERSISTENCE: 1
       DEBUG:       0
