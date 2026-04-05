@@ -1,0 +1,29 @@
+meta {
+  name: Associa viewer a socio
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/admin/associa-viewer
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "socio_id": "{{socio_id}}",
+    "keycloak_user_id": "viewer@clubmanager.local"
+  }
+}
+
+docs {
+  Solo admin. Collega un utente Keycloak (viewer) a un record socio nel DB.
+  Dopo questa operazione il viewer può accedere ai dati di quel socio.
+  keycloak_user_id può essere UUID o email.
+  Utile per i soci creati manualmente dall'admin prima che l'utente si registrasse.
+}

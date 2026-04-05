@@ -1,0 +1,20 @@
+meta {
+  name: Lista movimenti buono
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/buoni/{{buono_id}}/movimenti
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Admin: movimenti di qualsiasi buono.
+  Viewer: solo i propri (403 altrimenti).
+}

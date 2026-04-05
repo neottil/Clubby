@@ -1,0 +1,28 @@
+meta {
+  name: Crea movimento (admin)
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/buoni/{{buono_id}}/movimenti
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "importo": -10.00,
+    "descrizione": "Seduta del 10/03/2024"
+  }
+}
+
+docs {
+  Solo admin. Aggiunge un movimento al buono.
+  importo: positivo = ricarica, negativo = addebito (scalare dal saldo).
+  Il saldo corrente è calcolato come saldo_iniziale + somma movimenti.
+}

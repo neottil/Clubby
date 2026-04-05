@@ -1,0 +1,39 @@
+meta {
+  name: Registrazione autonoma (post-login)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/auth/register
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_viewer}}
+}
+
+body:json {
+  {
+    "nome": "Mario",
+    "cognome": "Rossi",
+    "email": "viewer@clubmanager.local"
+  }
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data.id) {
+    bru.setVar("socio_id", data.id);
+  }
+}
+
+docs {
+  Chiamato dal frontend dopo il primo login PKCE.
+  Crea il record socio nel DB e assegna il ruolo viewer in Keycloak.
+  È idempotente: se il socio esiste già ritorna 200 con il socio esistente.
+  
+  Richiede un JWT valido (token_viewer o token_admin).
+  Salva automaticamente l'id del socio creato in socio_id.
+}

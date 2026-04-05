@@ -1,0 +1,19 @@
+meta {
+  name: Lista incontri (viewer — solo i propri)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/incontri
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_viewer}}
+}
+
+docs {
+  Viewer: ritorna solo gli incontri del proprio socio.
+}

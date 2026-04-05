@@ -1,0 +1,36 @@
+meta {
+  name: Crea buono (admin)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/buoni
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "socio_id": "{{socio_id}}",
+    "saldo_iniziale": 100.00,
+    "note": "Buono prepagato 10 sedute"
+  }
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data.id) {
+    bru.setVar("buono_id", data.id);
+  }
+}
+
+docs {
+  Solo admin. Crea un buono prepagato per il socio.
+  saldo_iniziale deve essere >= 0.
+  Salva automaticamente buono_id per le richieste successive.
+}

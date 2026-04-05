@@ -1,0 +1,20 @@
+meta {
+  name: Dettaglio incontro
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/incontri/{{incontro_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Admin: qualsiasi incontro.
+  Viewer: solo i propri (403 altrimenti).
+}

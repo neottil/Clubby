@@ -1,0 +1,31 @@
+meta {
+  name: Ottieni token viewer
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{keycloak_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/token
+  body: formUrlEncoded
+  auth: none
+}
+
+body:form-urlencoded {
+  grant_type: password
+  client_id: {{keycloak_client_id}}
+  username: viewer@clubmanager.local
+  password: Viewer1234!
+  scope: openid
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data.access_token) {
+    bru.setVar("token_viewer", data.access_token);
+  }
+}
+
+docs {
+  Ottieni un access token per l'utente viewer.
+  Il token viene salvato automaticamente nella variabile token_viewer.
+}
