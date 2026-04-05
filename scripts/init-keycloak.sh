@@ -161,12 +161,18 @@ kc_api POST "/$REALM/users" "{
   }]
 }" 2>/dev/null || echo "  (utente admin già esistente, salto)"
 
-# Assegna ruolo admin all'utente
+# Imposta password admin separatamente (più affidabile della creazione inline in KC26)
 ADMIN_KC_USER_ID=$(kc_api GET "/$REALM/users?email=admin@clubmanager.local" | jq -r '.[0].id')
+if [ -n "$ADMIN_KC_USER_ID" ] && [ "$ADMIN_KC_USER_ID" != "null" ]; then
+  kc_api PUT "/$REALM/users/$ADMIN_KC_USER_ID/reset-password" \
+    '{"type":"password","value":"Admin1234!","temporary":false}' 2>/dev/null || true
+fi
+
+# Assegna ruolo admin all'utente
 ADMIN_ROLE_JSON=$(kc_api GET "/$REALM/roles/admin")
 if [ -n "$ADMIN_KC_USER_ID" ] && [ "$ADMIN_KC_USER_ID" != "null" ]; then
   kc_api POST "/$REALM/users/$ADMIN_KC_USER_ID/role-mappings/realm" "[$ADMIN_ROLE_JSON]" 2>/dev/null || true
-  echo "  Utente admin creato e ruolo assegnato."
+  echo "  Utente admin creato, password impostata e ruolo assegnato."
 fi
 
 # Crea utente viewer di test
@@ -184,12 +190,18 @@ kc_api POST "/$REALM/users" "{
   }]
 }" 2>/dev/null || echo "  (utente viewer già esistente, salto)"
 
-# Assegna ruolo viewer all'utente
+# Imposta password viewer separatamente
 VIEWER_KC_USER_ID=$(kc_api GET "/$REALM/users?email=viewer@clubmanager.local" | jq -r '.[0].id')
+if [ -n "$VIEWER_KC_USER_ID" ] && [ "$VIEWER_KC_USER_ID" != "null" ]; then
+  kc_api PUT "/$REALM/users/$VIEWER_KC_USER_ID/reset-password" \
+    '{"type":"password","value":"Viewer1234!","temporary":false}' 2>/dev/null || true
+fi
+
+# Assegna ruolo viewer all'utente
 VIEWER_ROLE_JSON=$(kc_api GET "/$REALM/roles/viewer")
 if [ -n "$VIEWER_KC_USER_ID" ] && [ "$VIEWER_KC_USER_ID" != "null" ]; then
   kc_api POST "/$REALM/users/$VIEWER_KC_USER_ID/role-mappings/realm" "[$VIEWER_ROLE_JSON]" 2>/dev/null || true
-  echo "  Utente viewer creato e ruolo assegnato."
+  echo "  Utente viewer creato, password impostata e ruolo assegnato."
 fi
 
 # Scrivi frontend/.env.local
