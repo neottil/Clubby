@@ -23,6 +23,9 @@ script:post-response {
   if (data.access_token) {
     bru.setVar("token_viewer", data.access_token);
   }
+  if (data.refresh_token) {
+    bru.setVar("refresh_token_viewer", data.refresh_token);
+  }
 }
 
 docs {
