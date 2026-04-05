@@ -42,9 +42,9 @@ services:
       retries: 10
 
   # ----------------------------------------------------------
-  # LocalStack: simula Cognito
-  # NON usiamo init/ready.d (fragile, problemi di permessi).
-  # L'init lo fa il container dedicato localstack-init.
+  # LocalStack: simula Cognito (v4+)
+  # L'healthcheck usa awslocal (già incluso nell'immagine) per
+  # verificare che cognito-idp sia effettivamente operativo.
   # ----------------------------------------------------------
   localstack:
     image: localstack/localstack:latest
@@ -52,24 +52,27 @@ services:
     ports:
       - "4566:4566"
     environment:
-      SERVICES:       cognito-idp,secretsmanager
-      DEFAULT_REGION: eu-central-1
-      DATA_DIR:       /var/lib/localstack/data
-      DEBUG:          0
+      SERVICES:     cognito-idp,secretsmanager
+      # PERSISTENCE sostituisce DATA_DIR (deprecata in v4)
+      PERSISTENCE:  1
+      DEBUG:        0
     volumes:
       - localstack_data:/var/lib/localstack
     networks:
       - localnet
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      # awslocal è incluso nell'immagine localstack/localstack.
+      # Se list-user-pools risponde (anche lista vuota), cognito-idp è pronto.
+      test: ["CMD-SHELL", "awslocal cognito-idp list-user-pools --max-results 1 --region eu-central-1 > /dev/null 2>&1"]
       interval: 5s
-      timeout: 3s
-      retries: 30
+      timeout: 5s
+      retries: 40
+      start_period: 20s
 
   # ----------------------------------------------------------
-  # Init container: gira una volta, crea le risorse Cognito su
-  # LocalStack e scrive gli ID nel volume condiviso.
-  # Usa l'immagine ufficiale AWS CLI (include awslocal).
+  # Init container: gira una sola volta dopo che LocalStack è
+  # healthy, crea le risorse Cognito e scrive gli ID in
+  # /shared/localstack.env (volume condiviso con BE e FE).
   # ----------------------------------------------------------
   localstack-init:
     image: amazon/aws-cli:latest
@@ -82,7 +85,7 @@ services:
     volumes:
       - localstack_shared:/shared
       - ./scripts/localstack-init.sh:/localstack-init.sh:ro
-    # entrypoint che rende eseguibile lo script (bypass permessi mount :ro)
+    # cp in /tmp aggira il problema dei permessi del mount :ro
     entrypoint: ["/bin/sh", "-c", "cp /localstack-init.sh /tmp/init.sh && chmod +x /tmp/init.sh && /tmp/init.sh"]
     depends_on:
       localstack:
@@ -91,9 +94,7 @@ services:
       - localnet
 
   # ----------------------------------------------------------
-  # Backend: server locale che mappa le request alle Lambda handler
-  # Usa Postgres diretto (DB_LOCAL=true) e Cognito su LocalStack.
-  # Aspetta /shared/localstack.env scritto dall'init container.
+  # Backend: server locale (tsx) con Postgres diretto + Cognito su LocalStack
   # ----------------------------------------------------------
   backend:
     image: node:22-alpine
@@ -101,28 +102,24 @@ services:
     working_dir: /app
     command: >
       sh -c "
-        echo 'Attendo localstack.env...' &&
+        echo 'Attendo /shared/localstack.env...' &&
         while [ ! -f /shared/localstack.env ]; do sleep 2; done &&
         export $(cat /shared/localstack.env | xargs) &&
-        echo \"COGNITO_USER_POOL_ID=$$COGNITO_USER_POOL_ID\" &&
+        echo \"Pool ID: $COGNITO_USER_POOL_ID\" &&
         npm install &&
         npx tsx src/local/server.ts
       "
     environment:
       NODE_ENV:              development
       TENANT_ID:             asd1
-      # Postgres locale (bypassa RDS Data API)
       DB_LOCAL:              "true"
       DB_HOST:               postgres
       DB_PORT:               "5432"
       DB_NAME:               clubmanager
       DB_USER:               clubmanager
       DB_PASSWORD:           clubmanager_dev
-      # Finti ARN (non usati quando DB_LOCAL=true)
       DB_CLUSTER_ARN:        arn:aws:rds:eu-central-1:000000000000:cluster:local
       DB_SECRET_ARN:         arn:aws:secretsmanager:eu-central-1:000000000000:secret:local
-      # Cognito: COGNITO_USER_POOL_ID viene caricato da /shared/localstack.env
-      # AWS_ENDPOINT punta CognitoIdentityProviderClient a LocalStack
       AWS_REGION_NAME:       eu-central-1
       AWS_ENDPOINT:          http://localstack:4566
       AWS_ACCESS_KEY_ID:     test
@@ -142,9 +139,8 @@ services:
       - localnet
 
   # ----------------------------------------------------------
-  # Frontend: Vite dev server con hot reload.
-  # Legge POOL_ID e CLIENT_ID dal volume condiviso e genera
-  # .env.local prima di avviare Vite (valori compile-time).
+  # Frontend: Vite dev server
+  # Genera .env.local dai valori Cognito nel volume condiviso
   # ----------------------------------------------------------
   frontend:
     image: node:22-alpine
@@ -155,8 +151,8 @@ services:
         while [ ! -f /shared/localstack.env ]; do sleep 2; done &&
         export $(cat /shared/localstack.env | xargs) &&
         echo 'VITE_API_BASE_URL=http://localhost:3000'           >  .env.local &&
-        echo \"VITE_COGNITO_USER_POOL_ID=$$COGNITO_USER_POOL_ID\" >> .env.local &&
-        echo \"VITE_COGNITO_CLIENT_ID=$$COGNITO_CLIENT_ID\"        >> .env.local &&
+        echo \"VITE_COGNITO_USER_POOL_ID=$COGNITO_USER_POOL_ID\" >> .env.local &&
+        echo \"VITE_COGNITO_CLIENT_ID=$COGNITO_CLIENT_ID\"        >> .env.local &&
         echo 'VITE_COGNITO_ENDPOINT=http://localhost:4566'       >> .env.local &&
         echo 'VITE_TENANT_ID=asd1'                               >> .env.local &&
         npm install &&
