@@ -2,7 +2,30 @@
  * Server HTTP locale per sviluppo (NON usato in produzione Lambda).
  * Usa http module nativo per evitare dipendenze aggiuntive.
  * Mappa le request HTTP alle stesse Lambda handler di produzione.
+ *
+ * Carica automaticamente backend/.env se presente.
+ * Avvio: npx tsx src/local/server.ts
  */
+
+// Carica .env dalla root del backend (se esiste) prima di tutto il resto
+import { existsSync, readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const envPath = resolve(__dirname, '../../.env');
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (!(key in process.env)) process.env[key] = val;
+  }
+  console.log(`Loaded env from ${envPath}`);
+}
 
 import http from 'http';
 import { handler as sociHandler } from '../handlers/soci.js';
