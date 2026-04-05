@@ -65,6 +65,7 @@ services:
       KC_HTTP_ENABLED: "true"
     ports:
       - "8080:8080"
+      - "9000:9000"
     depends_on:
       keycloak-db:
         condition: service_healthy
