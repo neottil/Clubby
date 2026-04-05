@@ -1,0 +1,207 @@
+/**
+ * Server HTTP — usato sia in sviluppo locale che in produzione (container Docker/Kubernetes).
+ *
+ * Carica automaticamente .env se presente (utile in locale senza docker-compose env injection).
+ * In produzione le variabili d'ambiente vengono iniettate dal container runtime.
+ *
+ * Avvio locale:  npm run dev      (tsx con hot reload)
+ * Avvio prod:    npm start        (node dist/server.js dopo build)
+ */
+
+import { existsSync, readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+// Carica .env solo se il file esiste (locale senza env injection)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const envPath = resolve(__dirname, '../.env');
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    // Non sovrascrive variabili già iniettate dal container runtime
+    if (!(key in process.env)) process.env[key] = val;
+  }
+  console.log(`[env] Loaded from ${envPath}`);
+}
+
+import http from 'http';
+import { verifyToken, type RequestEvent } from './middleware/auth.js';
+import { handler as sociHandler } from './handlers/soci.js';
+import { handler as incontriHandler } from './handlers/incontri.js';
+import { handler as buoniHandler } from './handlers/buoni.js';
+import { handler as adminHandler } from './handlers/admin.js';
+import { handler as authHandler } from './handlers/auth.js';
+
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
+const HOST = process.env.HOST ?? '0.0.0.0'; // 0.0.0.0 necessario nei container
+
+// ---------------------------------------------------------------------------
+// Routing — mappa path → handler + parametri estratti
+// ---------------------------------------------------------------------------
+interface RouteMatch {
+  handler: (event: RequestEvent) => Promise<unknown>;
+  params: Record<string, string>;
+}
+
+const ROUTES: Array<{
+  pattern: RegExp;
+  handler: (event: RequestEvent) => Promise<unknown>;
+  param: string | null;
+}> = [
+  { pattern: /^\/api\/auth\/register$/,              handler: authHandler,      param: null },
+  { pattern: /^\/api\/soci\/([^/]+)$/,               handler: sociHandler,      param: 'id' },
+  { pattern: /^\/api\/soci$/,                        handler: sociHandler,      param: null },
+  { pattern: /^\/api\/incontri\/([^/]+)$/,           handler: incontriHandler,  param: 'id' },
+  { pattern: /^\/api\/incontri$/,                    handler: incontriHandler,  param: null },
+  { pattern: /^\/api\/buoni\/([^/]+)\/movimenti$/,   handler: buoniHandler,     param: 'id' },
+  { pattern: /^\/api\/buoni\/([^/]+)$/,              handler: buoniHandler,     param: 'id' },
+  { pattern: /^\/api\/buoni$/,                       handler: buoniHandler,     param: null },
+  { pattern: /^\/api\/admin/,                        handler: adminHandler,     param: null },
+];
+
+function route(pathname: string): RouteMatch | null {
+  for (const { pattern, handler, param } of ROUTES) {
+    const match = pathname.match(pattern);
+    if (match) {
+      return { handler, params: param ? { [param]: match[1] } : {} };
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Costruisce il RequestEvent dalla request HTTP nativa
+// ---------------------------------------------------------------------------
+function buildEvent(
+  req: http.IncomingMessage,
+  body: string,
+  params: Record<string, string>,
+  claims: Record<string, unknown>,
+): RequestEvent {
+  const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
+  const queryStringParameters: Record<string, string> = {};
+  url.searchParams.forEach((v, k) => { queryStringParameters[k] = v; });
+
+  return {
+    version: '2.0',
+    routeKey: `${req.method} ${url.pathname}`,
+    rawPath: url.pathname,
+    rawQueryString: url.search.slice(1),
+    headers: req.headers as Record<string, string>,
+    queryStringParameters,
+    pathParameters: params,
+    body: body || undefined,
+    requestContext: {
+      http: {
+        method: req.method ?? 'GET',
+        path: url.pathname,
+      },
+      authorizer: {
+        jwt: { claims },
+      },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// CORS headers
+// ---------------------------------------------------------------------------
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? '*';
+
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': CORS_ORIGIN,
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+};
+
+// ---------------------------------------------------------------------------
+// Server
+// ---------------------------------------------------------------------------
+const server = http.createServer(async (req, res) => {
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, CORS_HEADERS);
+    res.end();
+    return;
+  }
+
+  const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
+
+  // Health check — usato da Docker/Kubernetes liveness probe (no auth richiesta)
+  if (url.pathname === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
+
+  // Leggi body
+  const bodyChunks: Buffer[] = [];
+  await new Promise<void>(resolve => {
+    req.on('data', chunk => bodyChunks.push(chunk));
+    req.on('end', resolve);
+  });
+  const body = Buffer.concat(bodyChunks).toString();
+
+  // Routing
+  const matched = route(url.pathname);
+  if (!matched) {
+    res.writeHead(404, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+    res.end(JSON.stringify({ error: 'Not found' }));
+    return;
+  }
+
+  // Autenticazione JWT — verifica firma via JWKS Keycloak
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.writeHead(401, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+    res.end(JSON.stringify({ error: 'Token mancante' }));
+    return;
+  }
+
+  let claims: Record<string, unknown>;
+  try {
+    claims = await verifyToken(authHeader.slice(7)) as unknown as Record<string, unknown>;
+  } catch {
+    res.writeHead(401, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+    res.end(JSON.stringify({ error: 'Token non valido o scaduto' }));
+    return;
+  }
+
+  // Esegui handler
+  try {
+    const event = buildEvent(req, body, matched.params, claims);
+    const result = await matched.handler(event) as { statusCode: number; headers?: Record<string, string>; body?: string };
+    res.writeHead(result.statusCode ?? 200, {
+      'Content-Type': 'application/json',
+      ...CORS_HEADERS,
+      ...result.headers,
+    });
+    res.end(result.body ?? '');
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Errore interno';
+    console.error('[server] Unhandled error:', err);
+    res.writeHead(500, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+    res.end(JSON.stringify({ error: message }));
+  }
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`[server] ClubManager API listening on http://${HOST}:${PORT}`);
+  console.log(`[server] Keycloak: ${process.env.KEYCLOAK_URL ?? 'http://localhost:8080'}`);
+  console.log(`[server] DB: ${process.env.DB_HOST ?? 'localhost'}:${process.env.DB_PORT ?? 5432}/${process.env.DB_NAME ?? 'clubmanager'}`);
+  console.log(`[server] CORS origin: ${CORS_ORIGIN}`);
+});
+
+// Graceful shutdown — necessario in Kubernetes per evitare richieste perse al SIGTERM
+process.on('SIGTERM', () => {
+  console.log('[server] SIGTERM received, closing...');
+  server.close(() => {
+    console.log('[server] Closed.');
+    process.exit(0);
+  });
+});
