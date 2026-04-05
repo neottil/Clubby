@@ -151,14 +151,11 @@ echo "▶ Creo utente admin di test (admin@clubmanager.local)..."
 kc_api POST "/$REALM/users" "{
   \"username\": \"admin@clubmanager.local\",
   \"email\": \"admin@clubmanager.local\",
+  \"firstName\": \"Admin\",
+  \"lastName\": \"ClubManager\",
   \"emailVerified\": true,
   \"enabled\": true,
-  \"requiredActions\": [],
-  \"credentials\": [{
-    \"type\": \"password\",
-    \"value\": \"Admin1234!\",
-    \"temporary\": false
-  }]
+  \"requiredActions\": []
 }" 2>/dev/null || echo "  (utente admin già esistente, salto)"
 
 # Imposta password admin separatamente (più affidabile della creazione inline in KC26)
@@ -180,14 +177,11 @@ echo "▶ Creo utente viewer di test (viewer@clubmanager.local)..."
 kc_api POST "/$REALM/users" "{
   \"username\": \"viewer@clubmanager.local\",
   \"email\": \"viewer@clubmanager.local\",
+  \"firstName\": \"Viewer\",
+  \"lastName\": \"ClubManager\",
   \"emailVerified\": true,
   \"enabled\": true,
-  \"requiredActions\": [],
-  \"credentials\": [{
-    \"type\": \"password\",
-    \"value\": \"Viewer1234!\",
-    \"temporary\": false
-  }]
+  \"requiredActions\": []
 }" 2>/dev/null || echo "  (utente viewer già esistente, salto)"
 
 # Imposta password viewer separatamente
