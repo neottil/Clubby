@@ -63,16 +63,6 @@ async function buildEvent(req: http.IncomingMessage, body: string, pathParams: R
   };
 }
 
-// Mock admin claims in Keycloak format
-const MOCK_ADMIN_CLAIMS = {
-  sub: 'local-admin-00000000',
-  preferred_username: 'local-admin',
-  email: 'admin@clubmanager.local',
-  realm_access: { roles: ['admin'] },
-  iat: Math.floor(Date.now() / 1000),
-  exp: Math.floor(Date.now() / 1000) + 3600,
-};
-
 // Routing
 function route(path: string, method: string): { handler: Function; params: Record<string, string> } | null {
   const patterns = [
@@ -125,16 +115,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Auth: try to verify real JWT, fall back to mock admin
-  let claims: any = MOCK_ADMIN_CLAIMS;
+  // Auth: verifica JWT reale tramite JWKS di Keycloak
   const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    try {
-      const keycloakClaims = await verifyToken(authHeader.slice(7));
-      claims = keycloakClaims;
-    } catch (err) {
-      console.warn('JWT verification failed, using mock admin:', (err as Error).message);
-    }
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ error: 'Token mancante' }));
+    return;
+  }
+
+  let claims: any;
+  try {
+    claims = await verifyToken(authHeader.slice(7));
+  } catch (err) {
+    res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ error: 'Token non valido o scaduto' }));
+    return;
   }
 
   try {
@@ -153,7 +148,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`ClubManager local server running on http://localhost:${PORT}`);
-  console.log('Using Keycloak JWT verification (falls back to mock admin)');
+  console.log('Using Keycloak JWT verification (http://localhost:8080)');
   console.log('Endpoints:');
   console.log('  GET/POST   /api/soci');
   console.log('  GET/PUT/DELETE /api/soci/:id');
