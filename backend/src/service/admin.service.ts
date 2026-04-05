@@ -130,6 +130,20 @@ export async function promuoviAdmin(keycloakUserId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------
+// Assegna ruolo viewer a un utente Keycloak
+// ---------------------------------------------------------------
+export async function assegnaRuoloViewer(keycloakUserId: string): Promise<void> {
+  const role = await getRealmRole('viewer');
+  const res = await keycloakAdminFetch(`/users/${keycloakUserId}/role-mappings/realm`, {
+    method: 'POST',
+    body: JSON.stringify([role]),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to assign viewer role: ${res.status}`);
+  }
+}
+
+// ---------------------------------------------------------------
 // Associa un viewer Keycloak a un socio
 // ---------------------------------------------------------------
 export async function associaViewerASocio(

@@ -8,13 +8,61 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 - Gestione incontri
 - Buoni prepagati
 
-## Stack
+## Architettura
 
 - **Frontend**: React 19 + Vite + TypeScript
-- **Backend**: Node.js 22 + Express (local) / handler compatibili con API Gateway
+- **Backend**: Node.js 22, server Express-like nativo per locale, handler compatibili con qualsiasi runtime in prod
 - **Database**: PostgreSQL 16
-- **Autenticazione**: Keycloak 26 (OIDC, PKCE, realm roles)
-- **Deploy target**: Docker / Kubernetes su VPC privata
+- **Autenticazione**: Keycloak 26 (OIDC Authorization Code Flow + PKCE)
+- **Deploy target**: Docker / Kubernetes su VPC privata (nessuna dipendenza AWS)
+
+## Modello utenti e ruoli
+
+### Ruoli Keycloak
+
+- **admin**: vede e gestisce i dati di tutti i soci. Può promuovere altri utenti ad admin. Viene creato tramite script init.
+- **viewer**: vede solo i propri dati (soci, incontri, buoni, movimenti). Viene assegnato automaticamente alla registrazione.
+
+### Registrazione
+
+1. Il socio clicca "Registrati" → viene reindirizzato a Keycloak (standard registration form)
+2. Keycloak crea l'utente nel proprio DB
+3. Dopo il login il frontend chiama `POST /api/auth/register` con nome e cognome
+4. Il backend assegna automaticamente il ruolo `viewer` e crea il record socio nel DB
+5. Il socio può ora accedere ai propri dati
+
+### Admin principale
+
+Creato da `scripts/init-keycloak.sh` — credenziali: admin@clubmanager.local / Admin1234!
+
+Un admin può promuovere qualsiasi utente viewer ad admin tramite `POST /api/admin/promuovi`.
+
+## API Endpoints
+
+Tutte le API richiedono un JWT Keycloak valido (Bearer token).
+
+| Metodo | Path | Descrizione | Ruolo richiesto |
+|--------|------|-------------|-----------------|
+| POST | `/api/auth/register` | Registrazione post-login (crea socio + assegna viewer) | Qualsiasi JWT valido |
+| GET | `/api/soci` | Lista soci (admin: tutti, viewer: solo il proprio) | admin / viewer |
+| POST | `/api/soci` | Crea socio manualmente | admin |
+| GET | `/api/soci/:id` | Dettaglio socio | admin / viewer (solo il proprio) |
+| PUT | `/api/soci/:id` | Modifica socio | admin |
+| DELETE | `/api/soci/:id` | Elimina socio | admin |
+| GET | `/api/incontri` | Lista incontri (admin: tutti, viewer: solo i propri) | admin / viewer |
+| POST | `/api/incontri` | Crea incontro | admin |
+| GET | `/api/incontri/:id` | Dettaglio incontro | admin / viewer (solo il proprio) |
+| PUT | `/api/incontri/:id` | Modifica incontro | admin |
+| DELETE | `/api/incontri/:id` | Elimina incontro | admin |
+| GET | `/api/buoni` | Lista buoni (admin: tutti, viewer: solo i propri) | admin / viewer |
+| POST | `/api/buoni` | Crea buono | admin |
+| GET | `/api/buoni/:id` | Dettaglio buono | admin / viewer (solo il proprio) |
+| GET | `/api/buoni/:id/movimenti` | Movimenti buono | admin / viewer (solo il proprio) |
+| POST | `/api/buoni/:id/movimenti` | Aggiungi movimento | admin |
+| GET | `/api/admin/users` | Lista utenti Keycloak | admin |
+| POST | `/api/admin/associa-viewer` | Associa viewer a socio (body: socio_id, keycloak_user_id) | admin |
+| DELETE | `/api/admin/associa-viewer/:socioId` | Disassocia viewer da socio | admin |
+| POST | `/api/admin/promuovi` | Promuovi utente ad admin (body: keycloak_user_id) | admin |
 
 ## Sviluppo locale
 
@@ -80,19 +128,13 @@ http://localhost:8080 → admin / admin
 | `make logs-kc` | Log Keycloak |
 | `make logs-pg` | Log PostgreSQL |
 
-## Multi-tenant
-
-Ogni tenant (ASD) è isolato. La configurazione del tenant avviene tramite variabili d'ambiente:
-- `TENANT` / `VITE_TENANT_ID`: identificativo del tenant
-- Ogni tenant ha il proprio realm Keycloak, database e deploy
-
 ## Struttura progetto
 
 ```
 ClubManager/
 ├── backend/
 │   ├── src/
-│   │   ├── handlers/       # Handler HTTP (soci, incontri, buoni, admin)
+│   │   ├── handlers/       # Handler HTTP (soci, incontri, buoni, admin, auth)
 │   │   ├── service/        # Business logic
 │   │   ├── middleware/      # Auth (Keycloak JWT), response helpers, error classes
 │   │   ├── db/             # Database client (pg Pool) + schema SQL
@@ -113,35 +155,23 @@ ClubManager/
 └── Makefile
 ```
 
-## API Endpoints
+## Multi-tenant
 
-| Metodo | Path | Handler | Descrizione |
-|--------|------|---------|-------------|
-| GET/POST | `/api/soci` | soci | Lista / Crea socio |
-| GET/PUT/DELETE | `/api/soci/:id` | soci | Dettaglio / Modifica / Elimina |
-| GET/POST | `/api/incontri` | incontri | Lista / Crea incontro |
-| GET/PUT/DELETE | `/api/incontri/:id` | incontri | Dettaglio / Modifica / Elimina |
-| GET/POST | `/api/buoni` | buoni | Lista / Crea buono |
-| GET | `/api/buoni/:id` | buoni | Dettaglio buono |
-| GET/POST | `/api/buoni/:id/movimenti` | buoni | Movimenti del buono |
-| GET | `/api/admin/users` | admin | Lista utenti Keycloak |
-| POST | `/api/admin/associa-viewer` | admin | Associa viewer a socio |
-| DELETE | `/api/admin/associa-viewer/:socioId` | admin | Disassocia viewer |
-| POST | `/api/admin/promuovi` | admin | Promuovi utente ad admin |
-
-Tutte le API richiedono un JWT Keycloak valido (Bearer token).
+Ogni tenant (ASD) è isolato. La configurazione del tenant avviene tramite variabili d'ambiente:
+- `TENANT` / `VITE_TENANT_ID`: identificativo del tenant
+- Ogni tenant ha il proprio realm Keycloak, database e deploy
 
 ## Deploy (VPC / Kubernetes)
 
-Per il deploy in produzione:
-
-- **Keycloak**: impostare `KC_PROXY=edge` (TLS termination a livello load balancer), `KC_HOSTNAME=https://auth.yourdomain.com`
-- **Backend**: connessione diretta a Postgres via pg (`DB_HOST` punta al servizio Postgres nel cluster)
+- **Keycloak**: `KC_PROXY=edge` se dietro load balancer HTTPS, `KC_HOSTNAME=https://auth.tuodominio.com`
+- **Backend**: variabile d'ambiente `DB_HOST` punta al servizio Postgres nel cluster
 - **JWT verification**: API Gateway o ingress controller verifica il token JWT via JWKS di Keycloak
 - **Secrets**: usare il secret manager del provider cloud scelto
 - **Database**: PostgreSQL 16 gestito (RDS, Cloud SQL, o self-hosted)
+- Nessuna dipendenza AWS di nessun tipo
 
-Variabili d'ambiente da configurare per ogni ambiente:
+### Variabili d'ambiente
+
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
 - `KEYCLOAK_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_ADMIN_CLIENT_ID`, `KEYCLOAK_ADMIN_CLIENT_SECRET`
 - `VITE_KEYCLOAK_URL`, `VITE_KEYCLOAK_REALM`, `VITE_KEYCLOAK_CLIENT_ID`, `VITE_API_BASE_URL`

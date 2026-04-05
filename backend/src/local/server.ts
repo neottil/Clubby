@@ -33,6 +33,7 @@ import { handler as sociHandler } from '../handlers/soci.js';
 import { handler as incontriHandler } from '../handlers/incontri.js';
 import { handler as buoniHandler } from '../handlers/buoni.js';
 import { handler as adminHandler } from '../handlers/admin.js';
+import { handler as authHandler } from '../handlers/auth.js';
 
 const PORT = process.env.PORT ?? 3000;
 
@@ -73,6 +74,7 @@ function route(path: string, method: string): { handler: Function; params: Recor
     { pattern: /^\/api\/buoni\/([^/]+)\/movimenti$/, handler: buoniHandler, param: 'id' },
     { pattern: /^\/api\/buoni\/([^/]+)$/,    handler: buoniHandler, param: 'id' },
     { pattern: /^\/api\/buoni$/,             handler: buoniHandler, param: null },
+    { pattern: /^\/api\/auth\/register$/, handler: authHandler, param: null },
     { pattern: /^\/api\/admin/,              handler: adminHandler, param: null },
   ];
 
@@ -157,5 +159,6 @@ server.listen(PORT, () => {
   console.log('  GET/POST   /api/buoni');
   console.log('  GET        /api/buoni/:id');
   console.log('  GET/POST   /api/buoni/:id/movimenti');
+  console.log('  POST       /api/auth/register');
   console.log('  GET/POST/DELETE /api/admin/*');
 });
