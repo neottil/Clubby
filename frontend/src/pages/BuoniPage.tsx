@@ -84,8 +84,9 @@ export default function BuoniPage() {
       setShowMovForm(false);
       await loadMovimenti(selectedBuono);
       // Aggiorna saldo nella lista
-      const updated = await api.getBuono(selectedBuono.id);
-      setBuoni(prev => prev.map(b => b.id === updated.id ? updated : b));
+      const updatedBuoni = await api.getBuoni();
+      const updated = updatedBuoni.find(b => b.id === selectedBuono.id) ?? selectedBuono;
+      setBuoni(updatedBuoni);
       setSelectedBuono(updated);
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
@@ -108,7 +109,7 @@ export default function BuoniPage() {
             <label style={styles.label}>Socio</label>
             <select style={styles.input} value={buonoForm.socio_id} onChange={e => setBuonoForm({ ...buonoForm, socio_id: e.target.value })}>
               <option value=''>— Seleziona —</option>
-              {soci.map(s => <option key={s.id} value={s.id}>{s.cognome} {s.nome}</option>)}
+              {soci.filter(s => !buoni.some(b => b.socio_id === s.id)).map(s => <option key={s.id} value={s.id}>{s.cognome} {s.nome}</option>)}
             </select>
           </div>
           <div style={styles.field}>

@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS buono (
   updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_buono_socio ON buono(socio_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_buono_socio ON buono(socio_id);
 
 -- ============================================================
 -- Tabella: movimento_buono

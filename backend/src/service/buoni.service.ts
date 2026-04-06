@@ -84,6 +84,14 @@ export async function createBuono(input: CreateBuonoInput): Promise<Buono> {
 
   await getSocioById(input.socio_id);
 
+  const existing = await query(
+    `SELECT id FROM buono WHERE socio_id = :socio_id LIMIT 1`,
+    { socio_id: input.socio_id }
+  );
+  if (existing.rows.length > 0) {
+    throw new BadRequestError('Il socio ha già un buono attivo');
+  }
+
   const result = await query(
     `INSERT INTO buono (socio_id, saldo_iniziale, note)
      VALUES (:socio_id, :saldo_iniziale, :note)

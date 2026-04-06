@@ -66,7 +66,6 @@ export function createApiClient(token: string | null) {
 
     // Buoni
     getBuoni:       (socioId?: string)    => request<any[]>(`/api/buoni${socioId ? `?socio_id=${socioId}` : ''}`, {}, token),
-    getBuono:       (id: string)          => request<any>(`/api/buoni/${id}`, {}, token),
     createBuono:    (body: any)           => request<any>('/api/buoni', { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Movimenti

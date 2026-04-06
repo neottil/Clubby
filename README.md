@@ -55,8 +55,7 @@ Tutte le API richiedono un JWT Keycloak valido (Bearer token).
 | PUT | `/api/incontri/:id` | Modifica incontro | admin |
 | DELETE | `/api/incontri/:id` | Elimina incontro | admin |
 | GET | `/api/buoni` | Lista buoni (admin: tutti, viewer: solo i propri) | admin / viewer |
-| POST | `/api/buoni` | Crea buono | admin |
-| GET | `/api/buoni/:id` | Dettaglio buono | admin / viewer (solo il proprio) |
+| POST | `/api/buoni` | Crea buono (un solo buono per socio) | admin |
 | GET | `/api/buoni/:id/movimenti` | Movimenti buono | admin / viewer (solo il proprio) |
 | POST | `/api/buoni/:id/movimenti` | Aggiungi movimento | admin |
 | GET | `/api/admin/users` | Lista utenti Keycloak | admin |

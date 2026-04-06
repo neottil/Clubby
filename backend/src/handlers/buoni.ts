@@ -1,5 +1,5 @@
 /**
- * Handler: /api/buoni, /api/buoni/{id}, /api/buoni/{id}/movimenti
+ * Handler: /api/buoni, /api/buoni/{id}/movimenti
  * Ruoli: admin (tutti), viewer (solo i propri buoni)
  */
 
@@ -49,17 +49,6 @@ export const handler = async (
       } else {
         return ok(await listBuoni(viewerSocioId!));
       }
-    }
-
-    // -----------------------------------------------------------
-    // GET /api/buoni/{id}
-    // -----------------------------------------------------------
-    if (method === 'GET' && buonoId && !isMovimentiRoute) {
-      const buono = await getBuonoById(buonoId);
-      if (auth.role === 'viewer' && buono.socio_id !== viewerSocioId) {
-        throw new ForbiddenError();
-      }
-      return ok(buono);
     }
 
     // -----------------------------------------------------------
