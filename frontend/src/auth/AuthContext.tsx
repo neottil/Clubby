@@ -2,7 +2,7 @@
  * Contesto di autenticazione Keycloak (Authorization Code Flow + PKCE)
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { config, getKeycloakAuthorizeUrl, getKeycloakLogoutUrl, getKeycloakRegistrationUrl, getKeycloakTokenUrl } from '../config';
 
 interface TokenSet {
@@ -81,6 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return raw ? JSON.parse(raw) : null;
   });
   const [isLoading, setIsLoading] = useState(false);
+  const exchangeStarted = useRef(false);
 
   const saveTokens = (ts: TokenSet) => {
     sessionStorage.setItem(TOKEN_KEY, JSON.stringify(ts));
@@ -92,7 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setTokenSet(null);
   };
 
-  // Scambia authorization code con token
+  // Scambia authorization code con token e registra il socio nel DB
   const exchangeCode = useCallback(async (code: string) => {
     setIsLoading(true);
     try {
@@ -116,6 +117,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!res.ok) throw new Error('Token exchange fallito');
 
       const data = await res.json();
+      sessionStorage.removeItem('cm_pkce_verifier');
+
       saveTokens({
         accessToken:  data.access_token,
         idToken:      data.id_token,
@@ -123,7 +126,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         expiresAt:    Date.now() + data.expires_in * 1000,
       });
 
-      sessionStorage.removeItem('cm_pkce_verifier');
+      // Crea il socio nel DB (idempotente: se esiste già restituisce quello esistente)
+      const claims = decodeJwt(data.id_token) as any;
+      await fetch(`${config.apiBaseUrl}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${data.access_token}`,
+        },
+        body: JSON.stringify({
+          nome:    claims.given_name  ?? '',
+          cognome: claims.family_name ?? '',
+          email:   claims.email       ?? '',
+        }),
+      });
     } finally {
       setIsLoading(false);
     }
@@ -134,9 +150,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const url = new URL(window.location.href);
     const code = url.searchParams.get('code');
     if (code && window.location.pathname === '/callback') {
-      exchangeCode(code).then(() => {
-        window.history.replaceState({}, '', '/');
-      });
+      if (exchangeStarted.current) return;
+      exchangeStarted.current = true;
+      exchangeCode(code);
     }
   }, [exchangeCode]);
 

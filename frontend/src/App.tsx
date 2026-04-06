@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
@@ -8,8 +9,15 @@ import BuoniPage from './pages/BuoniPage';
 import AdminPage from './pages/AdminPage';
 
 function CallbackPage() {
-  // Gestisce il redirect OAuth: il codice è intercettato da AuthContext
-  const { isLoading } = useAuth();
+  const { user, isLoading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isLoading && user) {
+      navigate('/', { replace: true });
+    }
+  }, [isLoading, user, navigate]);
+
   return <div style={{ padding: 64, textAlign: 'center' }}>{isLoading ? 'Autenticazione in corso...' : 'Reindirizzamento...'}</div>;
 }
 
