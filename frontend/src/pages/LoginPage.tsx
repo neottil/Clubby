@@ -1,4 +1,5 @@
 import { useAuth } from '../auth/AuthContext';
+import { config } from '../config';
 
 export default function LoginPage() {
   const { login, isLoading } = useAuth();
@@ -7,7 +8,7 @@ export default function LoginPage() {
     <div style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.title}>ClubManager</h1>
-        <p style={styles.subtitle}>Gestione soci e incontri</p>
+        <p style={styles.subtitle}>{config.tenantName}</p>
         <button
           style={styles.button}
           onClick={login}

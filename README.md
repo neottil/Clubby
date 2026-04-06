@@ -196,7 +196,7 @@ ClubManager/
 ## Multi-tenant
 
 Ogni tenant (ASD) è isolato. La configurazione del tenant avviene tramite variabili d'ambiente:
-- `TENANT` / `VITE_TENANT_ID`: identificativo del tenant
+- `VITE_TENANT_NAME`: nome visualizzato del tenant (es. "ASD Roma")
 - Ogni tenant ha il proprio realm Keycloak, database e deploy
 
 ## Deploy (VPC / Kubernetes)
