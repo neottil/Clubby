@@ -7,24 +7,32 @@
  * Locale (docker-compose / .env.local):
  *   VITE_API_BASE_URL          = http://localhost:3000
  *   VITE_KEYCLOAK_URL          = http://localhost:8080
- *   VITE_KEYCLOAK_REALM        = clubmanager
- *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa
- *   VITE_TENANT_ID             = asd1
+ *   VITE_KEYCLOAK_REALM        = clubmanager          (obbligatoria)
+ *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa      (obbligatoria)
+ *   VITE_TENANT_NAME           = La mia ASD           (obbligatoria)
  *
  * Produzione:
  *   VITE_API_BASE_URL          = https://api.<dominio>
  *   VITE_KEYCLOAK_URL          = https://auth.<dominio>
- *   VITE_KEYCLOAK_REALM        = clubmanager
- *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa
- *   VITE_TENANT_ID             = asd1
+ *   VITE_KEYCLOAK_REALM        = clubmanager          (obbligatoria)
+ *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa      (obbligatoria)
+ *   VITE_TENANT_NAME           = La mia ASD           (obbligatoria)
  */
 
+function requireEnv(name: string): string {
+  const value = import.meta.env[name];
+  if (!value) {
+    throw new Error(`[config] Variabile d'ambiente obbligatoria non impostata: ${name}`);
+  }
+  return value as string;
+}
+
 export const config = {
-  apiBaseUrl:       import.meta.env.VITE_API_BASE_URL       ?? 'http://localhost:3000',
-  keycloakUrl:      import.meta.env.VITE_KEYCLOAK_URL       ?? 'http://localhost:8080',
-  keycloakRealm:    import.meta.env.VITE_KEYCLOAK_REALM     ?? 'clubmanager',
-  keycloakClientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID ?? 'clubmanager-spa',
-  tenantId:         import.meta.env.VITE_TENANT_ID           ?? 'asd1',
+  apiBaseUrl:       requireEnv('VITE_API_BASE_URL'),
+  keycloakUrl:      requireEnv('VITE_KEYCLOAK_URL'),
+  keycloakRealm:    requireEnv('VITE_KEYCLOAK_REALM'),
+  keycloakClientId: requireEnv('VITE_KEYCLOAK_CLIENT_ID'),
+  tenantName:       requireEnv('VITE_TENANT_NAME'),
 } as const;
 
 /** Base URL for Keycloak OIDC endpoints */

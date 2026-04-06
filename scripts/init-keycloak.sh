@@ -16,10 +16,37 @@
 
 set -e
 
-KEYCLOAK_URL="http://localhost:8080"
-REALM="clubmanager"
-ADMIN_USER="admin"
-ADMIN_PASS="admin"
+DEFAULT_KEYCLOAK_URL="http://localhost:8080"
+DEFAULT_REALM="clubmanager"
+DEFAULT_ADMIN_USER="admin"
+DEFAULT_ADMIN_PASS="admin"
+DEFAULT_TENANT_NAME="ClubManager"
+DEFAULT_API_BASE_URL="http://localhost:3000"
+
+echo "=== Configurazione ==="
+echo "(premi Invio per accettare i valori predefiniti)"
+echo ""
+
+read -rp "  Keycloak URL         [${DEFAULT_KEYCLOAK_URL}]: " input
+KEYCLOAK_URL="${input:-$DEFAULT_KEYCLOAK_URL}"
+
+read -rp "  Keycloak realm       [${DEFAULT_REALM}]: " input
+REALM="${input:-$DEFAULT_REALM}"
+
+read -rp "  Keycloak admin user  [${DEFAULT_ADMIN_USER}]: " input
+ADMIN_USER="${input:-$DEFAULT_ADMIN_USER}"
+
+read -rsp "  Keycloak admin pass  [${DEFAULT_ADMIN_PASS}]: " input
+echo ""
+ADMIN_PASS="${input:-$DEFAULT_ADMIN_PASS}"
+
+read -rp "  Backend API base URL [${DEFAULT_API_BASE_URL}]: " input
+API_BASE_URL="${input:-$DEFAULT_API_BASE_URL}"
+
+read -rp "  Nome tenant          [${DEFAULT_TENANT_NAME}]: " input
+TENANT_NAME="${input:-$DEFAULT_TENANT_NAME}"
+
+echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -200,11 +227,11 @@ fi
 
 # Scrivi frontend/.env.local
 cat > "$ROOT_DIR/frontend/.env.local" << EOF
-VITE_API_BASE_URL=http://localhost:3000
-VITE_KEYCLOAK_URL=http://localhost:8080
-VITE_KEYCLOAK_REALM=clubmanager
+VITE_API_BASE_URL=$API_BASE_URL
+VITE_KEYCLOAK_URL=$KEYCLOAK_URL
+VITE_KEYCLOAK_REALM=$REALM
 VITE_KEYCLOAK_CLIENT_ID=clubmanager-spa
-VITE_TENANT_ID=asd1
+VITE_TENANT_NAME=$TENANT_NAME
 EOF
 
 # Scrivi backend/.env
@@ -215,12 +242,11 @@ DB_NAME=clubmanager
 DB_USER=clubmanager
 DB_PASSWORD=clubmanager
 
-KEYCLOAK_URL=http://localhost:8080
-KEYCLOAK_REALM=clubmanager
+KEYCLOAK_URL=$KEYCLOAK_URL
+KEYCLOAK_REALM=$REALM
 KEYCLOAK_ADMIN_CLIENT_ID=clubmanager-backend
 KEYCLOAK_ADMIN_CLIENT_SECRET=clubmanager-backend-secret
 
-TENANT=local
 PORT=3000
 EOF
 
