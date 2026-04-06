@@ -71,10 +71,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q 'UP' <&3"]
-      interval: 15s
+      interval: 10s
       timeout: 10s
-      retries: 20
-      start_period: 90s
+      retries: 5
+      start_period: 30s
 
 volumes:
   postgres_data:

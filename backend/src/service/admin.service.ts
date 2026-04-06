@@ -29,7 +29,7 @@ async function getAdminToken(): Promise<string> {
     return cachedToken.token;
   }
 
-  const tokenUrl = `${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token`;
+  const tokenUrl = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`;
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
     client_id: KEYCLOAK_ADMIN_CLIENT_ID,
@@ -88,6 +88,8 @@ export async function listKeycloakUsers(): Promise<KeycloakUser[]> {
       return {
         sub: u.id,
         email: u.email ?? u.username ?? '',
+        firstName: u.firstName,
+        lastName: u.lastName,
         groups,
         enabled: u.enabled ?? true,
       };
