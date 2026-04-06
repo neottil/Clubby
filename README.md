@@ -165,7 +165,7 @@ Ogni tenant (ASD) è isolato. La configurazione del tenant avviene tramite varia
 
 - **Keycloak**: `KC_PROXY=edge` se dietro load balancer HTTPS, `KC_HOSTNAME=https://auth.tuodominio.com`
 - **Backend**: variabile d'ambiente `DB_HOST` punta al servizio Postgres nel cluster
-- **JWT verification**: API Gateway o ingress controller verifica il token JWT via JWKS di Keycloak
+- **JWT verification**: il backend verifica il token JWT via JWKS di Keycloak (ingress opzionale)
 - **Secrets**: usare il secret manager del provider cloud scelto
 - **Database**: PostgreSQL 16 gestito (RDS, Cloud SQL, o self-hosted)
 - Nessuna dipendenza AWS di nessun tipo

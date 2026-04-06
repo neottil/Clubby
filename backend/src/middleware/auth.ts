@@ -2,7 +2,7 @@
  * Middleware di autenticazione e autorizzazione
  *
  * Estrae i claims JWT dal token Keycloak.
- * In prod: API Gateway / Ingress JWT Authorizer valida firma e scadenza.
+ * In prod: Ingress / reverse proxy valida firma e scadenza.
  * In locale: il server verifica via JWKS.
  */
 
@@ -26,7 +26,7 @@ export interface AuthContext {
   role: UserRole;
 }
 
-/** Minimal request event interface (compatible with API Gateway v2 shape) */
+/** Minimal request event interface */
 export interface RequestEvent {
   version?: string;
   routeKey?: string;
@@ -69,7 +69,7 @@ export async function verifyToken(token: string): Promise<KeycloakClaims> {
 
 /**
  * Estrae e decodifica i claims JWT dall'evento.
- * API Gateway HTTP API v2 / Ingress inietta i claims in requestContext.authorizer.jwt.claims
+ * Il server inietta i claims in requestContext.authorizer.jwt.claims dopo la verifica JWKS
  */
 export function getAuthContext(event: RequestEvent): AuthContext {
   const claims = event.requestContext?.authorizer?.jwt?.claims;
@@ -78,7 +78,7 @@ export function getAuthContext(event: RequestEvent): AuthContext {
     throw new UnauthorizedError('Token non presente o non valido');
   }
 
-  // realm_access may come as a JSON string from API Gateway
+  // realm_access può arrivare come stringa JSON serializzata
   let realmAccess: { roles: string[] } = { roles: [] };
   if (claims.realm_access) {
     realmAccess = typeof claims.realm_access === 'string'

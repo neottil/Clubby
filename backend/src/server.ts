@@ -61,7 +61,8 @@ const ROUTES: Array<{
   { pattern: /^\/api\/buoni\/([^/]+)\/movimenti$/,   handler: buoniHandler,     param: 'id' },
   { pattern: /^\/api\/buoni\/([^/]+)$/,              handler: buoniHandler,     param: 'id' },
   { pattern: /^\/api\/buoni$/,                       handler: buoniHandler,     param: null },
-  { pattern: /^\/api\/admin/,                        handler: adminHandler,     param: null },
+  { pattern: /^\/api\/admin\/associa-viewer\/([^/]+)$/, handler: adminHandler,   param: 'socioId' },
+  { pattern: /^\/api\/admin/,                          handler: adminHandler,   param: null },
 ];
 
 function route(pathname: string): RouteMatch | null {
