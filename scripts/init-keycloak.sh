@@ -111,7 +111,7 @@ echo "▶ Creo realm '$REALM'..."
 kc_api POST "" "{
   \"realm\": \"$REALM\",
   \"enabled\": true,
-  \"registrationAllowed\": false,
+  \"registrationAllowed\": true,
   \"loginWithEmailAllowed\": true,
   \"duplicateEmailsAllowed\": false,
   \"resetPasswordAllowed\": true,
