@@ -102,6 +102,45 @@ Tutte le API richiedono un JWT Keycloak valido (Bearer token).
 
 5. Apri http://localhost:5173
 
+### Avvio in debug
+
+#### Backend
+Avviare da launch vscode
+
+#### Frontend
+Avviare l'app con npm run dev, avviare debugger da launch vscode
+
+#### .vscode/launch.json
+```
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Backend",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "src/server.ts"],
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "sourceMaps": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Frontend (Chrome debug)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend/src",
+      "sourceMapPathOverrides": {
+        "/@fs/*": "${workspaceFolder}/frontend/src/*"
+      }
+    }
+  ]
+}
+```
+
+
 ### Credenziali di test
 
 | Utente | Password | Ruolo |

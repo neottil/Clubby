@@ -1,7 +1,8 @@
 # Local history (IDE)
 .lh/
 .idea/
-.vscode/
+.vscode/*
+!.vscode/launch.json
 
 # Dependencies
 node_modules/
