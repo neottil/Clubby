@@ -3,7 +3,7 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { config, getKeycloakAuthorizeUrl, getKeycloakLogoutUrl, getKeycloakTokenUrl } from '../config';
+import { config, getKeycloakAuthorizeUrl, getKeycloakLogoutUrl, getKeycloakRegistrationUrl, getKeycloakTokenUrl } from '../config';
 
 interface TokenSet {
   accessToken: string;
@@ -24,6 +24,7 @@ interface AuthContextValue {
   token: string | null;
   isLoading: boolean;
   login: () => void;
+  register: () => void;
   logout: () => void;
 }
 
@@ -147,6 +148,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       `&code_challenge=${challenge}&code_challenge_method=S256`;
   }, []);
 
+  const register = useCallback(async () => {
+    const verifier   = await generateCodeVerifier();
+    const challenge  = await generateCodeChallenge(verifier);
+    sessionStorage.setItem('cm_pkce_verifier', verifier);
+    window.location.href = getKeycloakRegistrationUrl(REDIRECT_URI) +
+      `&code_challenge=${challenge}&code_challenge_method=S256`;
+  }, []);
+
   const logout = useCallback(() => {
     clearTokens();
     window.location.href = getKeycloakLogoutUrl(`${window.location.origin}/`);
@@ -156,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const token  = tokenSet?.accessToken ?? null;
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -56,6 +56,17 @@ export function getKeycloakTokenUrl(): string {
   return `${oidcBase()}/token`;
 }
 
+/** Keycloak registration endpoint (PKCE) — stessa callback del login */
+export function getKeycloakRegistrationUrl(redirectUri: string): string {
+  const params = new URLSearchParams({
+    client_id:    config.keycloakClientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope:        'openid email profile',
+  });
+  return `${oidcBase()}/registrations?${params.toString()}`;
+}
+
 /** Keycloak logout endpoint */
 export function getKeycloakLogoutUrl(redirectUri: string): string {
   const params = new URLSearchParams({

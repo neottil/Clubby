@@ -2,7 +2,7 @@ import { useAuth } from '../auth/AuthContext';
 import { config } from '../config';
 
 export default function LoginPage() {
-  const { login, isLoading } = useAuth();
+  const { login, register, isLoading } = useAuth();
 
   return (
     <div style={styles.container}>
@@ -15,6 +15,13 @@ export default function LoginPage() {
           disabled={isLoading}
         >
           {isLoading ? 'Caricamento...' : 'Accedi'}
+        </button>
+        <button
+          style={styles.buttonSecondary}
+          onClick={register}
+          disabled={isLoading}
+        >
+          Registrati
         </button>
       </div>
     </div>
@@ -57,5 +64,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: 'pointer',
     width: '100%',
+  },
+  buttonSecondary: {
+    background: 'transparent',
+    color: '#2563eb',
+    border: '1px solid #2563eb',
+    borderRadius: 8,
+    padding: '12px 32px',
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: 'pointer',
+    width: '100%',
+    marginTop: 12,
   },
 };
