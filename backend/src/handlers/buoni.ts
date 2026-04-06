@@ -45,9 +45,9 @@ export const handler = async (
     if (method === 'GET' && !buonoId) {
       if (auth.role === 'admin') {
         const socioId = event.queryStringParameters?.socio_id;
-        return ok(await listBuoni(socioId));
+        return ok(await listBuoni(socioId!));
       } else {
-        return ok(await listBuoni(viewerSocioId ?? undefined));
+        return ok(await listBuoni(viewerSocioId!));
       }
     }
 

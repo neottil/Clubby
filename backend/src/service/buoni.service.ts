@@ -46,19 +46,12 @@ function toMovimento(row: unknown): MovimentoBuono {
 // Buoni
 // ---------------------------------------------------------------
 
-export async function listBuoni(socioId?: string): Promise<Buono[]> {
-  const sql = socioId
-    ? `SELECT b.*,
+export async function listBuoni(socioId: string): Promise<Buono[]> {
+  const sql = `SELECT b.*,
               (b.saldo_iniziale + COALESCE(SUM(m.importo), 0)) AS saldo_residuo
        FROM buono b
        LEFT JOIN movimento_buono m ON m.buono_id = b.id
        WHERE b.socio_id = :socioId
-       GROUP BY b.id
-       ORDER BY b.data_creazione DESC`
-    : `SELECT b.*,
-              (b.saldo_iniziale + COALESCE(SUM(m.importo), 0)) AS saldo_residuo
-       FROM buono b
-       LEFT JOIN movimento_buono m ON m.buono_id = b.id
        GROUP BY b.id
        ORDER BY b.data_creazione DESC`;
 
