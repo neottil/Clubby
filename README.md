@@ -496,12 +496,12 @@ qui dopo il primo provisioning del namespace.
 | `VITE_KEYCLOAK_CLIENT_ID` | Client ID pubblico SPA, compilato nel bundle frontend | `clubmanager-spa` | Build & Deploy |
 | `VITE_TENANT_NAME` | Nome tenant visualizzato in UI, compilato nel bundle frontend | `ASD Roma` | Build & Deploy |
 | `VITE_ACTIVITY_SELECT_VALUES_MAPPING` | Mapping JSON attività→costo di default per il form "Nuovo incontro" (opzionale: se assente la select attività è vuota), compilato nel bundle frontend | `{"Dog Dance":20,"Mantrailing":20,"K9 Cross Training":25,"Educazione singolo":20,"Passeggiata":25,"Piscina":25}` | Build & Deploy |
-| `VITE_THEME_PRIMARY` | Colore primario (bottoni, link attivi) — opzionale, default il blu attuale | `#2563eb` | Build & Deploy |
+| `VITE_THEME_PRIMARY` | Colore primario (bottoni, link attivi) — opzionale, default il teal del logo | `#2ec4a6` | Build & Deploy |
 | `VITE_THEME_PRIMARY_TEXT` | Colore del testo sopra il colore primario — opzionale | `#ffffff` | Build & Deploy |
 | `VITE_THEME_DANGER` | Colore per importi negativi/azioni distruttive — opzionale | `#dc2626` | Build & Deploy |
 | `VITE_THEME_SUCCESS` | Colore per importi positivi/conferme — opzionale | `#16a34a` | Build & Deploy |
-| `VITE_THEME_NAV_BG` | Colore di sfondo della barra di navigazione — opzionale | `#1a1a2e` | Build & Deploy |
-| `VITE_THEME_NAV_TEXT` | Colore del testo/voci di menu sulla barra di navigazione — opzionale, da abbinare a `VITE_THEME_NAV_BG` per restare leggibile | `#c0c0d0` | Build & Deploy |
+| `VITE_THEME_NAV_BG` | Colore di sfondo della barra di navigazione — opzionale, default il blu navy del logo | `#16213e` | Build & Deploy |
+| `VITE_THEME_NAV_TEXT` | Colore del testo/voci di menu sulla barra di navigazione — opzionale, da abbinare a `VITE_THEME_NAV_BG` per restare leggibile, default il blu chiaro del logo | `#7ab8e0` | Build & Deploy |
 | `LOGO_FILE` | Nome del file SVG in `frontend/branding/` da usare come logo/favicon del tenant (opzionale: se assente resta il logo di default). **Non** ha prefisso `VITE_*`: non è letta dal browser ma da `scripts/apply-logo.mjs`, eseguito automaticamente da npm come hook `prebuild` prima di `vite build` | `asd1.svg` | Build & Deploy |
 
 Nessun secret aggiuntivo serve per il registry immagini: le pipeline si autenticano su `ghcr.io` con il
