@@ -1,14 +1,20 @@
 import { useAuth } from '../auth/AuthContext';
 import { config } from '../config';
+import { theme } from '../theme';
 
 export default function LoginPage() {
-  const { login, register, isLoading } = useAuth();
+  const { login, register, isLoading, sessionExpired } = useAuth();
 
   return (
     <div style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.title}>ClubManager</h1>
         <p style={styles.subtitle}>{config.tenantName}</p>
+        {sessionExpired && (
+          <div style={styles.sessionExpired}>
+            La sessione è scaduta. Accedi di nuovo per continuare.
+          </div>
+        )}
         <button
           style={styles.button}
           onClick={login}
@@ -48,15 +54,23 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 32,
     fontWeight: 700,
     margin: '0 0 8px 0',
-    color: '#1a1a2e',
+    color: theme.navBg,
   },
   subtitle: {
     color: '#666',
     marginBottom: 32,
   },
+  sessionExpired: {
+    background: '#fee',
+    color: theme.danger,
+    padding: '10px 16px',
+    borderRadius: 8,
+    marginBottom: 20,
+    fontSize: 14,
+  },
   button: {
-    background: '#2563eb',
-    color: '#fff',
+    background: theme.primary,
+    color: theme.primaryText,
     border: 'none',
     borderRadius: 8,
     padding: '12px 32px',
@@ -67,8 +81,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   buttonSecondary: {
     background: 'transparent',
-    color: '#2563eb',
-    border: '1px solid #2563eb',
+    color: theme.primary,
+    border: `1px solid ${theme.primary}`,
     borderRadius: 8,
     padding: '12px 32px',
     fontSize: 16,

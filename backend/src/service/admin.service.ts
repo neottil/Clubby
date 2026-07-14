@@ -69,7 +69,7 @@ async function keycloakAdminFetch(path: string, options: RequestInit = {}): Prom
 }
 
 // ---------------------------------------------------------------
-// Lista utenti Keycloak (per la UI admin)
+// Lista utenti Registrati (per la UI admin)
 // ---------------------------------------------------------------
 export async function listKeycloakUsers(): Promise<KeycloakUser[]> {
   const res = await keycloakAdminFetch('/users?max=100');

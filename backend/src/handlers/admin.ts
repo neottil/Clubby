@@ -24,7 +24,7 @@ export const handler = async (
     const socioId = event.pathParameters?.socioId;
 
     // -----------------------------------------------------------
-    // GET /api/admin/users  - Lista utenti Keycloak
+    // GET /api/admin/users  - Lista utenti Registrati (Keycloak)
     // -----------------------------------------------------------
     if (method === 'GET' && path.endsWith('/users')) {
       const users = await listKeycloakUsers();

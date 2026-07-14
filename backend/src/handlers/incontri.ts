@@ -44,8 +44,9 @@ export const handler = async (
         const incontri = await listIncontri(socioId);
         return ok(incontri);
       } else {
-        // Viewer: solo i propri incontri
-        const incontri = await listIncontri(viewerSocioId ?? undefined);
+        // Nessun socio associato al viewer → nessun dato (mai "tutti gli incontri")
+        if (!viewerSocioId) return ok([]);
+        const incontri = await listIncontri(viewerSocioId);
         return ok(incontri);
       }
     }

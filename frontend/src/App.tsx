@@ -27,15 +27,18 @@ function ProtectedRoutes() {
   if (isLoading) return <div style={{ padding: 64, textAlign: 'center' }}>Caricamento...</div>;
   if (!user)     return <Navigate to='/login' replace />;
 
+  // La scheda "Soci" è riservata all'admin: un viewer atterra su "Incontri".
+  const defaultRoute = user.isAdmin ? '/soci' : '/incontri';
+
   return (
     <Layout>
       <Routes>
-        <Route path='/'         element={<Navigate to='/soci' replace />} />
+        <Route path='/'         element={<Navigate to={defaultRoute} replace />} />
         <Route path='/soci'     element={<SociPage />} />
         <Route path='/incontri' element={<IncontriPage />} />
         <Route path='/buoni'    element={<BuoniPage />} />
         <Route path='/admin'    element={<AdminPage />} />
-        <Route path='*'         element={<Navigate to='/soci' replace />} />
+        <Route path='*'         element={<Navigate to={defaultRoute} replace />} />
       </Routes>
     </Layout>
   );

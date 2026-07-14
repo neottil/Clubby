@@ -8,7 +8,7 @@
 #   Linux:  apt install jq
 #
 # Uso:
-#   ./scripts/init-keycloak.sh
+#   ./scripts/init-local-keycloak.sh
 #
 # Output: scrive frontend/.env.local e backend/.env
 # con i valori del realm Keycloak configurato.
@@ -119,6 +119,13 @@ kc_api POST "" "{
   \"bruteForceProtected\": true
 }" 2>/dev/null || echo "  (realm già esistente, salto)"
 
+# Durata dell'access token: 2 ore (default Keycloak: 5 minuti). Una PUT di
+# aggiornamento, non solo alla creazione: si applica anche se il realm esiste
+# già da prima (rieseguibile senza dover ricreare il realm da zero).
+echo "▶ Imposto la durata dell'access token a 2 ore..."
+kc_api PUT "/$REALM" '{"accessTokenLifespan": 7200}' 2>/dev/null \
+  && echo "  Fatto." || echo "  ERRORE nell'aggiornare la durata del token."
+
 # Crea client SPA (public, PKCE)
 echo "▶ Creo client 'clubmanager-spa'..."
 kc_api POST "/$REALM/clients" "{
@@ -225,7 +232,14 @@ if [ -n "$VIEWER_KC_USER_ID" ] && [ "$VIEWER_KC_USER_ID" != "null" ]; then
   echo "  Utente viewer creato, password impostata e ruolo assegnato."
 fi
 
-# Scrivi frontend/.env.local
+# Scrivi frontend/.env.local (preservando VITE_ACTIVITY_SELECT_VALUES_MAPPING
+# se già presente da un run precedente: questo script non conosce il mapping
+# attività->costo, va impostato a mano una volta)
+EXISTING_ACTIVITY_MAPPING=""
+if [ -f "$ROOT_DIR/frontend/.env.local" ]; then
+  EXISTING_ACTIVITY_MAPPING=$(grep '^VITE_ACTIVITY_SELECT_VALUES_MAPPING=' "$ROOT_DIR/frontend/.env.local" || true)
+fi
+
 cat > "$ROOT_DIR/frontend/.env.local" << EOF
 VITE_API_BASE_URL=$API_BASE_URL
 VITE_KEYCLOAK_URL=$KEYCLOAK_URL
@@ -233,6 +247,10 @@ VITE_KEYCLOAK_REALM=$REALM
 VITE_KEYCLOAK_CLIENT_ID=clubmanager-spa
 VITE_TENANT_NAME=$TENANT_NAME
 EOF
+
+if [ -n "$EXISTING_ACTIVITY_MAPPING" ]; then
+  echo "$EXISTING_ACTIVITY_MAPPING" >> "$ROOT_DIR/frontend/.env.local"
+fi
 
 # Scrivi backend/.env
 cat > "$ROOT_DIR/backend/.env" << EOF

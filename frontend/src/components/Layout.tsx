@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { theme } from '../theme';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -10,9 +11,9 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
 
   const navLinks = [
-    { to: '/soci',    label: 'Soci' },
+    ...(user?.isAdmin ? [{ to: '/soci', label: 'Soci' }] : []),
     { to: '/incontri', label: 'Incontri' },
-    { to: '/buoni',   label: 'Buoni' },
+    { to: '/buoni',   label: 'Voucher' },
     ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin' }] : []),
   ];
 
@@ -52,26 +53,26 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 24,
     padding: '0 32px',
     height: 56,
-    background: '#1a1a2e',
-    color: '#fff',
+    background: theme.navBg,
+    color: theme.navText,
   },
-  brand: { fontWeight: 700, fontSize: 20, marginRight: 16 },
+  brand: { fontWeight: 700, fontSize: 20, marginRight: 16, color: theme.navText },
   links: { display: 'flex', gap: 8, flex: 1 },
   link: {
-    color: '#c0c0d0',
+    color: theme.navText,
     textDecoration: 'none',
     padding: '6px 14px',
     borderRadius: 6,
     fontSize: 14,
     fontWeight: 500,
   },
-  linkActive: { background: '#2563eb', color: '#fff' },
+  linkActive: { background: theme.primary, color: theme.primaryText },
   userInfo: { display: 'flex', alignItems: 'center', gap: 12 },
-  email: { fontSize: 13, color: '#a0a0b8' },
+  email: { fontSize: 13, color: theme.navText },
   logoutBtn: {
     background: 'transparent',
-    border: '1px solid #444',
-    color: '#c0c0d0',
+    border: `1px solid ${theme.navText}`,
+    color: theme.navText,
     borderRadius: 6,
     padding: '4px 12px',
     cursor: 'pointer',

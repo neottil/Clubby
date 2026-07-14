@@ -4,6 +4,7 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { config, getKeycloakAuthorizeUrl, getKeycloakLogoutUrl, getKeycloakRegistrationUrl, getKeycloakTokenUrl } from '../config';
+import { setUnauthorizedHandler } from '../api/client';
 
 interface TokenSet {
   accessToken: string;
@@ -23,6 +24,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   isLoading: boolean;
+  sessionExpired: boolean;
   login: () => void;
   register: () => void;
   logout: () => void;
@@ -41,8 +43,8 @@ function decodeJwt(token: string): Record<string, unknown> {
   return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
 }
 
-function parseUser(idToken: string): AuthUser {
-  const claims = decodeJwt(idToken) as any;
+function parseUser(accessToken: string): AuthUser {
+  const claims = decodeJwt(accessToken) as any;
   // Keycloak uses realm_access.roles
   let groups: string[] = [];
   if (claims.realm_access?.roles) {
@@ -81,6 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return raw ? JSON.parse(raw) : null;
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const exchangeStarted = useRef(false);
 
   const saveTokens = (ts: TokenSet) => {
@@ -92,6 +95,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     sessionStorage.removeItem(TOKEN_KEY);
     setTokenSet(null);
   };
+
+  // Registra l'handler globale: ogni chiamata API che riceve 401 pulisce i
+  // token e segnala la sessione scaduta, indipendentemente da quale pagina
+  // ha effettuato la chiamata (vedi api/client.ts).
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearTokens();
+      setSessionExpired(true);
+    });
+    return () => setUnauthorizedHandler(() => {});
+  }, []);
 
   // Scambia authorization code con token e registra il socio nel DB
   const exchangeCode = useCallback(async (code: string) => {
@@ -157,6 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [exchangeCode]);
 
   const login = useCallback(async () => {
+    setSessionExpired(false);
     const verifier   = await generateCodeVerifier();
     const challenge  = await generateCodeChallenge(verifier);
     sessionStorage.setItem('cm_pkce_verifier', verifier);
@@ -173,15 +188,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    setSessionExpired(false);
     clearTokens();
     window.location.href = getKeycloakLogoutUrl(`${window.location.origin}/`);
   }, []);
 
-  const user   = tokenSet ? parseUser(tokenSet.idToken) : null;
+  const user   = tokenSet ? parseUser(tokenSet.accessToken) : null;
   const token  = tokenSet?.accessToken ?? null;
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, sessionExpired, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

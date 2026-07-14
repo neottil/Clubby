@@ -15,7 +15,6 @@
 *.sql text eol=lf
 *.env text eol=lf
 *.example text eol=lf
-Makefile text eol=lf
 
 # File binari: nessuna conversione
 *.png binary

@@ -35,11 +35,16 @@ CREATE TABLE IF NOT EXISTS incontro (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   socio_id        UUID NOT NULL REFERENCES socio(id) ON DELETE CASCADE,
   data_incontro   DATE NOT NULL,
+  attivita        VARCHAR(100),
   costo           DECIMAL(10,2) NOT NULL CHECK (costo >= 0),
   note            TEXT,
   created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Retrocompatibilità: aggiunge la colonna se la tabella esisteva già senza
+-- (installazioni precedenti a questo schema).
+ALTER TABLE incontro ADD COLUMN IF NOT EXISTS attivita VARCHAR(100);
 
 CREATE INDEX IF NOT EXISTS idx_incontro_socio      ON incontro(socio_id);
 CREATE INDEX IF NOT EXISTS idx_incontro_data       ON incontro(data_incontro);
@@ -52,11 +57,15 @@ CREATE TABLE IF NOT EXISTS buono (
   socio_id        UUID NOT NULL REFERENCES socio(id) ON DELETE CASCADE,
   data_creazione  TIMESTAMP NOT NULL DEFAULT NOW(),
   saldo_iniziale  DECIMAL(10,2) NOT NULL CHECK (saldo_iniziale >= 0),
-  attivo          BOOLEAN NOT NULL DEFAULT TRUE,
   note            TEXT,
   created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Retrocompatibilità: rimuove la colonna se presente da installazioni
+-- precedenti a questa versione dello schema (il concetto di voucher
+-- attivo/chiuso è stato rimosso: un socio ha al più un voucher, punto).
+ALTER TABLE buono DROP COLUMN IF EXISTS attivo;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_buono_socio ON buono(socio_id);
 
@@ -66,14 +75,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_buono_socio ON buono(socio_id);
 CREATE TABLE IF NOT EXISTS movimento_buono (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   buono_id        UUID NOT NULL REFERENCES buono(id) ON DELETE CASCADE,
+  incontro_id     UUID REFERENCES incontro(id) ON DELETE CASCADE,
   data_movimento  TIMESTAMP NOT NULL DEFAULT NOW(),
   importo         DECIMAL(10,2) NOT NULL,  -- positivo = ricarica, negativo = addebito
   descrizione     TEXT,
   created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- Retrocompatibilità: aggiunge la colonna se la tabella esisteva già senza
+-- (installazioni precedenti a questo schema).
+ALTER TABLE movimento_buono ADD COLUMN IF NOT EXISTS incontro_id UUID REFERENCES incontro(id) ON DELETE CASCADE;
+
 CREATE INDEX IF NOT EXISTS idx_movimento_buono ON movimento_buono(buono_id);
 CREATE INDEX IF NOT EXISTS idx_movimento_data  ON movimento_buono(data_movimento);
+-- Un incontro genera al più un movimento (creato/aggiornato/rimosso in modo atomico insieme all'incontro)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movimento_incontro_unique ON movimento_buono(incontro_id) WHERE incontro_id IS NOT NULL;
 
 -- ============================================================
 -- Trigger: aggiorna updated_at automaticamente

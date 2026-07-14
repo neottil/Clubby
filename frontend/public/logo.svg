@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Persone: silhouette laterali (blu) + centrale (teal), sfondo trasparente -->
+  <g>
+    <!-- persona sinistra -->
+    <circle cx="62" cy="118" r="16" fill="#7ab8e0"/>
+    <path d="M32 172 c0 -26 14 -42 30 -42 s30 16 30 42 z" fill="#7ab8e0"/>
+
+    <!-- persona destra -->
+    <circle cx="138" cy="118" r="16" fill="#7ab8e0"/>
+    <path d="M108 172 c0 -26 14 -42 30 -42 s30 16 30 42 z" fill="#7ab8e0"/>
+
+    <!-- persona centrale, più grande e in primo piano -->
+    <circle cx="100" cy="104" r="20" fill="#2ec4a6"/>
+    <path d="M62 172 c0 -34 17 -54 38 -54 s38 20 38 54 z" fill="#2ec4a6"/>
+  </g>
+
+  <!-- CM sovrapposto alle persone -->
+  <text x="100" y="112" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-weight="700" font-size="92">
+    <tspan fill="#16213e" fill-opacity="0.94">C</tspan><tspan fill="#2ec4a6">M</tspan>
+  </text>
+</svg>

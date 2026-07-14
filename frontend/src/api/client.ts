@@ -13,6 +13,16 @@ export class ApiError extends Error {
   }
 }
 
+// ---------------------------------------------------------------
+// Notifica globale di sessione scaduta (401): registrata da AuthContext
+// per poter pulire i token e reindirizzare al login da qualunque chiamata
+// API, senza dover propagare una dipendenza dal contesto React fin qui.
+// ---------------------------------------------------------------
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: () => void): void {
+  onUnauthorized = handler;
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -38,6 +48,9 @@ async function request<T>(
       const data = await res.json();
       message = data.error ?? data.message ?? message;
     } catch {}
+    if (res.status === 401) {
+      onUnauthorized?.();
+    }
     throw new ApiError(res.status, message);
   }
 

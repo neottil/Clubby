@@ -10,6 +10,7 @@
  *   VITE_KEYCLOAK_REALM        = clubmanager          (obbligatoria)
  *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa      (obbligatoria)
  *   VITE_TENANT_NAME           = La mia ASD           (obbligatoria)
+ *   VITE_ACTIVITY_SELECT_VALUES_MAPPING = JSON {"Attività": costoDefault, ...} (opzionale)
  *
  * Produzione:
  *   VITE_API_BASE_URL          = https://api.<dominio>
@@ -17,6 +18,7 @@
  *   VITE_KEYCLOAK_REALM        = clubmanager          (obbligatoria)
  *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa      (obbligatoria)
  *   VITE_TENANT_NAME           = La mia ASD           (obbligatoria)
+ *   VITE_ACTIVITY_SELECT_VALUES_MAPPING = JSON {"Attività": costoDefault, ...} (opzionale)
  */
 
 function requireEnv(name: string): string {
@@ -27,12 +29,34 @@ function requireEnv(name: string): string {
   return value as string;
 }
 
+/**
+ * Mapping "attività" → costo di default, da VITE_ACTIVITY_SELECT_VALUES_MAPPING
+ * (JSON, es. {"Dog Dance": 20, "Mantrailing": 20}). Opzionale: se assente o
+ * malformata, restituisce un mapping vuoto (nessun blocco dell'app) e avvisa
+ * in console.
+ */
+function parseActivityMapping(): Record<string, number> {
+  const raw = import.meta.env.VITE_ACTIVITY_SELECT_VALUES_MAPPING;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw as string);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('deve essere un oggetto JSON piatto {"Attività": costo}');
+    }
+    return parsed as Record<string, number>;
+  } catch (err) {
+    console.warn('[config] VITE_ACTIVITY_SELECT_VALUES_MAPPING non valida, ignorata:', err);
+    return {};
+  }
+}
+
 export const config = {
-  apiBaseUrl:       requireEnv('VITE_API_BASE_URL'),
-  keycloakUrl:      requireEnv('VITE_KEYCLOAK_URL'),
-  keycloakRealm:    requireEnv('VITE_KEYCLOAK_REALM'),
-  keycloakClientId: requireEnv('VITE_KEYCLOAK_CLIENT_ID'),
-  tenantName:       requireEnv('VITE_TENANT_NAME'),
+  apiBaseUrl:           requireEnv('VITE_API_BASE_URL'),
+  keycloakUrl:          requireEnv('VITE_KEYCLOAK_URL'),
+  keycloakRealm:        requireEnv('VITE_KEYCLOAK_REALM'),
+  keycloakClientId:     requireEnv('VITE_KEYCLOAK_CLIENT_ID'),
+  tenantName:           requireEnv('VITE_TENANT_NAME'),
+  activityCostMapping:  parseActivityMapping(),
 } as const;
 
 /** Base URL for Keycloak OIDC endpoints */

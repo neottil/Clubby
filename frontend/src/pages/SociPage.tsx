@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
+import { useTableSort } from '../hooks/useTableSort';
+import { theme } from '../theme';
 
 interface Socio {
   id: string;
@@ -26,6 +28,7 @@ export default function SociPage() {
   const [editId, setEditId]       = useState<string | null>(null);
   const [form, setForm]           = useState(emptyForm);
   const [saving, setSaving]       = useState(false);
+  const [filter, setFilter]       = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -74,6 +77,16 @@ export default function SociPage() {
     }
   };
 
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return soci;
+    return soci.filter(s =>
+      `${s.cognome} ${s.nome} ${s.email ?? ''} ${s.telefono ?? ''}`.toLowerCase().includes(q)
+    );
+  }, [soci, filter]);
+
+  const { sorted, toggleSort, sortIndicator } = useTableSort(filtered, { initialKey: 'cognome' });
+
   if (loading) return <div style={styles.loading}>Caricamento...</div>;
 
   return (
@@ -86,6 +99,13 @@ export default function SociPage() {
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
+
+      <input
+        style={styles.filterInput}
+        placeholder='Cerca per cognome, nome, email o telefono...'
+        value={filter}
+        onChange={e => setFilter(e.target.value)}
+      />
 
       {showForm && (
         <div style={styles.formCard}>
@@ -120,13 +140,19 @@ export default function SociPage() {
       <table style={styles.table}>
         <thead>
           <tr>
-            {['Cognome', 'Nome', 'Email', 'Telefono', 'Iscritto dal', ...(user?.isAdmin ? ['Azioni'] : [])].map(h => (
-              <th key={h} style={styles.th}>{h}</th>
+            {([
+              ['cognome', 'Cognome'], ['nome', 'Nome'], ['email', 'Email'],
+              ['telefono', 'Telefono'], ['data_iscrizione', 'Iscritto dal'],
+            ] as const).map(([key, label]) => (
+              <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
+                {label}{sortIndicator(key)}
+              </th>
             ))}
+            {user?.isAdmin && <th style={styles.th}>Azioni</th>}
           </tr>
         </thead>
         <tbody>
-          {soci.map(s => (
+          {sorted.map(s => (
             <tr key={s.id} style={styles.tr}>
               <td style={styles.td}>{s.cognome}</td>
               <td style={styles.td}>{s.nome}</td>
@@ -144,8 +170,8 @@ export default function SociPage() {
         </tbody>
       </table>
 
-      {soci.length === 0 && !loading && (
-        <p style={styles.empty}>Nessun socio presente.</p>
+      {sorted.length === 0 && !loading && (
+        <p style={styles.empty}>{filter ? 'Nessun socio corrisponde alla ricerca.' : 'Nessun socio presente.'}</p>
       )}
     </div>
   );
@@ -156,11 +182,11 @@ const styles: Record<string, React.CSSProperties> = {
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
   title: { margin: 0, fontSize: 22, fontWeight: 700 },
   loading: { padding: 48, textAlign: 'center', color: '#666' },
-  error: { background: '#fee', color: '#c00', padding: '10px 16px', borderRadius: 8, marginBottom: 16 },
-  btn: { background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
+  error: { background: '#fee', color: theme.danger, padding: '10px 16px', borderRadius: 8, marginBottom: 16 },
+  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
   btnSecondary: { background: '#e5e7eb', color: '#333', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
   btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13, marginRight: 6 },
-  btnDanger: { background: '#fee', color: '#c00' },
+  btnDanger: { background: '#fee', color: theme.danger },
   formCard: { background: '#fff', borderRadius: 12, padding: 24, marginBottom: 24, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' },
   formTitle: { margin: '0 0 16px', fontSize: 16, fontWeight: 700 },
   field: { marginBottom: 14 },
@@ -168,8 +194,16 @@ const styles: Record<string, React.CSSProperties> = {
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
   textarea: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, minHeight: 80, boxSizing: 'border-box' },
   formActions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 },
+  filterInput: {
+    width: '100%', maxWidth: 360, padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd',
+    fontSize: 14, boxSizing: 'border-box', marginBottom: 16, display: 'block',
+  },
   table: { width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' },
   th: { padding: '12px 16px', textAlign: 'left', background: '#f1f5f9', fontSize: 13, fontWeight: 600, color: '#555', borderBottom: '1px solid #e5e7eb' },
+  thSortable: {
+    padding: '12px 16px', textAlign: 'left', background: '#f1f5f9', fontSize: 13, fontWeight: 600, color: '#555',
+    borderBottom: '1px solid #e5e7eb', cursor: 'pointer', userSelect: 'none',
+  },
   tr: { borderBottom: '1px solid #f1f5f9' },
   td: { padding: '11px 16px', fontSize: 14, color: '#333' },
   empty: { textAlign: 'center', color: '#999', marginTop: 32 },

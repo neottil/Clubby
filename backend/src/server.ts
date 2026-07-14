@@ -8,26 +8,13 @@
  * Avvio prod:    npm start        (node dist/server.js dopo build)
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-// Carica .env solo se il file esiste (locale senza env injection)
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const envPath = resolve(__dirname, '../.env');
-if (existsSync(envPath)) {
-  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const val = trimmed.slice(eq + 1).trim();
-    // Non sovrascrive variabili già iniettate dal container runtime
-    if (!(key in process.env)) process.env[key] = val;
-  }
-  console.log(`[env] Loaded from ${envPath}`);
-}
+// Side-effect only, deve restare il PRIMO import: in ES modules tutti gli
+// import vengono valutati, nell'ordine in cui compaiono, prima di qualunque
+// altro codice del file — inclusi i moduli importati più sotto (es.
+// handlers/admin.js → service/admin.service.js) che leggono process.env a
+// livello di modulo. Se il loader di .env non è il primo import, quei moduli
+// vedono le variabili come undefined. Vedi env.ts per i dettagli.
+import './env.js';
 
 import http from 'http';
 import { verifyToken, type RequestEvent } from './middleware/auth.js';

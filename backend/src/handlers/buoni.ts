@@ -45,9 +45,11 @@ export const handler = async (
     if (method === 'GET' && !buonoId) {
       if (auth.role === 'admin') {
         const socioId = event.queryStringParameters?.socio_id;
-        return ok(await listBuoni(socioId!));
+        return ok(await listBuoni(socioId));
       } else {
-        return ok(await listBuoni(viewerSocioId!));
+        // Nessun socio associato al viewer → nessun dato (mai "tutti i buoni")
+        if (!viewerSocioId) return ok([]);
+        return ok(await listBuoni(viewerSocioId));
       }
     }
 
@@ -77,7 +79,13 @@ export const handler = async (
     if (method === 'POST' && buonoId && isMovimentiRoute) {
       requireAdmin(auth);
       const body = JSON.parse(event.body ?? '{}');
-      return created(await createMovimento(buonoId, body));
+      // Whitelist esplicita: incontro_id è gestito solo internamente da
+      // incontri.service (movimento generato automaticamente), non deve
+      // poter essere impostato tramite questo endpoint pubblico.
+      return created(await createMovimento(buonoId, {
+        importo: body.importo,
+        descrizione: body.descrizione,
+      }));
     }
 
     return errorResponse({ statusCode: 404, message: 'Route non trovata' });
