@@ -1,0 +1,64 @@
+# Istanza Postgres unica condivisa da app e Keycloak (due database separati:
+# ${DB_NAME} e "keycloak"), per risparmiare risorse su una VPS di piccole
+# dimensioni con una mole di dati ridotta. Il ConfigMap "postgres-init"
+# (creato dal workflow Infra, non da questo template statico: contiene lo
+# schema.sql dell'app + lo script di creazione del database keycloak) viene
+# eseguito automaticamente da Postgres al primo avvio (directory
+# /docker-entrypoint-initdb.d), quindi solo sul volume dati vuoto.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clubmanager-postgres
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: clubmanager-postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: clubmanager-postgres
+  template:
+    metadata:
+      labels:
+        app: clubmanager-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16.3-alpine3.20
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "${DB_NAME}"
+            - name: POSTGRES_USER
+              value: "${DB_USER}"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clubmanager-infra-secrets
+                  key: DB_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "${DB_USER}"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "${DB_USER}"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: clubmanager-postgres
+        - name: init-scripts
+          configMap:
+            name: postgres-init

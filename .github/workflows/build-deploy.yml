@@ -1,0 +1,240 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+      - 'fix/**'
+  workflow_dispatch: {}
+
+jobs:
+  # Calcola le versioni "reali" (da package.json) e un tag univoco basato sulla
+  # data (yyyymmdd_HHMM) usato per taggare immagini Docker e commit durante
+  # questa run. Il tag reale (server-vX.Y.Z / client-vX.Y.Z / k8s-vX.Y.Z) viene
+  # assegnato solo dopo un deploy riuscito, dal workflow Tag.
+  versions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      server: ${{ steps.v.outputs.server }}
+      client: ${{ steps.v.outputs.client }}
+      k8s: ${{ steps.v.outputs.k8s }}
+      date_tag: ${{ steps.v.outputs.date_tag }}
+      sha: ${{ steps.v.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: v
+        run: |
+          echo "server=$(node -p "require('./backend/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "client=$(node -p "require('./frontend/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "k8s=$(node -p "require('./k8s/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "date_tag=$(date -u +%Y%m%d_%H%M)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Tag "di build" sul repo, univoco per run grazie alla data: permette di
+      # risalire esattamente al commit buildato/deployato da questa run, anche
+      # quando i package.json non sono stati bumpati. Il workflow Tag lo rimuove
+      # dopo aver assegnato il tag reale.
+      - name: Crea tag di build sul repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "build-${{ steps.v.outputs.date_tag }}" -m "Build ${{ steps.v.outputs.date_tag }}"
+          git push origin "build-${{ steps.v.outputs.date_tag }}"
+
+      - name: Scrivi versions.json
+        run: |
+          cat > versions.json <<EOF
+          {
+            "server": "${{ steps.v.outputs.server }}",
+            "client": "${{ steps.v.outputs.client }}",
+            "k8s": "${{ steps.v.outputs.k8s }}",
+            "date_tag": "${{ steps.v.outputs.date_tag }}",
+            "sha": "${{ steps.v.outputs.sha }}"
+          }
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: versions
+          path: versions.json
+
+  build-backend:
+    needs: versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # La compilazione avviene qui, nella pipeline: il Dockerfile non esegue
+      # alcuna build, si limita a impacchettare backend/dist già pronto.
+      - name: Installa dipendenze e builda il backend
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag pushati: solo quello di data + latest. Il tag di versione reale
+      # (server-vX.Y.Z) viene aggiunto dal workflow Tag dopo un deploy riuscito.
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ needs.versions.outputs.date_tag }}
+            ghcr.io/${{ github.repository_owner }}/clubmanager-backend:latest
+
+  build-frontend:
+    needs: versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Le variabili VITE_* sono compilate nel bundle statico da Vite in questo
+      # step (pipeline), non nel Dockerfile: Vite le legge solo a build-time.
+      # LOGO_FILE non ha prefisso VITE_ perché non è letta dal browser: la
+      # legge scripts/apply-logo.mjs (hook "prebuild" di npm) per copiare il
+      # logo del tenant da frontend/branding/ in frontend/public/logo.svg
+      # prima che Vite lo includa come asset statico.
+      - name: Installa dipendenze e builda il frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_KEYCLOAK_URL: ${{ vars.VITE_KEYCLOAK_URL }}
+          VITE_KEYCLOAK_REALM: ${{ vars.VITE_KEYCLOAK_REALM }}
+          VITE_KEYCLOAK_CLIENT_ID: ${{ vars.VITE_KEYCLOAK_CLIENT_ID }}
+          VITE_TENANT_NAME: ${{ vars.VITE_TENANT_NAME }}
+          VITE_ACTIVITY_SELECT_VALUES_MAPPING: ${{ vars.VITE_ACTIVITY_SELECT_VALUES_MAPPING }}
+          VITE_THEME_PRIMARY: ${{ vars.VITE_THEME_PRIMARY }}
+          VITE_THEME_PRIMARY_TEXT: ${{ vars.VITE_THEME_PRIMARY_TEXT }}
+          VITE_THEME_DANGER: ${{ vars.VITE_THEME_DANGER }}
+          VITE_THEME_SUCCESS: ${{ vars.VITE_THEME_SUCCESS }}
+          VITE_THEME_NAV_BG: ${{ vars.VITE_THEME_NAV_BG }}
+          VITE_THEME_NAV_TEXT: ${{ vars.VITE_THEME_NAV_TEXT }}
+          LOGO_FILE: ${{ vars.LOGO_FILE }}
+        run: |
+          npm ci
+          npm run build
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ needs.versions.outputs.date_tag }}
+            ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:latest
+
+  deploy:
+    needs: [versions, build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sostituisce i placeholder ${VAR} nei template k8s/templates/app/*.yaml
+      # (solo backend/frontend: namespace, Postgres e Keycloak sono gestiti dal
+      # workflow Infra, non da questo) con i valori reali presi da GitHub
+      # Variables/Secrets. L'output (k8s/rendered/) non viene mai committato:
+      # contiene credenziali in chiaro (vedi .gitignore).
+      - name: Renderizza manifest k8s
+        env:
+          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
+          BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ needs.versions.outputs.date_tag }}
+          FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ needs.versions.outputs.date_tag }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          DB_HOST: ${{ vars.DB_HOST }}
+          DB_PORT: ${{ vars.DB_PORT }}
+          DB_NAME: ${{ vars.DB_NAME }}
+          DB_USER: ${{ vars.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          KEYCLOAK_URL: ${{ vars.KEYCLOAK_URL }}
+          KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM }}
+          KEYCLOAK_ADMIN_CLIENT_ID: ${{ vars.KEYCLOAK_ADMIN_CLIENT_ID }}
+          KEYCLOAK_ADMIN_CLIENT_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
+          FRONTEND_HOST: ${{ vars.FRONTEND_HOST }}
+          BACKEND_HOST: ${{ vars.BACKEND_HOST }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p k8s/rendered
+          VARS='$KUBE_NAMESPACE $BACKEND_IMAGE $FRONTEND_IMAGE $BACKEND_PORT $DB_HOST $DB_PORT $DB_NAME $DB_USER $DB_PASSWORD $KEYCLOAK_URL $KEYCLOAK_REALM $KEYCLOAK_ADMIN_CLIENT_ID $KEYCLOAK_ADMIN_CLIENT_SECRET $FRONTEND_HOST $BACKEND_HOST'
+          for f in k8s/templates/app/*.yaml; do
+            envsubst "$VARS" < "$f" > "k8s/rendered/$(basename "$f")"
+          done
+
+      - name: Copia manifest sulla VPS via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT }}
+          source: "k8s/rendered/*"
+          target: ${{ vars.DEPLOY_PATH }}
+          strip_components: 2
+
+      - name: Applica manifest e verifica rollout
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT }}
+          script: |
+            set -e
+            kubectl apply -f ${{ vars.DEPLOY_PATH }}
+            kubectl rollout status deployment/clubmanager-backend -n ${{ vars.KUBE_NAMESPACE }} --timeout=180s
+            kubectl rollout status deployment/clubmanager-frontend -n ${{ vars.KUBE_NAMESPACE }} --timeout=180s
+
+  # A fine deploy, ripulisce dal registry le immagini taggate con la sola data,
+  # mantenendo solo le 3 più recenti per repository immagine. I tag di versione
+  # reale (X.Y.Z, assegnati dal workflow Tag) sono esclusi e non vengono mai
+  # toccati da questa pulizia.
+  cleanup-registry:
+    needs: [versions, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        image: [clubmanager-backend, clubmanager-frontend]
+    steps:
+      - name: Rimuovi vecchi tag di data (mantieni le 3 più recenti)
+        uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ matrix.image }}
+          package-type: container
+          min-versions-to-keep: 3
+          ignore-versions: '^\d+\.\d+\.\d+$'
+          token: ${{ secrets.GITHUB_TOKEN }}

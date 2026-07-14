@@ -1,0 +1,77 @@
+# NOTA: usa "start-dev" (come in locale, docker-compose.yml) per semplicità
+# iniziale. Per un hardening da produzione andrebbe sostituito con "start"
+# (build ottimizzata) — vedi TODO nel README.
+#
+# IMPORTANTE: KC_HOSTNAME è impostato sull'URL PUBBLICO (stesso host esposto
+# da keycloak-ingress.yaml), non su quello interno al cluster. Il backend
+# (vedi backend/src/middleware/auth.ts) valida il claim "iss" del JWT
+# confrontandolo esattamente con la sua variabile KEYCLOAK_URL: se Keycloak
+# emettesse token con un issuer diverso da quello che il backend si aspetta,
+# la validazione fallirebbe sempre. Per questo KEYCLOAK_URL (backend) deve
+# restare lo stesso URL pubblico di VITE_KEYCLOAK_URL (frontend) — non punta
+# al DNS interno del cluster, anche se il backend gira nello stesso namespace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clubmanager-keycloak
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: clubmanager-keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clubmanager-keycloak
+  template:
+    metadata:
+      labels:
+        app: clubmanager-keycloak
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.1.4
+          args: ["start-dev"]
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://clubmanager-postgres.${KUBE_NAMESPACE}.svc.cluster.local:5432/keycloak
+            - name: KC_DB_USERNAME
+              value: "${DB_USER}"
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clubmanager-infra-secrets
+                  key: DB_PASSWORD
+            - name: KEYCLOAK_ADMIN
+              value: "${KEYCLOAK_BOOTSTRAP_ADMIN}"
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clubmanager-infra-secrets
+                  key: KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
+            - name: KC_HOSTNAME
+              value: "https://${KEYCLOAK_HOST}"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_PROXY
+              value: edge
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: health
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 20
