@@ -340,7 +340,10 @@ lo crea. È idempotente (`kubectl apply`/`--dry-run=client -o yaml | kubectl app
 rieseguibile senza distruggere dati esistenti.
 
 1. Genera tre valori casuali (`openssl rand`): `DB_PASSWORD`, la password bootstrap dell'admin console di
-   Keycloak, e `KEYCLOAK_ADMIN_CLIENT_SECRET` — mai committati, esistono solo per la durata della run.
+   Keycloak, e `KEYCLOAK_ADMIN_CLIENT_SECRET` — **a meno che non esistano già come Secrets
+   sull'Environment**, nel qual caso li riusa invece di rigenerarli (indispensabile per rilanciare Infra in
+   sicurezza dopo il primo provisioning, senza disallineare le credenziali da quelle già impostate su
+   Postgres/Keycloak). Mai committati, esistono solo per la durata della run se rigenerati.
 2. Renderizza i template [k8s/templates/infra](k8s/templates/infra) con `envsubst` e li copia sulla VPS via
    SSH, insieme allo schema SQL dell'app ([backend/src/db/schema.sql](backend/src/db/schema.sql)) e allo
    script [scripts/keycloak-realm-init.sh](scripts/keycloak-realm-init.sh).
@@ -354,8 +357,11 @@ rieseguibile senza distruggere dati esistenti.
    ruoli `admin`/`viewer` e **un solo utente admin reale** (non credenziali di test hardcoded), con password
    temporanea che Keycloak obbliga a cambiare al primo login.
 6. Stampa nel riepilogo della run (`GITHUB_STEP_SUMMARY`) i valori da copiare a mano nei GitHub
-   Secrets/Variables di **Build & Deploy** (`DB_PASSWORD`, `KEYCLOAK_ADMIN_CLIENT_SECRET`,
-   ecc.) — **visibili in chiaro una sola volta**, non vengono salvati altrove: copiali subito.
+   Secrets/Variables (`DB_PASSWORD`, `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD`, `KEYCLOAK_ADMIN_CLIENT_SECRET`,
+   ecc.) — **visibili in chiaro una sola volta**, non vengono salvati altrove: copiali subito. Questo step
+   gira **sempre** (`if: always()`), anche se un passo precedente fallisce (es. il Job di init Keycloak): i
+   secret generati/riusati a inizio run vengono comunque mostrati, così puoi copiarli nell'Environment prima
+   di rilanciare Infra — che li riuserà invece di generarne di nuovi.
 
 **Nota sull'URL di Keycloak**: `KEYCLOAK_URL` (`https://` + `KEYCLOAK_HOST`, costruito da entrambe le
 pipeline, non è una variabile GitHub a sé) deve puntare all'**URL pubblico HTTPS** di Keycloak (es.
@@ -476,18 +482,23 @@ lancio. Le tabelle sotto vanno quindi configurate **due volte**, una per `dev` e
 diversi (hostname, namespace, credenziali VPS/DB/Keycloak di ciascun ambiente). Le **Secrets** sono cifrate
 e mai visibili nei log; le **Variables** sono in chiaro, per valori non sensibili.
 
-Usati sia da **Infra** che da **Build & Deploy** salvo dove indicato. `DB_PASSWORD` e
-`KEYCLOAK_ADMIN_CLIENT_SECRET` **non vanno inventati a mano**: sono generati dalla pipeline Infra e
-stampati nel riepilogo della sua run (vedi [Infra](#infra)) — vanno copiati nell'Environment corrispondente
-(`dev` o `prod`, a seconda di quale sia stato lanciato) dopo il primo provisioning del namespace.
+Usati sia da **Infra** che da **Build & Deploy** salvo dove indicato. `DB_PASSWORD`,
+`KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` e `KEYCLOAK_ADMIN_CLIENT_SECRET` **non vanno inventati a mano**: la prima
+volta Infra li genera casualmente e li stampa nel riepilogo della sua run (vedi [Infra](#infra), incluso se
+la run fallisce dopo averli generati) — copiali nell'Environment corrispondente (`dev` o `prod`) subito
+dopo. **Importante**: se questi Secrets sono già presenti sull'Environment quando rilanci Infra, vengono
+**riusati così come sono** invece di rigenerarne di nuovi — fondamentale perché Postgres e Keycloak
+persistono i dati tra un run e l'altro (PVC), quindi una password rigenerata ogni volta smetterebbe di
+corrispondere a quella realmente impostata al primo avvio, rompendo i login su ogni run successivo al primo.
 
 #### Secrets
 
 | Nome | Descrizione | Esempio |
 |------|-------------|---------|
 | `SSH_PRIVATE_KEY` | Chiave privata SSH (PEM) corrispondente a una chiave pubblica autorizzata sulla VPS | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
-| `DB_PASSWORD` | Password del database Postgres condiviso (app + Keycloak) — **generata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
-| `KEYCLOAK_ADMIN_CLIENT_SECRET` | Client secret del client confidential `clubmanager-backend` su Keycloak — **generato da Infra** | *(copiata dal riepilogo della run Infra)* |
+| `DB_PASSWORD` | Password del database Postgres condiviso (app + Keycloak) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
+| `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Password dell'admin console Keycloak (bootstrap, distinto dall'admin applicativo) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
+| `KEYCLOAK_ADMIN_CLIENT_SECRET` | Client secret del client confidential `clubmanager-backend` su Keycloak — **generato/riusato da Infra** | *(copiata dal riepilogo della run Infra)* |
 
 #### Variables
 

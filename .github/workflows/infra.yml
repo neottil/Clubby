@@ -32,16 +32,42 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Generati qui, mai committati: sono i valori "sorgente" per i GitHub
-      # Secrets che poi Build & Deploy userà (DB_PASSWORD,
-      # KEYCLOAK_ADMIN_CLIENT_SECRET) — vengono stampati una sola volta nel
-      # riepilogo della run per essere copiati a mano.
-      - name: Genera i secret dell'infrastruttura
+      # Se questi Secrets esistono già sull'Environment (copiati da una run
+      # precedente, anche fallita più avanti — vedi step di riepilogo con
+      # if: always()), li RIUSA invece di rigenerarli a caso: Postgres/Keycloak
+      # persistono i dati tra un run e l'altro (PVC), quindi una password
+      # rigenerata ogni volta smetterebbe di corrispondere a quella realmente
+      # impostata al primo avvio, rompendo i login su ogni run successivo.
+      - name: Genera (o riusa) i secret dell'infrastruttura
         id: secrets
+        env:
+          EXISTING_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          EXISTING_KC_BOOTSTRAP_PASSWORD: ${{ secrets.KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD }}
+          EXISTING_KC_BACKEND_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
         run: |
-          echo "db_password=$(openssl rand -base64 24)" >> "$GITHUB_OUTPUT"
-          echo "kc_bootstrap_password=$(openssl rand -base64 24)" >> "$GITHUB_OUTPUT"
-          echo "kc_backend_secret=$(openssl rand -hex 32)" >> "$GITHUB_OUTPUT"
+          if [ -n "$EXISTING_DB_PASSWORD" ]; then
+            echo "db_password=$EXISTING_DB_PASSWORD" >> "$GITHUB_OUTPUT"
+            echo "  DB_PASSWORD: riuso quello già presente nell'Environment."
+          else
+            echo "db_password=$(openssl rand -base64 24)" >> "$GITHUB_OUTPUT"
+            echo "  DB_PASSWORD: generato nuovo (nessun secret esistente trovato)."
+          fi
+
+          if [ -n "$EXISTING_KC_BOOTSTRAP_PASSWORD" ]; then
+            echo "kc_bootstrap_password=$EXISTING_KC_BOOTSTRAP_PASSWORD" >> "$GITHUB_OUTPUT"
+            echo "  KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD: riuso quello già presente nell'Environment."
+          else
+            echo "kc_bootstrap_password=$(openssl rand -base64 24)" >> "$GITHUB_OUTPUT"
+            echo "  KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD: generato nuovo (nessun secret esistente trovato)."
+          fi
+
+          if [ -n "$EXISTING_KC_BACKEND_SECRET" ]; then
+            echo "kc_backend_secret=$EXISTING_KC_BACKEND_SECRET" >> "$GITHUB_OUTPUT"
+            echo "  KEYCLOAK_ADMIN_CLIENT_SECRET: riuso quello già presente nell'Environment."
+          else
+            echo "kc_backend_secret=$(openssl rand -hex 32)" >> "$GITHUB_OUTPUT"
+            echo "  KEYCLOAK_ADMIN_CLIENT_SECRET: generato nuovo (nessun secret esistente trovato)."
+          fi
 
       - name: Renderizza manifest k8s/templates/infra
         env:
@@ -163,10 +189,18 @@ jobs:
             echo "--- Log del Job di inizializzazione realm ---"
             kubectl logs job/keycloak-realm-init -n "$NS"
 
+      # if: always() — gira anche se un passo precedente è fallito (es. il Job
+      # di init Keycloak): i tre secret sono già stati generati/riusati dallo
+      # step "Genera (o riusa)" a inizio job, quindi vanno comunque mostrati.
+      # Copiandoli nell'Environment ORA, la run successiva li riuserà invece
+      # di generarne di nuovi (vedi commento su quello step) — indispensabile
+      # se il fallimento è avvenuto DOPO che Postgres/Keycloak li hanno già
+      # usati per creare utenti/dati persistenti.
       - name: Riepilogo — valori da copiare nei GitHub Secrets/Variables
+        if: always()
         run: |
           {
-            echo "## Infra completata"
+            echo "## Infra — riepilogo (${{ job.status }})"
             echo ""
             echo "Copia questi valori nell'Environment **${{ inputs.env }}** (Settings → Environments →"
             echo "${{ inputs.env }}), usati dalla pipeline **Build & Deploy** (sempre Environment \`dev\`,"
@@ -175,6 +209,7 @@ jobs:
             echo "### Secrets"
             echo '```'
             echo "DB_PASSWORD=${{ steps.secrets.outputs.db_password }}"
+            echo "KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=${{ steps.secrets.outputs.kc_bootstrap_password }}"
             echo "KEYCLOAK_ADMIN_CLIENT_SECRET=${{ steps.secrets.outputs.kc_backend_secret }}"
             echo '```'
             echo ""
@@ -189,9 +224,19 @@ jobs:
             echo "vuoi usare nomi client o un realm diversi dai default.)"
             echo ""
             echo "**Questi valori sono visibili in chiaro una sola volta, qui.** Copiali subito nei"
-            echo "GitHub Secrets/Variables: questo riepilogo non verrà rigenerato automaticamente."
+            echo "GitHub Secrets: **KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD** in particolare non è mai stato"
+            echo "mostrato prima — se non lo salvi ora, alla prossima run ne verrà generato uno nuovo"
+            echo "che NON corrisponderà più a quello effettivamente impostato su Postgres/Keycloak se"
+            echo "questa run è arrivata almeno fino al loro avvio."
             echo ""
-            echo "Primo accesso admin: https://${{ vars.APP_DOMAIN }} — email"
-            echo "\`${{ inputs.initial_admin_email }}\`, password temporanea (quella inserita al lancio"
-            echo "di questa pipeline), da cambiare al primo login."
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "Primo accesso admin: https://${{ vars.APP_DOMAIN }} — email"
+              echo "\`${{ inputs.initial_admin_email }}\`, password temporanea (quella inserita al lancio"
+              echo "di questa pipeline), da cambiare al primo login."
+            else
+              echo "⚠️ **Questa run non è completata con successo** (vedi i log degli step precedenti)."
+              echo "L'utente admin potrebbe non essere stato creato: copia comunque i secret sopra, poi"
+              echo "rilancia Infra sullo stesso Environment — riuserà questi valori invece di generarne"
+              echo "di nuovi, ripartendo da dove si era interrotto senza disallineare le credenziali."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
