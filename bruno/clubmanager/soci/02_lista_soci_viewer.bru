@@ -1,0 +1,19 @@
+meta {
+  name: Lista soci (viewer — solo il proprio)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/soci
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_viewer}}
+}
+
+docs {
+  Viewer: ritorna solo il proprio record socio (array con 0 o 1 elemento).
+}

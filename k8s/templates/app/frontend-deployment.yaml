@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clubmanager-frontend
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: clubmanager-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clubmanager-frontend
+  template:
+    metadata:
+      labels:
+        app: clubmanager-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ${FRONTEND_IMAGE}
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10

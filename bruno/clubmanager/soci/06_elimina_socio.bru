@@ -1,0 +1,20 @@
+meta {
+  name: Elimina socio (admin)
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{base_url}}/api/soci/{{socio_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Elimina il socio e a cascata tutti i suoi incontri, buoni e movimenti.
+  Ritorna 204 No Content.
+}

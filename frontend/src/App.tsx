@@ -1,33 +1,59 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './auth/AuthContext';
+import Layout from './components/Layout';
+import LoginPage from './pages/LoginPage';
+import SociPage from './pages/SociPage';
+import IncontriPage from './pages/IncontriPage';
+import BuoniPage from './pages/BuoniPage';
+import AdminPage from './pages/AdminPage';
 
-type Socio = {
-  id: string;
-  nome: string;
-  email: string;
-};
-
-function App() {
-  const [soci, setSoci] = useState<Socio[]>([]);
+function CallbackPage() {
+  const { user, isLoading } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetch('http://localhost:3000/api/soci')
-      .then(res => res.json())
-      .then((data: Socio[]) => setSoci(data))
-      .catch(err => console.error('Errore fetch soci:', err));
-  }, []);
+    if (!isLoading && user) {
+      navigate('/', { replace: true });
+    }
+  }, [isLoading, user, navigate]);
+
+  return <div style={{ padding: 64, textAlign: 'center' }}>{isLoading ? 'Autenticazione in corso...' : 'Reindirizzamento...'}</div>;
+}
+
+function ProtectedRoutes() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) return <div style={{ padding: 64, textAlign: 'center' }}>Caricamento...</div>;
+  if (!user)     return <Navigate to='/login' replace />;
+
+  // La scheda "Soci" è riservata all'admin: un viewer atterra su "Incontri".
+  const defaultRoute = user.isAdmin ? '/soci' : '/incontri';
 
   return (
-    <div>
-      <h1>Lista Soci</h1>
-      <ul>
-        {soci.map(socio => (
-          <li key={socio.id}>
-            {socio.nome} - {socio.email}
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Layout>
+      <Routes>
+        <Route path='/'         element={<Navigate to={defaultRoute} replace />} />
+        <Route path='/soci'     element={<SociPage />} />
+        <Route path='/incontri' element={<IncontriPage />} />
+        <Route path='/buoni'    element={<BuoniPage />} />
+        <Route path='/admin'    element={<AdminPage />} />
+        <Route path='*'         element={<Navigate to={defaultRoute} replace />} />
+      </Routes>
+    </Layout>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path='/login'    element={<LoginPage />} />
+          <Route path='/callback' element={<CallbackPage />} />
+          <Route path='/*'        element={<ProtectedRoutes />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}

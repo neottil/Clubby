@@ -1,0 +1,40 @@
+# Un solo host pubblico per frontend + backend, con routing per path (come
+# Keycloak, il backend non ha un hostname proprio): il backend espone già
+# tutte le sue route sotto il prefisso /api (vedi backend/src/server.ts), e
+# il client frontend chiama ${VITE_API_BASE_URL}/api/... — bastano quindi due
+# regole sullo stesso host, senza reverse proxy né modifiche al server.
+#
+# Assume Traefik come Ingress Controller (incluso di default in k3s, ingressClassName
+# "traefik") e cert-manager con il ClusterIssuer "letsencrypt", entrambi configurati da
+# scripts/setup-vps-k3s.sh. Adatta ingressClassName/annotazione per un cluster diverso.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clubmanager
+  namespace: ${KUBE_NAMESPACE}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ${APP_DOMAIN}
+      secretName: clubmanager-tls
+  rules:
+    - host: ${APP_DOMAIN}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: clubmanager-backend
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: clubmanager-frontend
+                port:
+                  number: 80

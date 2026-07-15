@@ -1,0 +1,20 @@
+meta {
+  name: Lista buoni (admin — tutti)
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/buoni
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Admin: ritorna tutti i buoni.
+  Filtro opzionale: ?socio_id={{socio_id}}
+}

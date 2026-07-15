@@ -1,0 +1,38 @@
+meta {
+  name: Crea incontro (admin)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/incontri
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "socio_id": "{{socio_id}}",
+    "data_incontro": "2024-03-10",
+    "costo": 25.00,
+    "note": "Seduta di allenamento"
+  }
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data.id) {
+    bru.setVar("incontro_id", data.id);
+  }
+}
+
+docs {
+  Solo admin. Crea un incontro per il socio indicato in socio_id.
+  costo deve essere >= 0.
+  data_incontro: formato YYYY-MM-DD.
+  Salva automaticamente incontro_id per le richieste successive.
+}

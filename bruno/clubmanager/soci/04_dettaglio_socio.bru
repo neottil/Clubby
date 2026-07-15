@@ -1,0 +1,21 @@
+meta {
+  name: Dettaglio socio
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/soci/{{socio_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Admin: accede a qualsiasi socio.
+  Viewer: solo al proprio (403 altrimenti).
+  Imposta socio_id prima di eseguire (oppure usa "Crea socio" che lo salva automaticamente).
+}

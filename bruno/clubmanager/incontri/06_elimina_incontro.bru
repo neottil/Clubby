@@ -1,0 +1,19 @@
+meta {
+  name: Elimina incontro (admin)
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{base_url}}/api/incontri/{{incontro_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Ritorna 204 No Content.
+}

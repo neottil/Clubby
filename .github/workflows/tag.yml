@@ -1,0 +1,128 @@
+name: Tag
+
+# Attivazione MANUALE: da lanciare quando si decide di promuovere l'ultimo
+# deploy riuscito su `main`, rendendolo la versione "reale" (rilascio).
+# Non si attiva più in automatico dopo ogni Build & Deploy: i deploy su
+# feature/* o fix/* condividono per ora lo stesso namespace di sviluppo (non
+# sono ancora "produzione") e non possono mai essere promossi da questo
+# workflow, che verifica sempre che la run scelta appartenga a `main`.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: >-
+          ID della run di "Build & Deploy" da promuovere (facoltativo). Se
+          vuoto, usa l'ultima run completata con successo su main.
+        required: false
+        default: ''
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Individua la run di Build & Deploy da promuovere
+        id: run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID_INPUT: ${{ inputs.run_id }}
+        run: |
+          set -e
+          if [ -n "$RUN_ID_INPUT" ]; then
+            RUN_ID="$RUN_ID_INPUT"
+          else
+            RUN_ID=$(gh run list \
+              --repo "${{ github.repository }}" \
+              --workflow build-deploy.yml \
+              --branch main \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+          fi
+
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "ERRORE: nessuna run di Build & Deploy riuscita trovata su main." >&2
+            exit 1
+          fi
+
+          # Sicurezza: anche se run_id è passato manualmente, promuovi solo build di main.
+          BRANCH=$(gh run view "$RUN_ID" --repo "${{ github.repository }}" --json headBranch --jq .headBranch)
+          if [ "$BRANCH" != "main" ]; then
+            echo "ERRORE: la run #$RUN_ID appartiene al branch '$BRANCH', non 'main'. Il workflow Tag promuove solo build da main." >&2
+            exit 1
+          fi
+
+          HEAD_SHA=$(gh run view "$RUN_ID" --repo "${{ github.repository }}" --json headSha --jq .headSha)
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "Promuovo la run #$RUN_ID (commit $HEAD_SHA, branch $BRANCH)"
+
+      - name: Scarica le versioni calcolate da quella run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh run download "${{ steps.run.outputs.run_id }}" --repo "${{ github.repository }}" --name versions
+
+      - id: v
+        run: |
+          echo "server=$(node -p "require('./versions.json').server")" >> "$GITHUB_OUTPUT"
+          echo "client=$(node -p "require('./versions.json').client")" >> "$GITHUB_OUTPUT"
+          echo "k8s=$(node -p "require('./versions.json').k8s")" >> "$GITHUB_OUTPUT"
+          echo "date_tag=$(node -p "require('./versions.json').date_tag")" >> "$GITHUB_OUTPUT"
+
+      - name: Config git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Rimuovi il tag di build (data) dal repo
+        run: |
+          git push origin ":refs/tags/build-${{ steps.v.outputs.date_tag }}" || \
+            echo "Tag build-${{ steps.v.outputs.date_tag }} già assente, salto"
+
+      - name: Crea o sposta i tag server-v*, client-v*, k8s-v*
+        run: |
+          for pair in "server:${{ steps.v.outputs.server }}" "client:${{ steps.v.outputs.client }}" "k8s:${{ steps.v.outputs.k8s }}"; do
+            prefix="${pair%%:*}"
+            version="${pair##*:}"
+            tag="${prefix}-v${version}"
+            git tag -fa "$tag" "${{ steps.run.outputs.head_sha }}" -m "$tag"
+            git push origin "$tag" --force
+          done
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Aggiunge il tag di versione reale allo stesso digest già pushato con il
+      # tag di data (nessun rebuild: solo un nuovo riferimento sul registry).
+      #
+      # NOTA: il tag di data NON viene eliminato dall'immagine in questo step.
+      # L'API di GitHub Packages cancella per "versione" (= digest), non per
+      # singolo tag: dato che il tag reale appena creato punta allo stesso
+      # digest del tag di data, cancellare quella versione rimuoverebbe anche
+      # il tag reale appena assegnato. Il tag di data viene quindi lasciato
+      # come alias secondario e rimosso dal job cleanup-registry di Build &
+      # Deploy nei cicli successivi (mantiene solo le 3 build più recenti,
+      # escludendo sempre i tag di versione reale).
+      - name: Assegna il tag di versione reale alle immagini
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ steps.v.outputs.server }} \
+            ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ steps.v.outputs.date_tag }}
+
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ steps.v.outputs.client }} \
+            ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ steps.v.outputs.date_tag }}

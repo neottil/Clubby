@@ -1,0 +1,21 @@
+meta {
+  name: Disassocia viewer da socio
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{base_url}}/api/admin/associa-viewer/{{socio_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Rimuove il collegamento tra un utente Keycloak e il socio.
+  Il socio rimane nel DB ma non è più accessibile da nessun viewer.
+  Ritorna 204 No Content.
+}

@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clubmanager-backend
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: clubmanager-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clubmanager-backend
+  template:
+    metadata:
+      labels:
+        app: clubmanager-backend
+    spec:
+      containers:
+        - name: backend
+          image: ${BACKEND_IMAGE}
+          ports:
+            - containerPort: ${BACKEND_PORT}
+          envFrom:
+            - configMapRef:
+                name: clubmanager-config
+            - secretRef:
+                name: clubmanager-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: ${BACKEND_PORT}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: ${BACKEND_PORT}
+            initialDelaySeconds: 10
+            periodSeconds: 20

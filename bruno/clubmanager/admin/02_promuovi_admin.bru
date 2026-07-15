@@ -1,0 +1,26 @@
+meta {
+  name: Promuovi utente ad admin
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/admin/promuovi
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "keycloak_user_id": "viewer@clubmanager.local"
+  }
+}
+
+docs {
+  Solo admin. Assegna il ruolo 'admin' all'utente indicato.
+  keycloak_user_id può essere l'UUID Keycloak oppure l'email dell'utente.
+}

@@ -1,0 +1,178 @@
+name: Infra
+
+# Attivazione MANUALE: provisiona (o ri-applica in modo idempotente) il
+# namespace k8s, l'istanza Postgres condivisa (database applicativo +
+# database Keycloak) e Keycloak stesso, poi inizializza il realm. Da
+# eseguire una volta prima del primo deploy applicativo in un namespace, o
+# quando serve ricreare l'infrastruttura.
+#
+# Scope volutamente separato da Build & Deploy, che gestisce solo backend e
+# frontend applicativi (vedi README, sezione K8s).
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Ambiente target (deve esistere come Environment del repo, con le proprie Variables/Secrets)'
+        type: environment
+        required: true
+      initial_admin_email:
+        description: 'Email del primo utente admin reale da creare in Keycloak'
+        required: true
+      initial_admin_password:
+        description: >-
+          Password iniziale (temporanea) del primo admin. Keycloak obbliga a
+          cambiarla al primo login. Non riusarla altrove: resta visibile nei
+          log di questa run.
+        required: true
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Generati qui, mai committati: sono i valori "sorgente" per i GitHub
+      # Secrets che poi Build & Deploy userà (DB_PASSWORD,
+      # KEYCLOAK_ADMIN_CLIENT_SECRET) — vengono stampati una sola volta nel
+      # riepilogo della run per essere copiati a mano.
+      - name: Genera i secret dell'infrastruttura
+        id: secrets
+        run: |
+          echo "db_password=$(openssl rand -base64 24)" >> "$GITHUB_OUTPUT"
+          echo "kc_bootstrap_password=$(openssl rand -base64 24)" >> "$GITHUB_OUTPUT"
+          echo "kc_backend_secret=$(openssl rand -hex 32)" >> "$GITHUB_OUTPUT"
+
+      - name: Renderizza manifest k8s/templates/infra
+        env:
+          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
+          DB_NAME: ${{ vars.DB_NAME || 'clubmanager' }}
+          DB_USER: ${{ vars.DB_USER || 'clubmanager' }}
+          POSTGRES_STORAGE_SIZE: ${{ vars.POSTGRES_STORAGE_SIZE || '5Gi' }}
+          KEYCLOAK_HOST: ${{ vars.KEYCLOAK_HOST }}
+          KEYCLOAK_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
+          KEYCLOAK_START_MODE: ${{ vars.KEYCLOAK_START_MODE || 'start' }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p k8s/rendered-infra
+          VARS='$KUBE_NAMESPACE $DB_NAME $DB_USER $POSTGRES_STORAGE_SIZE $KEYCLOAK_HOST $KEYCLOAK_BOOTSTRAP_ADMIN $KEYCLOAK_START_MODE'
+          for f in k8s/templates/infra/*.yaml; do
+            envsubst "$VARS" < "$f" > "k8s/rendered-infra/$(basename "$f")"
+          done
+
+      - name: Prepara file di init Postgres e lo script di init realm
+        run: |
+          mkdir -p k8s/rendered-infra/postgres-init
+          cp backend/src/db/schema.sql k8s/rendered-infra/postgres-init/01-schema.sql
+          echo 'CREATE DATABASE keycloak;' > k8s/rendered-infra/postgres-init/00-create-keycloak-db.sql
+          cp scripts/keycloak-realm-init.sh k8s/rendered-infra/keycloak-realm-init.sh
+
+      - name: Copia i file sulla VPS via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          source: "k8s/rendered-infra/*"
+          target: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubmanager/infra' }}
+          strip_components: 2
+
+      - name: Applica l'infrastruttura e inizializza il realm Keycloak
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          NS: ${{ vars.KUBE_NAMESPACE }}
+          PATH_REMOTE: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubmanager/infra' }}
+          DB_PASSWORD: ${{ steps.secrets.outputs.db_password }}
+          KC_BOOTSTRAP_PASSWORD: ${{ steps.secrets.outputs.kc_bootstrap_password }}
+          KC_BACKEND_SECRET: ${{ steps.secrets.outputs.kc_backend_secret }}
+          KC_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
+          KC_REALM: ${{ vars.KEYCLOAK_REALM || 'clubmanager' }}
+          KC_HOST: ${{ vars.KEYCLOAK_HOST }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          INITIAL_ADMIN_EMAIL: ${{ inputs.initial_admin_email }}
+          INITIAL_ADMIN_PASSWORD: ${{ inputs.initial_admin_password }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          envs: NS,PATH_REMOTE,DB_PASSWORD,KC_BOOTSTRAP_PASSWORD,KC_BACKEND_SECRET,KC_BOOTSTRAP_ADMIN,KC_REALM,KC_HOST,APP_DOMAIN,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD
+          script: |
+            set -e
+
+            kubectl apply -f "$PATH_REMOTE/namespace.yaml"
+
+            kubectl create secret generic clubmanager-infra-secrets -n "$NS" \
+              --from-literal=DB_PASSWORD="$DB_PASSWORD" \
+              --from-literal=KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="$KC_BOOTSTRAP_PASSWORD" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl create configmap postgres-init -n "$NS" \
+              --from-file="$PATH_REMOTE/postgres-init/" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl apply -f "$PATH_REMOTE/postgres-pvc.yaml"
+            kubectl apply -f "$PATH_REMOTE/postgres-deployment.yaml"
+            kubectl apply -f "$PATH_REMOTE/postgres-service.yaml"
+            kubectl rollout status deployment/clubmanager-postgres -n "$NS" --timeout=180s
+
+            kubectl apply -f "$PATH_REMOTE/keycloak-deployment.yaml"
+            kubectl apply -f "$PATH_REMOTE/keycloak-service.yaml"
+            kubectl apply -f "$PATH_REMOTE/keycloak-ingress.yaml"
+            kubectl rollout status deployment/clubmanager-keycloak -n "$NS" --timeout=300s
+
+            kubectl create configmap keycloak-realm-init-script -n "$NS" \
+              --from-file=keycloak-realm-init.sh="$PATH_REMOTE/keycloak-realm-init.sh" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl create secret generic clubmanager-init-params -n "$NS" \
+              --from-literal=KEYCLOAK_URL="http://clubmanager-keycloak.$NS.svc.cluster.local:8080" \
+              --from-literal=REALM="$KC_REALM" \
+              --from-literal=ADMIN_USER="$KC_BOOTSTRAP_ADMIN" \
+              --from-literal=ADMIN_PASS="$KC_BOOTSTRAP_PASSWORD" \
+              --from-literal=FRONTEND_URL="https://$APP_DOMAIN" \
+              --from-literal=BACKEND_CLIENT_SECRET="$KC_BACKEND_SECRET" \
+              --from-literal=INITIAL_ADMIN_EMAIL="$INITIAL_ADMIN_EMAIL" \
+              --from-literal=INITIAL_ADMIN_PASSWORD="$INITIAL_ADMIN_PASSWORD" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl delete job keycloak-realm-init -n "$NS" --ignore-not-found
+            kubectl apply -f "$PATH_REMOTE/keycloak-init-job.yaml"
+            kubectl wait --for=condition=complete job/keycloak-realm-init -n "$NS" --timeout=180s
+
+            echo "--- Log del Job di inizializzazione realm ---"
+            kubectl logs job/keycloak-realm-init -n "$NS"
+
+      - name: Riepilogo — valori da copiare nei GitHub Secrets/Variables
+        run: |
+          {
+            echo "## Infra completata"
+            echo ""
+            echo "Copia questi valori nell'Environment **${{ inputs.env }}** (Settings → Environments →"
+            echo "${{ inputs.env }}), usati dalla pipeline **Build & Deploy** (sempre Environment \`dev\`,"
+            echo "quindi rilevante solo se questa run ha provisionato \`dev\`):"
+            echo ""
+            echo "### Secrets"
+            echo '```'
+            echo "DB_PASSWORD=${{ steps.secrets.outputs.db_password }}"
+            echo "KEYCLOAK_ADMIN_CLIENT_SECRET=${{ steps.secrets.outputs.kc_backend_secret }}"
+            echo '```'
+            echo ""
+            echo "### Variables"
+            echo '```'
+            echo "KEYCLOAK_REALM=${{ vars.KEYCLOAK_REALM || 'clubmanager' }}"
+            echo "KEYCLOAK_ADMIN_CLIENT_ID=clubmanager-backend"
+            echo "KEYCLOAK_CLIENT_ID=clubmanager-spa"
+            echo '```'
+            echo ""
+            echo "(Le ultime tre hanno comunque questi stessi valori come default: vanno impostate solo se"
+            echo "vuoi usare nomi client o un realm diversi dai default.)"
+            echo ""
+            echo "**Questi valori sono visibili in chiaro una sola volta, qui.** Copiali subito nei"
+            echo "GitHub Secrets/Variables: questo riepilogo non verrà rigenerato automaticamente."
+            echo ""
+            echo "Primo accesso admin: https://${{ vars.APP_DOMAIN }} — email"
+            echo "\`${{ inputs.initial_admin_email }}\`, password temporanea (quella inserita al lancio"
+            echo "di questa pipeline), da cambiare al primo login."
+          } >> "$GITHUB_STEP_SUMMARY"

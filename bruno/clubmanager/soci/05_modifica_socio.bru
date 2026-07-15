@@ -1,0 +1,27 @@
+meta {
+  name: Modifica socio (admin)
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{base_url}}/api/soci/{{socio_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "telefono": "3339876543",
+    "note": "Nota aggiornata"
+  }
+}
+
+docs {
+  Solo admin. Tutti i campi sono opzionali — aggiorna solo quelli presenti nel body.
+  Campi modificabili: nome, cognome, email, telefono, note.
+}

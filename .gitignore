@@ -1,2 +1,45 @@
-# Local Hitory
+# Local history (IDE)
 .lh/
+.idea/
+.vscode/*
+!.vscode/launch.json
+
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build output
+dist/
+*/dist/
+build/
+*/build/
+
+# TypeScript incremental
+*.tsbuildinfo
+
+# Env files con segreti (i file .example vanno in repo, quelli reali no)
+*.local.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env.local
+# File .env radice
+.env
+
+# Build packages
+*.zip
+
+# Logs
+*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
+
+
+# Manifest k8s renderizzati dalle pipeline (contengono i secret sostituiti in chiaro)
+k8s/rendered/
+k8s/rendered-infra/
+
+# Frontend
+frontend/.vite/

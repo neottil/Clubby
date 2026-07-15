@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: clubmanager-postgres
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  selector:
+    app: clubmanager-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,20 @@
+meta {
+  name: Lista utenti Regstrati (admin)
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/admin/users
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Ritorna la lista degli utenti registrati su Keycloak
+  con i loro ruoli realm (admin/viewer).
+}

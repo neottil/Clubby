@@ -1,0 +1,19 @@
+meta {
+  name: Lista soci (admin — tutti)
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/soci
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Admin: ritorna la lista completa di tutti i soci.
+}

@@ -1,0 +1,27 @@
+# Espone Keycloak pubblicamente in HTTPS: necessario perché il browser
+# dell'utente deve raggiungerlo direttamente per il flusso di login OIDC
+# (redirect Authorization Code + PKCE), non solo il backend.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clubmanager-keycloak
+  namespace: ${KUBE_NAMESPACE}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ${KEYCLOAK_HOST}
+      secretName: clubmanager-keycloak-tls
+  rules:
+    - host: ${KEYCLOAK_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: clubmanager-keycloak
+                port:
+                  number: 8080

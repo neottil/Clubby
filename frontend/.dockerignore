@@ -1,0 +1,9 @@
+node_modules
+src
+public
+index.html
+vite.config.ts
+tsconfig*.json
+.env.local
+.vite
+npm-debug.log*

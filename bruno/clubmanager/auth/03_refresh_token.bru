@@ -1,0 +1,35 @@
+meta {
+  name: Refresh token admin
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{keycloak_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/token
+  body: formUrlEncoded
+  auth: none
+}
+
+body:form-urlencoded {
+  grant_type: refresh_token
+  client_id: {{keycloak_client_id}}
+  refresh_token: {{refresh_token_admin}}
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data.access_token) {
+    bru.setVar("token_admin", data.access_token);
+  }
+  if (data.refresh_token) {
+    bru.setVar("refresh_token_admin", data.refresh_token);
+  }
+}
+
+docs {
+  Rinnova l'access token admin usando il refresh token.
+  Usa questa request invece di 01_token_admin quando il token è scaduto
+  ma il refresh token è ancora valido (default Keycloak: 30 minuti).
+  
+  Aggiorna automaticamente token_admin e refresh_token_admin.
+}

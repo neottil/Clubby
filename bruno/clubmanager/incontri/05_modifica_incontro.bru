@@ -1,0 +1,26 @@
+meta {
+  name: Modifica incontro (admin)
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{base_url}}/api/incontri/{{incontro_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "costo": 30.00,
+    "note": "Costo aggiornato"
+  }
+}
+
+docs {
+  Solo admin. Campi modificabili: data_incontro, costo, note.
+}
