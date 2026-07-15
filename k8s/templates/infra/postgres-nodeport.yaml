@@ -1,0 +1,23 @@
+# Service opzionale per esporre Postgres su internet tramite NodePort,
+# utile per collegarsi da un client locale (DBeaver, ecc.) senza passare da
+# un tunnel SSH + kubectl port-forward (vedi README per entrambi i metodi).
+# Applicato dal workflow Infra SOLO se la variabile DB_NODE_PORT è impostata
+# (nessun default): se assente, questo Service viene rimosso/non creato.
+#
+# ATTENZIONE: un NodePort espone Postgres su ${KUBE_NAMESPACE} sull'IP
+# pubblico della VPS, su tutte le interfacce, protetto solo dalla password
+# del DB. Filtra la porta via firewall (es. Hetzner Cloud Firewall) al tuo
+# IP, non lasciarla aperta a tutto internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: clubmanager-postgres-external
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  type: NodePort
+  selector:
+    app: clubmanager-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      nodePort: ${DB_NODE_PORT}

@@ -52,10 +52,11 @@ jobs:
           KEYCLOAK_HOST: ${{ vars.KEYCLOAK_HOST }}
           KEYCLOAK_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
           KEYCLOAK_START_MODE: ${{ vars.KEYCLOAK_START_MODE || 'start' }}
+          DB_NODE_PORT: ${{ vars.DB_NODE_PORT }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered-infra
-          VARS='$KUBE_NAMESPACE $DB_NAME $DB_USER $POSTGRES_STORAGE_SIZE $KEYCLOAK_HOST $KEYCLOAK_BOOTSTRAP_ADMIN $KEYCLOAK_START_MODE'
+          VARS='$KUBE_NAMESPACE $DB_NAME $DB_USER $POSTGRES_STORAGE_SIZE $KEYCLOAK_HOST $KEYCLOAK_BOOTSTRAP_ADMIN $KEYCLOAK_START_MODE $DB_NODE_PORT'
           for f in k8s/templates/infra/*.yaml; do
             envsubst "$VARS" < "$f" > "k8s/rendered-infra/$(basename "$f")"
           done
@@ -90,6 +91,7 @@ jobs:
           KC_REALM: ${{ vars.KEYCLOAK_REALM || 'clubmanager' }}
           KC_HOST: ${{ vars.KEYCLOAK_HOST }}
           APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          DB_NODE_PORT: ${{ vars.DB_NODE_PORT }}
           INITIAL_ADMIN_EMAIL: ${{ inputs.initial_admin_email }}
           INITIAL_ADMIN_PASSWORD: ${{ inputs.initial_admin_password }}
         with:
@@ -97,7 +99,7 @@ jobs:
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
-          envs: NS,PATH_REMOTE,DB_PASSWORD,KC_BOOTSTRAP_PASSWORD,KC_BACKEND_SECRET,KC_BOOTSTRAP_ADMIN,KC_REALM,KC_HOST,APP_DOMAIN,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD
+          envs: NS,PATH_REMOTE,DB_PASSWORD,KC_BOOTSTRAP_PASSWORD,KC_BACKEND_SECRET,KC_BOOTSTRAP_ADMIN,KC_REALM,KC_HOST,APP_DOMAIN,DB_NODE_PORT,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD
           script: |
             set -e
 
@@ -123,6 +125,16 @@ jobs:
             kubectl apply -f "$PATH_REMOTE/postgres-deployment.yaml"
             kubectl apply -f "$PATH_REMOTE/postgres-service.yaml"
             kubectl rollout status deployment/clubmanager-postgres -n "$NS" --timeout=180s
+
+            # NodePort esterno per Postgres: solo se DB_NODE_PORT è impostata
+            # (nessun default — feature opt-in, vedi README). Se non impostata,
+            # rimuove il Service se esisteva da una run precedente con la
+            # variabile poi tolta, per non lasciare porte aperte per errore.
+            if [ -n "$DB_NODE_PORT" ]; then
+              kubectl apply -f "$PATH_REMOTE/postgres-nodeport.yaml"
+            else
+              kubectl delete -f "$PATH_REMOTE/postgres-nodeport.yaml" --ignore-not-found
+            fi
 
             kubectl apply -f "$PATH_REMOTE/keycloak-deployment.yaml"
             kubectl apply -f "$PATH_REMOTE/keycloak-service.yaml"

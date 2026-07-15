@@ -513,6 +513,7 @@ stampati nel riepilogo della sua run (vedi [Infra](#infra)) — vanno copiati ne
 | `BACKEND_PORT` | Porta interna su cui ascolta il backend (Deployment + ConfigMap `PORT`) | `3000` | `3000` | Build & Deploy |
 | `POSTGRES_STORAGE_SIZE` | Dimensione del PVC per l'istanza Postgres condivisa | `5Gi` | `5Gi` | Infra |
 | `DB_PORT` | Porta Postgres | `5432` | `5432` | Build & Deploy |
+| `DB_NODE_PORT` | Porta `NodePort` su cui esporre Postgres sull'IP pubblico della VPS, per collegarsi da un client locale (DBeaver, ecc.) — feature opt-in, **nessun default**: se non impostata il Service `NodePort` non viene creato (o viene rimosso se era stato creato in precedenza). Vedi sezione "Connessione al DB da un client locale" valori possibili 30000-32767 | `30432` | `-` (disattivato) | Infra |
 | `DB_NAME` | Nome del database applicativo (il database `keycloak` è fisso, creato da Infra) | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
 | `DB_USER` | Utente Postgres applicativo (condiviso anche da Keycloak) | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
 | `KEYCLOAK_BOOTSTRAP_ADMIN` | Username dell'admin console Keycloak (bootstrap, non l'admin applicativo) | `admin` | `admin` | Infra |
@@ -531,6 +532,40 @@ stampati nel riepilogo della sua run (vedi [Infra](#infra)) — vanno copiati ne
 
 Nessun secret aggiuntivo serve per il registry immagini: le pipeline si autenticano su `ghcr.io` con il
 `GITHUB_TOKEN` automatico di Actions (permesso `packages: write`, già configurato nei workflow).
+
+### Connessione al DB da un client locale (DBeaver, ecc.)
+
+Postgres gira dentro il cluster su un Service `ClusterIP` (solo interno, non raggiungibile da internet).
+Due modi per collegarti da un client locale:
+
+#### 1. Tunnel SSH + `kubectl port-forward` (sempre disponibile, nessuna esposizione pubblica)
+
+Da terminale locale:
+```bash
+ssh -L 5432:localhost:5432 deploy@<IP_VPS> \
+  'export KUBECONFIG=/home/deploy/.kube/config && kubectl port-forward -n <namespace> svc/clubmanager-postgres 5432:5432'
+```
+(sostituisci `<IP_VPS>` e `<namespace>`, es. `clubmanager-dev`; sostituisci `deploy` se il tuo `SSH_USER` è
+diverso). Lascia il terminale aperto finché usi il client — il tunnel resta attivo finché la sessione SSH è
+connessa.
+
+Poi in DBeaver: host `localhost`, porta `5432`, database/utente/password = `DB_NAME`/`DB_USER`/`DB_PASSWORD`
+dell'Environment (default `clubmanager`/`clubmanager`; la password è quella generata da Infra, vedi tabella
+sopra).
+
+#### 2. `NodePort` (esposizione pubblica sull'IP della VPS, opt-in)
+
+Imposta `DB_NODE_PORT` (es. `30432`) sull'Environment desiderato e rilancia **Infra**: crea un Service
+`NodePort` aggiuntivo (`k8s/templates/infra/postgres-nodeport.yaml`), raggiungibile su
+`<IP_VPS>:<DB_NODE_PORT>`. Se in seguito rimuovi/svuoti `DB_NODE_PORT` e rilanci Infra, il Service viene
+eliminato automaticamente.
+
+⚠️ **Attenzione**: un `NodePort` espone Postgres su tutte le interfacce della VPS, protetto solo dalla
+password del DB. Se lo attivi, filtra la porta via firewall (es. Hetzner Cloud Firewall) al tuo IP
+personale — non lasciarla aperta a tutto internet.
+
+In DBeaver: host `<IP_VPS>` (o un DNS che punta allo stesso IP, es. `db-dev.clubby.click`), porta
+`DB_NODE_PORT`, stesse credenziali del metodo 1.
 
 ## TODO
 

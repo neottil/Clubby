@@ -30,9 +30,16 @@ set -euo pipefail
 : "${INITIAL_ADMIN_EMAIL:?variabile INITIAL_ADMIN_EMAIL mancante}"
 : "${INITIAL_ADMIN_PASSWORD:?variabile INITIAL_ADMIN_PASSWORD mancante}"
 
-echo "▶ Attendo Keycloak su $KEYCLOAK_URL..."
+# L'health check gira sulla porta 9000 (management interface, KC_HEALTH_ENABLED),
+# non sulla porta 8080 di KEYCLOAK_URL (API OIDC/admin) — vedi keycloak-service.yaml.
+# KEYCLOAK_URL qui è sempre l'URL interno al cluster costruito da Infra
+# (http://clubmanager-keycloak.<ns>.svc.cluster.local:8080), quindi la
+# sostituzione di porta è sicura.
+KEYCLOAK_HEALTH_URL="${KEYCLOAK_URL/:8080/:9000}"
+
+echo "▶ Attendo Keycloak su $KEYCLOAK_HEALTH_URL..."
 for i in $(seq 1 60); do
-  if curl -sf "$KEYCLOAK_URL/health/ready" >/dev/null 2>&1; then
+  if curl -sf "$KEYCLOAK_HEALTH_URL/health/ready" >/dev/null 2>&1; then
     echo "  Keycloak pronto."
     break
   fi
