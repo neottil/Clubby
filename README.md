@@ -376,7 +376,7 @@ sbagliato farebbe fallire sempre la verifica. Il frontend riceve lo stesso valor
 
 Si attiva su push su `main`, `feature/**`, `fix/**` (o manualmente). Tutti i branch deployano sullo
 **stesso namespace** (`KUBE_NAMESPACE` dell'Environment `dev`, a cui il workflow è sempre agganciato —
-`environment: dev` su ogni job): ogni push su uno di questi branch sovrascrive il deploy corrente in
+`environment: development` su ogni job): ogni push su uno di questi branch sovrascrive il deploy corrente in
 sviluppo. La promozione controllata in produzione (Environment `prod`, provisionato da `Infra`) è prevista in
 una pipeline `Promote` dedicata futura, non ancora implementata — riuserà le immagini Docker già pushate su
 `ghcr.io` da questo workflow, senza rebuild.
@@ -409,7 +409,7 @@ I manifest renderizzati (`k8s/rendered/`, contengono credenziali in chiaro) non 
 #### `Tag` ([tag.yml](.github/workflows/tag.yml))
 
 **Attivazione manuale** (`workflow_dispatch`, tab Actions → Tag → Run workflow): non parte da solo dopo
-`Build & Deploy`. Anche questo workflow è sempre agganciato all'Environment `dev` (`environment: dev`), come
+`Build & Deploy`. Anche questo workflow è sempre agganciato all'Environment `dev` (`environment: development`), come
 `Build & Deploy`: assegna il tag di versione reale alle immagini già buildate in sviluppo. Va lanciato
 quando si decide di **promuovere** l'ultimo deploy riuscito su `main`, rendendolo la versione "reale"
 (rilascio) — coerente col fatto che, per ora, `feature/**` e `fix/**` deployano sullo stesso namespace di

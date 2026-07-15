@@ -19,7 +19,7 @@ on:
 jobs:
   tag:
     runs-on: ubuntu-latest
-    environment: dev
+    environment: development
     permissions:
       contents: write
       packages: write
