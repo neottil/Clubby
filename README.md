@@ -14,7 +14,7 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 - **Backend**: Node.js 22, server HTTP nativo (`backend/src/server.ts`), usato sia in locale che in produzione
 - **Database**: PostgreSQL 16
 - **Autenticazione**: Keycloak 26 (OIDC Authorization Code Flow + PKCE)
-- **Deploy target**: Docker / Kubernetes su VPC privata (nessuna dipendenza AWS)
+- **Deploy target**: Docker / Kubernetes su VPC privata
 
 ## Modello utenti e ruoli
 
@@ -223,7 +223,6 @@ Configurazione del tenant tramite variabili d'ambiente:
 - **JWT verification**: il backend verifica il token JWT via JWKS di Keycloak (ingress opzionale)
 - **Secrets**: usare il secret manager del provider cloud scelto
 - **Database**: PostgreSQL 16 gestito (RDS, Cloud SQL, o self-hosted)
-- Nessuna dipendenza AWS di nessun tipo
 
 ### Variabili d'ambiente
 
@@ -241,7 +240,7 @@ Vedi la tabella completa in [Variabili e secret da configurare su GitHub](#varia
   questa fase. Contrappeso accettato: un problema al pod Postgres impatta sia l'app che l'autenticazione.
 - **Persistenza**: un solo PersistentVolumeClaim (PVC) per l'istanza Postgres condivisa.
 - **Backup**: CronJob Kubernetes che esegue `pg_dump` periodico verso storage esterno (es. bucket
-  S3-compatible self-hosted, no AWS). Da definire in dettaglio in fase di implementazione.
+  S3-compatible self-hosted, aws s3). Da definire in dettaglio in fase di implementazione.
 - **Multi-tenant**: un namespace Kubernetes per tenant, ciascuno con i propri pod (backend, frontend,
   Postgres, Keycloak) e i propri Secret — coerente con quanto descritto in [Multi-tenant](#multi-tenant).
 
