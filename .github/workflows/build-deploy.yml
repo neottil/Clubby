@@ -220,6 +220,10 @@ jobs:
           port: ${{ vars.SSH_PORT || 22 }}
           script: |
             set -e
+            # Vedi commento in infra.yml: kubectl (symlink a k3s) senza
+            # KUBECONFIG esplicito risolve su /etc/rancher/k3s/k3s.yaml
+            # (root:root), illeggibile dall'utente di deploy.
+            export KUBECONFIG="$HOME/.kube/config"
             kubectl apply -f ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
             kubectl rollout status deployment/clubmanager-backend -n ${{ vars.KUBE_NAMESPACE }} --timeout=180s
             kubectl rollout status deployment/clubmanager-frontend -n ${{ vars.KUBE_NAMESPACE }} --timeout=180s

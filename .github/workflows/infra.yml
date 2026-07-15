@@ -101,6 +101,13 @@ jobs:
           script: |
             set -e
 
+            # kubectl è un symlink al binario di k3s (creato da setup-vps-k3s.sh):
+            # se invocato senza KUBECONFIG esplicito risolve di default su
+            # /etc/rancher/k3s/k3s.yaml (root:root, 600), illeggibile da un utente
+            # non-root anche se ~/.kube/config esiste ed è corretto. Forziamo
+            # esplicitamente il file preparato per l'utente di deploy.
+            export KUBECONFIG="$HOME/.kube/config"
+
             kubectl apply -f "$PATH_REMOTE/namespace.yaml"
 
             kubectl create secret generic clubmanager-infra-secrets -n "$NS" \
