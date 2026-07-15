@@ -1,6 +1,8 @@
-# NOTA: usa "start-dev" (come in locale, docker-compose.yml) per semplicità
-# iniziale. Per un hardening da produzione andrebbe sostituito con "start"
-# (build ottimizzata) — vedi TODO nel README.
+# NOTA: la modalità di avvio (${KEYCLOAK_START_MODE}) è parametrica: "start-dev"
+# (default, come in locale via docker-compose.yml) per l'Environment dev,
+# "start" (build ottimizzata, produzione) per l'Environment prod — impostata
+# tramite la variabile GitHub KEYCLOAK_START_MODE dell'Environment scelto al
+# lancio di Infra (vedi README).
 #
 # IMPORTANTE: KC_HOSTNAME è impostato sull'URL PUBBLICO (stesso host esposto
 # da keycloak-ingress.yaml), non su quello interno al cluster. Il backend
@@ -30,7 +32,7 @@ spec:
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:26.1.4
-          args: ["start-dev"]
+          args: ["${KEYCLOAK_START_MODE}"]
           env:
             - name: KC_DB
               value: postgres

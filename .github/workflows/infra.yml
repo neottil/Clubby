@@ -11,6 +11,10 @@ name: Infra
 on:
   workflow_dispatch:
     inputs:
+      env:
+        description: 'Ambiente target (deve esistere come Environment del repo, con le proprie Variables/Secrets)'
+        type: environment
+        required: true
       initial_admin_email:
         description: 'Email del primo utente admin reale da creare in Keycloak'
         required: true
@@ -24,8 +28,9 @@ on:
 jobs:
   infra:
     runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Generati qui, mai committati: sono i valori "sorgente" per i GitHub
       # Secrets che poi Build & Deploy userà (DB_PASSWORD,
@@ -41,15 +46,16 @@ jobs:
       - name: Renderizza manifest k8s/templates/infra
         env:
           KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
-          DB_NAME: ${{ vars.DB_NAME }}
-          DB_USER: ${{ vars.DB_USER }}
-          POSTGRES_STORAGE_SIZE: ${{ vars.POSTGRES_STORAGE_SIZE }}
+          DB_NAME: ${{ vars.DB_NAME || 'clubmanager' }}
+          DB_USER: ${{ vars.DB_USER || 'clubmanager' }}
+          POSTGRES_STORAGE_SIZE: ${{ vars.POSTGRES_STORAGE_SIZE || '5Gi' }}
           KEYCLOAK_HOST: ${{ vars.KEYCLOAK_HOST }}
-          KEYCLOAK_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN }}
+          KEYCLOAK_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
+          KEYCLOAK_START_MODE: ${{ vars.KEYCLOAK_START_MODE || 'start' }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered-infra
-          VARS='$KUBE_NAMESPACE $DB_NAME $DB_USER $POSTGRES_STORAGE_SIZE $KEYCLOAK_HOST $KEYCLOAK_BOOTSTRAP_ADMIN'
+          VARS='$KUBE_NAMESPACE $DB_NAME $DB_USER $POSTGRES_STORAGE_SIZE $KEYCLOAK_HOST $KEYCLOAK_BOOTSTRAP_ADMIN $KEYCLOAK_START_MODE'
           for f in k8s/templates/infra/*.yaml; do
             envsubst "$VARS" < "$f" > "k8s/rendered-infra/$(basename "$f")"
           done
@@ -64,34 +70,34 @@ jobs:
       - name: Copia i file sulla VPS via SSH
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ vars.SSH_PORT }}
+          port: ${{ vars.SSH_PORT || 22 }}
           source: "k8s/rendered-infra/*"
-          target: ${{ vars.INFRA_DEPLOY_PATH }}
+          target: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubmanager/infra' }}
           strip_components: 2
 
       - name: Applica l'infrastruttura e inizializza il realm Keycloak
         uses: appleboy/ssh-action@v1.2.0
         env:
           NS: ${{ vars.KUBE_NAMESPACE }}
-          PATH_REMOTE: ${{ vars.INFRA_DEPLOY_PATH }}
+          PATH_REMOTE: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubmanager/infra' }}
           DB_PASSWORD: ${{ steps.secrets.outputs.db_password }}
           KC_BOOTSTRAP_PASSWORD: ${{ steps.secrets.outputs.kc_bootstrap_password }}
           KC_BACKEND_SECRET: ${{ steps.secrets.outputs.kc_backend_secret }}
-          KC_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN }}
-          KC_REALM: ${{ vars.KEYCLOAK_REALM }}
+          KC_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
+          KC_REALM: ${{ vars.KEYCLOAK_REALM || 'clubmanager' }}
           KC_HOST: ${{ vars.KEYCLOAK_HOST }}
-          FRONTEND_HOST: ${{ vars.FRONTEND_HOST }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
           INITIAL_ADMIN_EMAIL: ${{ inputs.initial_admin_email }}
           INITIAL_ADMIN_PASSWORD: ${{ inputs.initial_admin_password }}
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ vars.SSH_PORT }}
-          envs: NS,PATH_REMOTE,DB_PASSWORD,KC_BOOTSTRAP_PASSWORD,KC_BACKEND_SECRET,KC_BOOTSTRAP_ADMIN,KC_REALM,KC_HOST,FRONTEND_HOST,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD
+          port: ${{ vars.SSH_PORT || 22 }}
+          envs: NS,PATH_REMOTE,DB_PASSWORD,KC_BOOTSTRAP_PASSWORD,KC_BACKEND_SECRET,KC_BOOTSTRAP_ADMIN,KC_REALM,KC_HOST,APP_DOMAIN,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD
           script: |
             set -e
 
@@ -125,7 +131,7 @@ jobs:
               --from-literal=REALM="$KC_REALM" \
               --from-literal=ADMIN_USER="$KC_BOOTSTRAP_ADMIN" \
               --from-literal=ADMIN_PASS="$KC_BOOTSTRAP_PASSWORD" \
-              --from-literal=FRONTEND_URL="https://$FRONTEND_HOST" \
+              --from-literal=FRONTEND_URL="https://$APP_DOMAIN" \
               --from-literal=BACKEND_CLIENT_SECRET="$KC_BACKEND_SECRET" \
               --from-literal=INITIAL_ADMIN_EMAIL="$INITIAL_ADMIN_EMAIL" \
               --from-literal=INITIAL_ADMIN_PASSWORD="$INITIAL_ADMIN_PASSWORD" \
@@ -143,8 +149,9 @@ jobs:
           {
             echo "## Infra completata"
             echo ""
-            echo "Copia questi valori in Settings → Secrets and variables → Actions"
-            echo "(usati dalla pipeline **Build & Deploy**):"
+            echo "Copia questi valori nell'Environment **${{ inputs.env }}** (Settings → Environments →"
+            echo "${{ inputs.env }}), usati dalla pipeline **Build & Deploy** (sempre Environment \`dev\`,"
+            echo "quindi rilevante solo se questa run ha provisionato \`dev\`):"
             echo ""
             echo "### Secrets"
             echo '```'
@@ -154,18 +161,18 @@ jobs:
             echo ""
             echo "### Variables"
             echo '```'
-            echo "KEYCLOAK_URL=https://${{ vars.KEYCLOAK_HOST }}"
-            echo "KEYCLOAK_REALM=${{ vars.KEYCLOAK_REALM }}"
+            echo "KEYCLOAK_REALM=${{ vars.KEYCLOAK_REALM || 'clubmanager' }}"
             echo "KEYCLOAK_ADMIN_CLIENT_ID=clubmanager-backend"
-            echo "VITE_KEYCLOAK_URL=https://${{ vars.KEYCLOAK_HOST }}"
-            echo "VITE_KEYCLOAK_REALM=${{ vars.KEYCLOAK_REALM }}"
-            echo "VITE_KEYCLOAK_CLIENT_ID=clubmanager-spa"
+            echo "KEYCLOAK_CLIENT_ID=clubmanager-spa"
             echo '```'
+            echo ""
+            echo "(Le ultime tre hanno comunque questi stessi valori come default: vanno impostate solo se"
+            echo "vuoi usare nomi client o un realm diversi dai default.)"
             echo ""
             echo "**Questi valori sono visibili in chiaro una sola volta, qui.** Copiali subito nei"
             echo "GitHub Secrets/Variables: questo riepilogo non verrà rigenerato automaticamente."
             echo ""
-            echo "Primo accesso admin: https://${{ vars.FRONTEND_HOST }} — email"
+            echo "Primo accesso admin: https://${{ vars.APP_DOMAIN }} — email"
             echo "\`${{ inputs.initial_admin_email }}\`, password temporanea (quella inserita al lancio"
             echo "di questa pipeline), da cambiare al primo login."
           } >> "$GITHUB_STEP_SUMMARY"

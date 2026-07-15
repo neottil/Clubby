@@ -19,12 +19,13 @@ on:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    environment: dev
     permissions:
       contents: write
       packages: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 

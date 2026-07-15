@@ -315,16 +315,30 @@ Tre workflow in [.github/workflows](.github/workflows), scope separato: **Infra*
 namespace/Postgres/Keycloak, **Build & Deploy** builda e deploya solo backend e frontend a ogni push,
 **Tag** promuove manualmente un deploy a "versione reale".
 
+**GitHub Environments (`dev`/`prod`)**: `Build & Deploy` e `Tag` sono agganciati (job-level `environment:
+dev`) sempre e solo all'Environment `dev` del repo — ogni push builda/deploya sempre in sviluppo, mai in
+produzione. `Infra` invece accetta un input obbligatorio `env` (di tipo `environment`: il menu a tendina in
+GitHub mostra gli Environment realmente configurati sul repo) e aggancia il job all'Environment scelto
+(`environment: ${{ inputs.env }}`), perché va lanciato manualmente una tantum sia per provisionare `dev` che
+`prod`. Le **Variables/Secrets** vanno quindi configurate per-Environment (Settings → Environments → `dev` /
+`prod`, non più solo a livello di repository): ogni Environment ha i propri valori di
+`KUBE_NAMESPACE`/`APP_DOMAIN`/`KEYCLOAK_HOST`/`DB_*`/`SSH_*`/ecc. Una pipeline `Promote` futura userà le
+immagini Docker già pushate su `ghcr.io` da `Build & Deploy` (già taggate per data e per versione reale) per
+promuoverle da `dev` a `prod` senza rebuild.
+
 #### Infra
 
 Workflow: [infra.yml](.github/workflows/infra.yml).
 
-**Attivazione manuale** (`workflow_dispatch`, con due input obbligatori: email e password temporanea del
-primo admin). Da lanciare una tantum per namespace, prima del primo `Build & Deploy`, o quando serve
-ricreare l'infrastruttura di base. **Presuppone che `scripts/setup-vps-k3s.sh` sia già stato eseguito a
-mano sulla VPS** (k3s, Traefik e cert-manager devono esistere): questa pipeline parte da un cluster già
-funzionante, non lo crea. È idempotente (`kubectl apply`/`--dry-run=client -o yaml | kubectl apply -f -`
-ovunque), quindi rieseguibile senza distruggere dati esistenti.
+**Attivazione manuale** (`workflow_dispatch`, con tre input obbligatori: `env` — l'Environment GitHub target,
+`dev` o `prod` —, email e password temporanea del primo admin). Aggancia il job all'Environment scelto
+(`environment: ${{ inputs.env }}`), quindi legge le Variables/Secrets configurate su **quell'Environment**,
+non quelle di `dev` usate da `Build & Deploy`/`Tag`. Da lanciare una tantum per namespace/ambiente, prima del
+primo `Build & Deploy` (per `dev`) o prima della prima promozione (per `prod`), o quando serve ricreare
+l'infrastruttura di base. **Presuppone che `scripts/setup-vps-k3s.sh` sia già stato eseguito a mano sulla
+VPS** (k3s, Traefik e cert-manager devono esistere): questa pipeline parte da un cluster già funzionante, non
+lo crea. È idempotente (`kubectl apply`/`--dry-run=client -o yaml | kubectl apply -f -` ovunque), quindi
+rieseguibile senza distruggere dati esistenti.
 
 1. Genera tre valori casuali (`openssl rand`): `DB_PASSWORD`, la password bootstrap dell'admin console di
    Keycloak, e `KEYCLOAK_ADMIN_CLIENT_SECRET` — mai committati, esistono solo per la durata della run.
@@ -341,23 +355,26 @@ ovunque), quindi rieseguibile senza distruggere dati esistenti.
    ruoli `admin`/`viewer` e **un solo utente admin reale** (non credenziali di test hardcoded), con password
    temporanea che Keycloak obbliga a cambiare al primo login.
 6. Stampa nel riepilogo della run (`GITHUB_STEP_SUMMARY`) i valori da copiare a mano nei GitHub
-   Secrets/Variables di **Build & Deploy** (`DB_PASSWORD`, `KEYCLOAK_ADMIN_CLIENT_SECRET`, `KEYCLOAK_URL`,
+   Secrets/Variables di **Build & Deploy** (`DB_PASSWORD`, `KEYCLOAK_ADMIN_CLIENT_SECRET`,
    ecc.) — **visibili in chiaro una sola volta**, non vengono salvati altrove: copiali subito.
 
-**Nota sull'URL di Keycloak**: `KEYCLOAK_URL` (letto dal backend) e `VITE_KEYCLOAK_URL` (compilato nel
-frontend) devono puntare allo **stesso URL pubblico HTTPS** (es. `https://auth.tuodominio.com`), non a un
-indirizzo interno del cluster. Il backend valida il claim `iss` del JWT confrontandolo esattamente con la
-sua `KEYCLOAK_URL` ([backend/src/middleware/auth.ts](backend/src/middleware/auth.ts)); poiché Keycloak
-emette token con issuer pari all'URL pubblico usato dal browser (`KC_HOSTNAME`, impostato dal template
-[keycloak-deployment.yaml](k8s/templates/infra/keycloak-deployment.yaml)), un `KEYCLOAK_URL` diverso lato
-backend farebbe fallire sempre la verifica.
+**Nota sull'URL di Keycloak**: `KEYCLOAK_URL` (`https://` + `KEYCLOAK_HOST`, costruito da entrambe le
+pipeline, non è una variabile GitHub a sé) deve puntare all'**URL pubblico HTTPS** di Keycloak (es.
+`https://auth.tuodominio.com`), non a un indirizzo interno del cluster — il backend valida il claim `iss` del
+JWT confrontandolo esattamente con questo valore ([backend/src/middleware/auth.ts](backend/src/middleware/auth.ts));
+poiché Keycloak emette token con issuer pari all'URL pubblico usato dal browser (`KC_HOSTNAME`, impostato dal
+template [keycloak-deployment.yaml](k8s/templates/infra/keycloak-deployment.yaml)), un `KEYCLOAK_HOST`
+sbagliato farebbe fallire sempre la verifica. Il frontend riceve lo stesso valore come `VITE_KEYCLOAK_URL`
+(derivato automaticamente nel job `build-frontend`).
 
 #### `Build & Deploy` ([build-deploy.yml](.github/workflows/build-deploy.yml))
 
 Si attiva su push su `main`, `feature/**`, `fix/**` (o manualmente). Tutti i branch deployano sullo
-**stesso namespace** (`KUBE_NAMESPACE`): non c'è ancora separazione tra ambiente di sviluppo e produzione —
-ogni push su uno di questi branch sovrascrive il deploy corrente. La promozione controllata in produzione
-(namespace/ambiente separato) è prevista in una pipeline dedicata futura, non ancora implementata.
+**stesso namespace** (`KUBE_NAMESPACE` dell'Environment `dev`, a cui il workflow è sempre agganciato —
+`environment: dev` su ogni job): ogni push su uno di questi branch sovrascrive il deploy corrente in
+sviluppo. La promozione controllata in produzione (Environment `prod`, provisionato da `Infra`) è prevista in
+una pipeline `Promote` dedicata futura, non ancora implementata — riuserà le immagini Docker già pushate su
+`ghcr.io` da questo workflow, senza rebuild.
 
 Job in sequenza:
 
@@ -387,10 +404,12 @@ I manifest renderizzati (`k8s/rendered/`, contengono credenziali in chiaro) non 
 #### `Tag` ([tag.yml](.github/workflows/tag.yml))
 
 **Attivazione manuale** (`workflow_dispatch`, tab Actions → Tag → Run workflow): non parte da solo dopo
-`Build & Deploy`. Va lanciato quando si decide di **promuovere** l'ultimo deploy riuscito su `main`,
-rendendolo la versione "reale" (rilascio) — coerente col fatto che, per ora, `feature/**` e `fix/**`
-deployano sullo stesso namespace di sviluppo di `main` e non rappresentano ancora una produzione separata
-(quando ci sarà una pipeline di promozione dedicata, questo workflow verrà rivisto).
+`Build & Deploy`. Anche questo workflow è sempre agganciato all'Environment `dev` (`environment: dev`), come
+`Build & Deploy`: assegna il tag di versione reale alle immagini già buildate in sviluppo. Va lanciato
+quando si decide di **promuovere** l'ultimo deploy riuscito su `main`, rendendolo la versione "reale"
+(rilascio) — coerente col fatto che, per ora, `feature/**` e `fix/**` deployano sullo stesso namespace di
+sviluppo di `main` e non rappresentano ancora una produzione separata (quando ci sarà la pipeline
+`Promote`, questo workflow verrà rivisto).
 
 Accetta un input opzionale `run_id` (l'ID di una run specifica di `Build & Deploy` da promuovere); se
 omesso usa automaticamente l'ultima run di `Build & Deploy` completata con successo **su `main`**. In
@@ -451,80 +470,83 @@ k8s/
 
 ### Variabili e secret da configurare su GitHub
 
-Repository → Settings → Secrets and variables → Actions. Le **Secrets** sono cifrate e mai visibili nei
-log; le **Variables** sono in chiaro, per valori non sensibili.
+**Per Environment** (Repository → Settings → Environments → crea `dev` e `prod`, poi per ciascuno
+"Environment secrets"/"Environment variables"), non più a livello di repository: `Build & Deploy` e `Tag`
+leggono sempre l'Environment `dev`; `Infra` legge l'Environment passato come input (`dev` o `prod`) al
+lancio. Le tabelle sotto vanno quindi configurate **due volte**, una per `dev` e una per `prod`, con valori
+diversi (hostname, namespace, credenziali VPS/DB/Keycloak di ciascun ambiente). Le **Secrets** sono cifrate
+e mai visibili nei log; le **Variables** sono in chiaro, per valori non sensibili.
 
 Usati sia da **Infra** che da **Build & Deploy** salvo dove indicato. `DB_PASSWORD` e
 `KEYCLOAK_ADMIN_CLIENT_SECRET` **non vanno inventati a mano**: sono generati dalla pipeline Infra e
-stampati nel riepilogo della sua run (vedi [Infra](#infra)) — vanno solo copiati
-qui dopo il primo provisioning del namespace.
+stampati nel riepilogo della sua run (vedi [Infra](#infra)) — vanno copiati nell'Environment corrispondente
+(`dev` o `prod`, a seconda di quale sia stato lanciato) dopo il primo provisioning del namespace.
 
 #### Secrets
 
 | Nome | Descrizione | Esempio |
 |------|-------------|---------|
-| `SSH_HOST` | Indirizzo della VPS su cui gira il cluster k8s | `203.0.113.10` |
-| `SSH_USER` | Utente SSH per connettersi alla VPS | `deploy` |
 | `SSH_PRIVATE_KEY` | Chiave privata SSH (PEM) corrispondente a una chiave pubblica autorizzata sulla VPS | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
 | `DB_PASSWORD` | Password del database Postgres condiviso (app + Keycloak) — **generata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
 | `KEYCLOAK_ADMIN_CLIENT_SECRET` | Client secret del client confidential `clubmanager-backend` su Keycloak — **generato da Infra** | *(copiata dal riepilogo della run Infra)* |
 
 #### Variables
 
-| Nome | Descrizione | Esempio / Default | Usata da |
-|------|-------------|--------------------|----------|
-| `SSH_PORT` | Porta SSH della VPS | `22` | Infra, Build & Deploy |
-| `DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Build & Deploy | `/opt/clubmanager/k8s` | Build & Deploy |
-| `INFRA_DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Infra (diverso da `DEPLOY_PATH` per non mischiarli) | `/opt/clubmanager/infra` | Infra |
-| `KUBE_NAMESPACE` | Namespace Kubernetes target | `clubmanager-prod` | Infra, Build & Deploy |
-| `BACKEND_PORT` | Porta interna su cui ascolta il backend (Deployment + ConfigMap `PORT`) | `3000` | Build & Deploy |
-| `POSTGRES_STORAGE_SIZE` | Dimensione del PVC per l'istanza Postgres condivisa | `5Gi` | Infra |
-| `DB_HOST` | Host del Postgres condiviso raggiungibile dal cluster (nome del Service creato da Infra) | `clubmanager-postgres.clubmanager-prod.svc.cluster.local` | Build & Deploy |
-| `DB_PORT` | Porta Postgres | `5432` | Build & Deploy |
-| `DB_NAME` | Nome del database applicativo (il database `keycloak` è fisso, creato da Infra) | `clubmanager` | Infra, Build & Deploy |
-| `DB_USER` | Utente Postgres applicativo (condiviso anche da Keycloak) | `clubmanager` | Infra, Build & Deploy |
-| `KEYCLOAK_HOST` | Hostname pubblico di Keycloak (bare host, usato nell'Ingress di Infra) | `auth.clubmanager.example.com` | Infra |
-| `KEYCLOAK_BOOTSTRAP_ADMIN` | Username dell'admin console Keycloak (bootstrap, non l'admin applicativo) | `admin` | Infra |
-| `KEYCLOAK_URL` | URL **pubblico** di Keycloak — deve coincidere con `VITE_KEYCLOAK_URL` (vedi nota sull'issuer JWT sopra), non punta al DNS interno del cluster | `https://auth.clubmanager.example.com` | Build & Deploy |
-| `KEYCLOAK_REALM` | Realm Keycloak del tenant | `clubmanager` | Infra, Build & Deploy |
-| `KEYCLOAK_ADMIN_CLIENT_ID` | Client ID del client confidential backend | `clubmanager-backend` | Build & Deploy |
-| `FRONTEND_HOST` | Hostname pubblico del frontend (usato nell'Ingress, e come base per i redirect URI SPA creati da Infra) | `app.clubmanager.example.com` | Infra, Build & Deploy |
-| `BACKEND_HOST` | Hostname pubblico dell'API (usato nell'Ingress) | `api.clubmanager.example.com` | Build & Deploy |
-| `VITE_API_BASE_URL` | URL base delle API, compilato nel bundle frontend a build-time | `https://api.clubmanager.example.com` | Build & Deploy |
-| `VITE_KEYCLOAK_URL` | URL pubblico di Keycloak, compilato nel bundle frontend — stesso valore di `KEYCLOAK_URL` | `https://auth.clubmanager.example.com` | Build & Deploy |
-| `VITE_KEYCLOAK_REALM` | Realm Keycloak, compilato nel bundle frontend | `clubmanager` | Build & Deploy |
-| `VITE_KEYCLOAK_CLIENT_ID` | Client ID pubblico SPA, compilato nel bundle frontend | `clubmanager-spa` | Build & Deploy |
+##### Obbligatorie (nessun default: vanno impostate per ogni Environment)
+
+| Nome | Descrizione | Esempio | Usata da |
+|------|-------------|---------|----------|
+| `SSH_HOST` | Indirizzo della VPS su cui gira il cluster k8s | `203.0.113.10` | Infra, Build & Deploy |
+| `SSH_USER` | Utente SSH per connettersi alla VPS | `deploy` | Infra, Build & Deploy |
+| `KUBE_NAMESPACE` | Namespace Kubernetes target — deve essere diverso tra `dev` e `prod` anche se condividono la stessa VPC/cluster | `clubmanager-prod` | Infra, Build & Deploy |
+| `APP_DOMAIN` | Hostname pubblico dell'app (usato nell'Ingress per frontend **e** backend sullo stesso host, routing per path: `/api` → backend, `/` → frontend; anche base per `VITE_API_BASE_URL` e per i redirect URI SPA creati da Infra) | `app.clubmanager.example.com` | Infra, Build & Deploy |
 | `VITE_TENANT_NAME` | Nome tenant visualizzato in UI, compilato nel bundle frontend | `ASD Roma` | Build & Deploy |
-| `VITE_ACTIVITY_SELECT_VALUES_MAPPING` | Mapping JSON attività→costo di default per il form "Nuovo incontro" (opzionale: se assente la select attività è vuota), compilato nel bundle frontend | `{"Dog Dance":20,"Mantrailing":20,"K9 Cross Training":25,"Educazione singolo":20,"Passeggiata":25,"Piscina":25}` | Build & Deploy |
-| `VITE_THEME_PRIMARY` | Colore primario (bottoni, link attivi) — opzionale, default il teal del logo | `#2ec4a6` | Build & Deploy |
-| `VITE_THEME_PRIMARY_TEXT` | Colore del testo sopra il colore primario — opzionale | `#ffffff` | Build & Deploy |
-| `VITE_THEME_DANGER` | Colore per importi negativi/azioni distruttive — opzionale | `#dc2626` | Build & Deploy |
-| `VITE_THEME_SUCCESS` | Colore per importi positivi/conferme — opzionale | `#16a34a` | Build & Deploy |
-| `VITE_THEME_NAV_BG` | Colore di sfondo della barra di navigazione — opzionale, default il blu navy del logo | `#16213e` | Build & Deploy |
-| `VITE_THEME_NAV_TEXT` | Colore del testo/voci di menu sulla barra di navigazione — opzionale, da abbinare a `VITE_THEME_NAV_BG` per restare leggibile, default il blu chiaro del logo | `#7ab8e0` | Build & Deploy |
-| `LOGO_FILE` | Nome del file SVG in `frontend/branding/` da usare come logo/favicon del tenant (opzionale: se assente resta il logo di default). **Non** ha prefisso `VITE_*`: non è letta dal browser ma da `scripts/apply-logo.mjs`, eseguito automaticamente da npm come hook `prebuild` prima di `vite build` | `asd1.svg` | Build & Deploy |
+| `KEYCLOAK_HOST` | Hostname pubblico di Keycloak (bare host) — usato sia nell'Ingress di Infra sia per costruire `KEYCLOAK_URL` (`https://` + questo valore); non punta al DNS interno del cluster, il backend valida il claim `iss` del JWT confrontandolo esattamente con `https://KEYCLOAK_HOST` (vedi nota sull'issuer JWT sopra) | `auth.clubmanager.example.com` | Infra, Build & Deploy |
+| `DB_HOST` | Host del Postgres condiviso raggiungibile dal cluster (nome del Service creato da Infra, include il namespace) | `clubmanager-postgres.clubmanager-prod.svc.cluster.local` | Build & Deploy |
+
+##### Opzionali (default applicato se non impostate)
+
+| Nome | Descrizione | Esempio | Default | Usata da |
+|------|-------------|---------|---------|----------|
+| `SSH_PORT` | Porta SSH della VPS | `22` | `22` | Infra, Build & Deploy |
+| `DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Build & Deploy — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubmanager/k8s` | `/opt/clubmanager/k8s` | Build & Deploy |
+| `INFRA_DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Infra (diverso da `DEPLOY_PATH` per non mischiarli) — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubmanager/infra` | `/opt/clubmanager/infra` | Infra |
+| `BACKEND_PORT` | Porta interna su cui ascolta il backend (Deployment + ConfigMap `PORT`) | `3000` | `3000` | Build & Deploy |
+| `POSTGRES_STORAGE_SIZE` | Dimensione del PVC per l'istanza Postgres condivisa | `5Gi` | `5Gi` | Infra |
+| `DB_PORT` | Porta Postgres | `5432` | `5432` | Build & Deploy |
+| `DB_NAME` | Nome del database applicativo (il database `keycloak` è fisso, creato da Infra) | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
+| `DB_USER` | Utente Postgres applicativo (condiviso anche da Keycloak) | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
+| `KEYCLOAK_BOOTSTRAP_ADMIN` | Username dell'admin console Keycloak (bootstrap, non l'admin applicativo) | `admin` | `admin` | Infra |
+| `KEYCLOAK_START_MODE` | Comando di avvio di Keycloak (`args` del container): `start-dev` per sviluppo, `start` (build ottimizzata) per produzione — impostare `start-dev` solo sull'Environment `dev` | `start` | `start` | Infra |
+| `KEYCLOAK_REALM` | Realm Keycloak del tenant | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
+| `KEYCLOAK_ADMIN_CLIENT_ID` | Client ID del client confidential backend | `clubmanager-backend` | `clubmanager-backend` | Build & Deploy |
+| `KEYCLOAK_CLIENT_ID` | Client ID pubblico SPA (compilato nel frontend come `VITE_KEYCLOAK_CLIENT_ID`) | `clubmanager-spa` | `clubmanager-spa` | Build & Deploy |
+| `VITE_ACTIVITY_SELECT_VALUES_MAPPING` | Mapping JSON attività→costo di default per il form "Nuovo incontro", compilato nel bundle frontend | `{"Dog Dance":20,"Mantrailing":20,"K9 Cross Training":25,"Educazione singolo":20,"Passeggiata":25,"Piscina":25}` | `{}` (select vuota) | Build & Deploy |
+| `VITE_THEME_PRIMARY` | Colore primario (bottoni, link attivi) | `#2ec4a6` | `#2ec4a6` | Build & Deploy |
+| `VITE_THEME_PRIMARY_TEXT` | Colore del testo sopra il colore primario | `#ffffff` | `#ffffff` | Build & Deploy |
+| `VITE_THEME_DANGER` | Colore per importi negativi/azioni distruttive | `#dc2626` | `#dc2626` | Build & Deploy |
+| `VITE_THEME_SUCCESS` | Colore per importi positivi/conferme | `#16a34a` | `#16a34a` | Build & Deploy |
+| `VITE_THEME_NAV_BG` | Colore di sfondo della barra di navigazione | `#16213e` | `#16213e` | Build & Deploy |
+| `VITE_THEME_NAV_TEXT` | Colore del testo/voci di menu sulla barra di navigazione, da abbinare a `VITE_THEME_NAV_BG` per restare leggibile | `#7ab8e0` | `#7ab8e0` | Build & Deploy |
+| `LOGO_FILE` | Nome del file SVG in `frontend/branding/` da usare come logo/favicon del tenant. **Non** ha prefisso `VITE_*`: non è letta dal browser ma da `scripts/apply-logo.mjs`, eseguito automaticamente da npm come hook `prebuild` prima di `vite build` | `asd1.svg` | `-` (resta il logo di default) | Build & Deploy |
 
 Nessun secret aggiuntivo serve per il registry immagini: le pipeline si autenticano su `ghcr.io` con il
 `GITHUB_TOKEN` automatico di Actions (permesso `packages: write`, già configurato nei workflow).
 
 ## TODO
 
-- [ ] Provare l'app in locale
-- [ ] Push (senza workflow)
-- [ ] Configurazione variabili e secret per la pipeline (GitHub) — inclusi i nuovi valori richiesti da Infra
-      (`INFRA_DEPLOY_PATH`, `POSTGRES_STORAGE_SIZE`, `KEYCLOAK_HOST`, `KEYCLOAK_BOOTSTRAP_ADMIN`)
-- [ ] Configurazione ambiente VPS (`scripts/setup-vps-k3s.sh`: k3s, Traefik, cert-manager/Let's Encrypt)
-- [ ] Configurare il DNS di `FRONTEND_HOST`/`BACKEND_HOST`/`KEYCLOAK_HOST` verso l'IP pubblico della VPS
+- [ ] Configurare il DNS di `APP_DOMAIN`/`KEYCLOAK_HOST` verso l'IP pubblico della VPS
       (necessario perché cert-manager possa risolvere la challenge HTTP-01 ed emettere i certificati)
 - [ ] Verificare l'emissione dei certificati partendo dal `ClusterIssuer` `letsencrypt-staging` prima di
       passare a `letsencrypt` (produzione), per non consumare il rate limit reale di Let's Encrypt
-- [ ] Push workflow
 - [ ] Lanciare la pipeline **Infra** e copiare i valori generati (`DB_PASSWORD`,
       `KEYCLOAK_ADMIN_CLIENT_SECRET`, ecc.) nei GitHub Secrets/Variables prima del primo Build & Deploy
 - [ ] Prova pipeline (Build & Deploy, poi Tag)
-- [ ] Test
+- [ ] Implementare api Test
 - [ ] Definire in dettaglio la strategia di backup di Postgres (CronJob `pg_dump` + storage esterno)
-- [ ] Hardening Keycloak in produzione: passare da `start-dev` a `start` (build ottimizzata) — vedi
-      [k8s/templates/infra/keycloak-deployment.yaml](k8s/templates/infra/keycloak-deployment.yaml)
-- [ ] Pipeline di promozione in produzione (namespace/ambiente separato da quello di sviluppo condiviso da
+- [ ] Hardening Keycloak in produzione: la modalità di avvio è già parametrica (`KEYCLOAK_START_MODE`, vedi
+      [k8s/templates/infra/keycloak-deployment.yaml](k8s/templates/infra/keycloak-deployment.yaml)) — resta
+      da impostare `KEYCLOAK_START_MODE=start` sull'Environment `prod` e verificare che Keycloak si avvii e
+      funzioni correttamente in modalità `start` (build ottimizzata, non di sviluppo) dietro Traefik
+- [ ] Pipeline di promozione in produzione eseguibile solo da main(namespace/ambiente separato da quello di sviluppo condiviso da
       `main`/`feature/**`/`fix/**`)
