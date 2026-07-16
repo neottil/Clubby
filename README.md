@@ -169,9 +169,10 @@ http://localhost:8080 → admin / admin
 ClubManager/
 ├── .github/
 │   └── workflows/
-│       ├── infra.yml        # Provisiona namespace + Postgres condiviso + Keycloak (manuale)
-│       ├── build-deploy.yml # Build immagini + deploy k8s (be/fe) via SSH
-│       └── tag.yml          # Crea/sposta i tag server-v*, client-v*, k8s-v* (manuale)
+│       ├── infra.yml               # Provisiona namespace + Postgres condiviso + Keycloak (manuale)
+│       ├── build-deploy.yml        # Build immagini + deploy k8s (be/fe indipendenti) via SSH
+│       ├── tag.yml                 # Crea/sposta i tag server-v*/client-v* (manuale)
+│       └── cleanup-build-tags.yml  # Ripulisce i tag <scope>-<branch>-* superati (manuale)
 ├── backend/
 │   ├── src/
 │   │   ├── handlers/       # Handler HTTP (soci, incontri, buoni, admin, auth)
@@ -179,6 +180,7 @@ ClubManager/
 │   │   ├── middleware/      # Auth (Keycloak JWT), response helpers, error classes
 │   │   ├── db/             # Database client (pg Pool) + schema SQL
 │   │   └── server.ts       # Entry point HTTP (locale e produzione)
+│   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-backend
 │   ├── Dockerfile
 │   ├── package.json
 │   └── tsconfig.json
@@ -189,14 +191,12 @@ ClubManager/
 │   │   ├── pages/          # SociPage, IncontriPage, BuoniPage, AdminPage, LoginPage
 │   │   ├── components/     # Layout
 │   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID)
+│   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-frontend
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
 ├── k8s/
-│   ├── package.json        # Version dei manifest, usata dalla pipeline per il tag k8s-v*
-│   └── templates/          # Manifest con placeholder ${VAR}, renderizzati in CI
-│       ├── app/            # Gestiti da Build & Deploy: backend, frontend, ingress
-│       └── infra/          # Gestiti da Infra: namespace, Postgres condiviso, Keycloak
+│   └── templates/infra/    # Manifest ${VAR}, gestiti da Infra: namespace, Postgres condiviso, Keycloak
 ├── scripts/
 │   ├── init-local-keycloak.sh         # Setup Keycloak locale (interattivo, Docker Compose)
 │   ├── keycloak-realm-init.sh   # Init realm Keycloak in k8s (non interattivo, eseguito da Infra)
@@ -271,7 +271,7 @@ collaterali) e si occupa di:
 3. Installare **cert-manager** e creare due `ClusterIssuer`:
    - `letsencrypt-staging` — per test, nessun limite di rate reale (certificati non fidati dai browser)
    - `letsencrypt` — produzione, usato dall'annotazione `cert-manager.io/cluster-issuer` nei template
-     [k8s/templates/app/ingress.yaml](k8s/templates/app/ingress.yaml) e
+     [backend/k8s/ingress.yaml](backend/k8s/ingress.yaml) e
      [k8s/templates/infra/keycloak-ingress.yaml](k8s/templates/infra/keycloak-ingress.yaml)
 
 Entrambi risolvono la ACME challenge **HTTP-01** tramite Traefik (`ingressClassName: traefik`).
@@ -297,7 +297,8 @@ namespace-<tenant>/
 ├── Job         keycloak-realm-init (one-shot: crea realm/client/ruoli/primo admin)                    [infra]
 ├── Service     backend, frontend                                                                      [build-deploy]
 ├── Service     keycloak, postgres                                                                     [infra]
-├── Ingress     clubmanager (routing verso frontend/backend, TLS)                                       [build-deploy]
+├── Ingress     clubmanager-backend (path /api, possiede la richiesta TLS/cert-manager)                 [build-deploy]
+├── Ingress     clubmanager-frontend (path /, stesso host/secretName TLS del backend)                   [build-deploy]
 ├── Ingress     clubmanager-keycloak (routing verso Keycloak, TLS)                                      [infra]
 ├── Secret      clubmanager-secrets (DB_PASSWORD, KEYCLOAK_ADMIN_CLIENT_SECRET, per backend)            [build-deploy]
 ├── Secret      clubmanager-infra-secrets (DB_PASSWORD, KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD)              [infra]
@@ -382,96 +383,178 @@ sviluppo. La promozione controllata in produzione (Environment `prod`, provision
 una pipeline `Promote` dedicata futura, non ancora implementata — riuserà le immagini Docker già pushate su
 `ghcr.io` da questo workflow, senza rebuild.
 
-Job in sequenza:
+**Backend e frontend sono due scope completamente indipendenti**, ciascuno con i propri manifest k8s
+colocati nel proprio folder — `backend/k8s/` e `frontend/k8s/` (niente più un `k8s/templates/app/`
+condiviso) — e il proprio tag Git `<scope>-<branch>-<data>` (es. `backend-main-20260716_1317`,
+`frontend-feature-login-page-20260716_1317`; `/` nel nome branch diventa `-`). **Un solo tag per scope**,
+non due: serve sia da baseline per il diff della run successiva sullo stesso branch, sia da riferimento per
+il workflow **Tag** (vedi sotto) — niente più distinzione tra tag "di build" e tag "di deploy".
 
-1. **versions**: legge il campo `version` di `backend/package.json`, `frontend/package.json` e
-   `k8s/package.json`, calcola un **tag di data** `yyyymmdd_HHMM` (UTC) univoco per questa run, e crea
-   subito un tag Git `build-<data>` sul commit (serve a risalire a quale commit è stato buildato/deployato
-   da questa run specifica). Pubblica un artifact `versions` con tutti questi valori — usato dal workflow
-   Tag, che li recupera invece di ricalcolarli.
-2. **build-backend** / **build-frontend**: la **compilazione avviene qui, nella pipeline** (`npm ci && npm
-   run build`), non nel Dockerfile — `backend/Dockerfile` e `frontend/Dockerfile` si limitano a impacchettare
-   l'output già compilato (`dist/`) rispettivamente in un'immagine Node runtime e in un'immagine nginx. Le
-   variabili `VITE_*` sono passate come variabili d'ambiente allo step `npm run build` del frontend (Vite le
-   compila nel bundle statico a build-time). Le immagini vengono pushate su GitHub Container Registry
-   (`ghcr.io`) taggate **solo** con il tag di data e con `latest` — il tag di versione reale (`X.Y.Z`) viene
-   assegnato in seguito dal workflow Tag, solo dopo un deploy riuscito.
-3. **deploy**: sostituisce i placeholder `${VAR}` nei template [k8s/templates/app](k8s/templates/app) con i valori
-   reali (`envsubst`), usando come immagini quelle appena pushate col tag di data. Copia i manifest
-   renderizzati sulla VPS via SSH (`scp`), poi via SSH esegue `kubectl apply -f` seguito da `kubectl rollout
-   status` su backend e frontend — la pipeline fallisce se il rollout non si stabilizza entro il timeout.
-4. **cleanup-registry**: dopo un deploy riuscito, ripulisce dal registry le immagini taggate solo con la
-   data, mantenendo le **3 più recenti** per repository immagine (`clubmanager-backend`,
-   `clubmanager-frontend`). I tag di versione reale (`X.Y.Z`) sono sempre esclusi da questa pulizia.
+Job separati (`build-backend`/`deploy-backend` e `build-frontend`/`deploy-frontend`), ciascuno gira **solo**
+se serve davvero, e **non tocca mai** il Deployment k8s dell'altro componente se quello non è cambiato
+(nessun riavvio/rollout inutile). Il job `versions` diffa `HEAD` contro l'ultimo tag `<scope>-<branch>-*` —
+**per ciascuno scope indipendentemente**, limitato al proprio folder (`backend/` o `frontend/`, `k8s/`
+incluso in quanto sottocartella) — e decide:
+- qualcosa sotto `backend/` (o `frontend/`), **escluso** `backend/k8s/` (o `frontend/k8s/`), è cambiato →
+  builda una nuova immagine e la deploya
+- solo `backend/k8s/*.yaml` (o `frontend/k8s/*.yaml`) è cambiato → **nessun rebuild**, ma il manifest viene
+  comunque riapplicato, riusando **l'ultima immagine di quello scope effettivamente deployata con successo**
+  (mai `:latest`: cerca l'ultimo tag `<scope>-<branch>-*`)
+- nessuna modifica rilevante per uno scope → il suo job di deploy non gira affatto, il Deployment resta
+  esattamente com'era
+- nessuna modifica in nessuno dei due scope → l'intera run si ferma dopo `versions` (nessuna build, nessun
+  deploy, nessun tag spostato), con un `::warning::` nel log
+
+Se non trova nessun tag `<scope>-<branch>-*` precedente per uno scope su questo branch (prima run in
+assoluto, o dopo una pulizia con il workflow **Cleanup build tags**, vedi sotto), builda e deploya sempre
+tutto per quello scope, per sicurezza.
+
+**Come avanza il tag `<scope>-<branch>-*`**, sempre a fine job (`deploy-backend`/`deploy-frontend`), solo
+dopo un rollout riuscito:
+- se c'era un **rebuild**: crea un tag **nuovo** (`<scope>-<branch>-<data-di-questa-run>`), sul commit appena
+  deployato — riferisce la nuova immagine appena pushata.
+- se era un deploy **manifest-only** (nessun rebuild): **sposta in avanti** (force-update) il tag
+  **esistente** più recente di quello scope sul commit di questa run, **senza rinominarlo** — il nome resta
+  invariato (quindi continua a riferire correttamente la stessa vecchia immagine, mai spostata), ma il tag
+  ora segna "fino a qui il manifest è già stato applicato", cosicché la prossima run non rilevi di nuovo lo
+  stesso cambiamento già gestito.
+
+Job:
+
+1. **versions**: legge il campo `version` di `backend/package.json` e `frontend/package.json`, calcola un
+   **tag di data** `<branch>-yyyymmdd_HHMM` (UTC) univoco per questa run (usato per le immagini Docker e
+   come base del nome dei tag Git di ciascuno scope).
+2. **build-backend** / **build-frontend** (condizionali, vedi sopra): la **compilazione avviene qui, nella
+   pipeline** (`npm ci && npm run build`), non nel Dockerfile — `backend/Dockerfile` e `frontend/Dockerfile`
+   si limitano a impacchettare l'output già compilato (`dist/`) rispettivamente in un'immagine Node runtime e
+   in un'immagine nginx. Le variabili `VITE_*` sono passate come variabili d'ambiente allo step `npm run
+   build` del frontend (Vite le compila nel bundle statico a build-time). Le immagini vengono pushate su
+   GitHub Container Registry (`ghcr.io`) taggate **solo** con il tag di data (branch-scoped) e con `latest` —
+   il tag di versione reale (`X.Y.Z`) viene assegnato in seguito dal workflow Tag, solo dopo la promozione.
+3. **deploy-backend** (condizionale, vedi sopra): applica **solo** i manifest sotto `backend/k8s/`
+   (`configmap.yaml`, `secret.yaml`, `deployment.yaml`, `service.yaml`, `ingress.yaml` — quest'ultimo
+   possiede la richiesta TLS/cert-manager per l'host condiviso), poi `kubectl rollout status` sul solo
+   Deployment backend.
+4. **deploy-frontend** (condizionale, vedi sopra): applica **solo** i manifest sotto `frontend/k8s/`
+   (`deployment.yaml`, `service.yaml`, `ingress.yaml` — stesso host/secret TLS di quello del backend, ma
+   senza l'annotazione cert-manager, per non farli litigare sulla stessa `Certificate`), poi `kubectl
+   rollout status` sul solo Deployment frontend.
+5. **cleanup-registry**: dopo almeno un deploy riuscito, ripulisce dal registry le immagini taggate solo con
+   la data, mantenendo le **3 più recenti** per repository immagine (`clubmanager-backend`,
+   `clubmanager-frontend`), a prescindere dal branch. I tag di versione reale (`X.Y.Z`) sono sempre esclusi
+   da questa pulizia.
 
 I manifest renderizzati (`k8s/rendered/`, contengono credenziali in chiaro) non vengono mai committati
 (vedi `.gitignore`) e vivono solo per la durata della run della pipeline.
 
+#### `Cleanup build tags` ([cleanup-build-tags.yml](.github/workflows/cleanup-build-tags.yml))
+
+**Attivazione manuale**, oppure **automatica** (fire-and-forget) alla fine di ogni promozione riuscita del
+workflow **Tag**, scoped a `branch=main` e `preserve_latest=true`. I tag `<scope>-<branch>-*` **non sono
+usa-e-getta**: sono anche la baseline del diff della prossima run di `Build & Deploy` su quel branch e il
+riferimento del workflow **Tag** — per questo, di default (`preserve_latest=true`), per ciascuno scope e
+per ciascun branch coinvolto viene sempre **mantenuto il tag più recente** (Git e immagine Docker
+corrispondente), eliminando solo quelli più vecchi. Così è sicuro lanciarlo — anche in automatico — su un
+branch ancora attivo come `main`: dopo la pulizia resta comunque un tag da cui `Build & Deploy` può
+calcolare il prossimo diff.
+
+Accetta tre input:
+- `branch` (opzionale): se valorizzato (es. `main`, `feature/x`), ripulisce **solo** i tag di quel branch —
+  sia Git (`backend-<branch>-*`, `frontend-<branch>-*`) sia le immagini Docker corrispondenti su `ghcr.io`
+  (`clubmanager-backend`/`clubmanager-frontend`), tramite l'API di GitHub Packages (non
+  `actions/delete-package-versions`, che non supporta un filtro per tag). Se vuoto, ripulisce i tag di
+  **tutti** i branch (`preserve_latest` si applica per singolo branch, non globalmente). In tutti i casi,
+  un'immagine il cui digest è aliasato anche da un tag di versione reale (`X.Y.Z`) viene sempre saltata, mai
+  eliminata.
+- `preserve_latest` (default `true`): mantiene il tag più recente per scope+branch, elimina solo i più
+  vecchi. Mettilo a `false` **solo** quando un branch `feature/**`/`fix/**` è concluso e mergiato — in quel
+  caso nessuno dei suoi tag serve più a nessuno e si può ripulire per intero (la prossima run di
+  `Build & Deploy` su quel branch, se mai ce ne sarà un'altra, ribuilderà/redeployerà tutto da capo).
+- `dry_run` (default `true`): elenca solo cosa verrebbe eliminato (tag Git e immagini Docker), senza
+  cancellare nulla.
+
 #### `Tag` ([tag.yml](.github/workflows/tag.yml))
 
-**Attivazione manuale** (`workflow_dispatch`, tab Actions → Tag → Run workflow): non parte da solo dopo
-`Build & Deploy`. Anche questo workflow è sempre agganciato all'Environment `dev` (`environment: development`), come
-`Build & Deploy`: assegna il tag di versione reale alle immagini già buildate in sviluppo. Va lanciato
-quando si decide di **promuovere** l'ultimo deploy riuscito su `main`, rendendolo la versione "reale"
-(rilascio) — coerente col fatto che, per ora, `feature/**` e `fix/**` deployano sullo stesso namespace di
-sviluppo di `main` e non rappresentano ancora una produzione separata (quando ci sarà la pipeline
-`Promote`, questo workflow verrà rivisto).
+**Attivazione manuale** (`workflow_dispatch`, nessun input, tab Actions → Tag → Run workflow): non parte da
+solo dopo `Build & Deploy`. Anche questo workflow è sempre agganciato all'Environment `dev`
+(`environment: development`): assegna il tag di versione reale alle immagini già buildate in sviluppo.
+Promuove sempre e solo **main**, per costruzione (vedi sotto) — coerente col fatto che, per ora, `feature/**`
+e `fix/**` deployano sullo stesso namespace di sviluppo di `main` e non rappresentano ancora una produzione
+separata (quando ci sarà la pipeline `Promote`, questo workflow verrà rivisto).
 
-Accetta un input opzionale `run_id` (l'ID di una run specifica di `Build & Deploy` da promuovere); se
-omesso usa automaticamente l'ultima run di `Build & Deploy` completata con successo **su `main`**. In
-entrambi i casi verifica che la run scelta appartenga effettivamente a `main` e si ferma con errore in caso
-contrario: non è possibile promuovere per sbaglio una build di `feature/**` o `fix/**`.
+Non prende in input l'ID di una run di `Build & Deploy` da promuovere: dato che backend e frontend deployano
+in modo indipendente (vedi sopra), non esiste "la run da promuovere" — ogni scope avanza per conto suo,
+potenzialmente in run diverse. Per ciascuno dei due scope (`backend`, `frontend`), il workflow:
 
-Una volta individuata la run, scarica l'artifact `versions` che ha prodotto (non ricalcola nulla) e:
+1. Cerca l'ultimo tag `<scope>-main-*` (creato/avanzato da `deploy-backend`/`deploy-frontend` solo dopo un
+   rollout riuscito, vedi sopra) — se non lo trova, fallisce con un errore esplicito (quello scope non è mai
+   stato deployato su main).
+2. Legge la versione dal `package.json` **al commit di quel tag specifico** (`git show <tag>:<scope>/package.json`
+   — non da `HEAD`: backend e frontend possono essere più avanti/indietro l'uno rispetto all'altro).
+3. **Crea o sposta** (force-update) il tag di versione reale corrispondente su quel commit:
 
-1. **Rimuove** dal repo il tag Git di data `build-<data>` creato da Build & Deploy.
-2. **Crea o sposta** (force-update) tre tag Git sul commit effettivamente deployato:
+   | Scope | Tag reale | Fonte versione |
+   |---|---|---|
+   | `backend` | `server-vX.Y.Z` | `backend/package.json` → `version` |
+   | `frontend` | `client-vX.Y.Z` | `frontend/package.json` → `version` |
 
-   | Tag | Fonte versione |
-   |---|---|
-   | `server-vX.Y.Z` | `backend/package.json` → `version` |
-   | `client-vX.Y.Z` | `frontend/package.json` → `version` |
-   | `k8s-vX.Y.Z` | `k8s/package.json` → `version` |
+4. **Assegna il tag di versione reale** (`X.Y.Z`) all'immagine già pushata col tag di data ricavato dal nome
+   del tag `<scope>-*` stesso (nessuna variabile/artifact separato), tramite `docker buildx imagetools
+   create` (nessun rebuild: aggiunge solo un riferimento sullo stesso digest già presente sul registry).
+5. **Triggera** (fire-and-forget, non aspetta che finisca) il workflow **Cleanup build tags** scoped a
+   `branch=main` e `preserve_latest=true`, per ripulire i tag `backend-main-*`/`frontend-main-*` (Git e
+   Docker) rimasti da eventuali tentativi precedenti su `main` mai promossi — mantenendo sempre il più
+   recente per scope, così il prossimo diff di `Build & Deploy` ha ancora una baseline da cui partire.
 
-3. **Assegna il tag di versione reale** (`X.Y.Z`) alle immagini Docker già pushate con il tag di data,
-   tramite `docker buildx imagetools create` (nessun rebuild: aggiunge solo un riferimento sullo stesso
-   digest già presente sul registry).
-
-**Nota sul tag di data e i limiti di GHCR**: il tag di data **non** viene eliminato dall'immagine in questo
-passaggio. L'API di GitHub Packages cancella per *versione* (= digest), non per singolo tag: poiché il tag
-di versione reale appena creato punta allo stesso digest del tag di data, cancellare quella versione
-rimuoverebbe anche il tag reale appena assegnato. Il tag di data resta quindi come alias secondario
-sull'immagine finché non viene rimosso dal job `cleanup-registry` di `Build & Deploy` nei cicli successivi
-(che mantiene solo le 3 build più recenti, escludendo sempre i tag di versione reale). Il tag Git di data,
-invece, viene rimosso subito (i tag Git non condividono questa limitazione).
+**Nota sul tag di data e i limiti di GHCR**: il tag di data **non** viene eliminato dall'immagine appena
+promossa nello step 4. L'API di GitHub Packages cancella per *versione* (= digest), non per singolo tag:
+poiché il tag di versione reale appena creato punta allo stesso digest del tag di data, cancellare quella
+versione rimuoverebbe anche il tag reale appena assegnato — sia `cleanup-registry` di `Build & Deploy` sia il
+`Cleanup build tags` triggerato dallo step 5 lo sanno e saltano sempre le immagini che hanno anche un tag
+`X.Y.Z`.
 
 Per rilasciare una nuova versione di un componente, alza a mano il campo `version` nel `package.json`
-corrispondente prima del push su `main`: la pipeline la userà per il tag Git e per il tag Docker dopo il
-deploy.
+corrispondente prima del push su `main`: la pipeline la userà per il tag Git e per il tag Docker al momento
+della promozione.
 
-### Struttura `k8s/`
+### Struttura dei manifest k8s
+
+I manifest di backend/frontend sono **colocati nel folder del componente a cui appartengono**
+(`backend/k8s/`, `frontend/k8s/`), non più in un `k8s/templates/app/` condiviso: così un cambio ai manifest
+di un componente ricade sotto lo stesso prefisso di path (`backend/`/`frontend/`) usato da `Build & Deploy`
+per decidere cosa buildare/deployare (vedi sopra), senza bisogno di regole separate per "solo k8s".
+`k8s/templates/infra/` (usato solo da **Infra**, provisioning namespace/Postgres/Keycloak) resta invece
+centralizzato, dato che non appartiene né a backend né a frontend.
 
 ```
+backend/
+├── k8s/                     # manifest con placeholder ${VAR}, applicati da deploy-backend
+│   ├── configmap.yaml        # variabili non sensibili (DB_HOST, KEYCLOAK_URL, ...)
+│   ├── secret.yaml           # DB_PASSWORD, KEYCLOAK_ADMIN_CLIENT_SECRET
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── ingress.yaml           # possiede la richiesta TLS/cert-manager (ClusterIssuer "letsencrypt")
+│                               # per l'host condiviso col frontend
+└── ...                       # codice del backend
+
+frontend/
+├── k8s/                     # manifest con placeholder ${VAR}, applicati da deploy-frontend
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── ingress.yaml           # stesso host/secretName TLS del backend, SENZA annotazione cert-manager
+│                               # (una sola Certificate per host, gestita dall'Ingress del backend)
+└── ...                       # codice del frontend
+
 k8s/
-├── package.json            # version dei manifest, letta dalla pipeline per il tag k8s-vX.Y.Z
-└── templates/               # manifest con placeholder ${VAR}, renderizzati da envsubst in CI
-    ├── app/                 # applicati da Build & Deploy (backend/frontend)
-    │   ├── configmap.yaml    # variabili non sensibili (DB_HOST, KEYCLOAK_URL, ...)
-    │   ├── secret.yaml       # DB_PASSWORD, KEYCLOAK_ADMIN_CLIENT_SECRET (per il backend)
-    │   ├── backend-deployment.yaml
-    │   ├── backend-service.yaml
-    │   ├── frontend-deployment.yaml
-    │   ├── frontend-service.yaml
-    │   └── ingress.yaml      # assume Ingress Controller + cert-manager (ClusterIssuer "letsencrypt")
-    └── infra/                # applicati da Infra (namespace, Postgres condiviso, Keycloak)
-        ├── namespace.yaml
-        ├── postgres-pvc.yaml
-        ├── postgres-deployment.yaml
-        ├── postgres-service.yaml
-        ├── keycloak-deployment.yaml
-        ├── keycloak-service.yaml
-        ├── keycloak-ingress.yaml
-        └── keycloak-init-job.yaml  # Job one-shot: esegue keycloak-realm-init.sh dentro al cluster
+└── templates/infra/          # applicati da Infra (namespace, Postgres condiviso, Keycloak)
+    ├── namespace.yaml
+    ├── postgres-pvc.yaml
+    ├── postgres-deployment.yaml
+    ├── postgres-service.yaml
+    ├── keycloak-deployment.yaml
+    ├── keycloak-service.yaml
+    ├── keycloak-ingress.yaml
+    └── keycloak-init-job.yaml  # Job one-shot: esegue keycloak-realm-init.sh dentro al cluster
 ```
 
 ### Variabili e secret da configurare su GitHub

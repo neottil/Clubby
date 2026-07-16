@@ -1,8 +1,13 @@
-# Un solo host pubblico per frontend + backend, con routing per path (come
-# Keycloak, il backend non ha un hostname proprio): il backend espone già
-# tutte le sue route sotto il prefisso /api (vedi backend/src/server.ts), e
-# il client frontend chiama ${VITE_API_BASE_URL}/api/... — bastano quindi due
-# regole sullo stesso host, senza reverse proxy né modifiche al server.
+# Ingress del backend: possiede la richiesta del certificato TLS (annotazione
+# cert-manager) per l'host condiviso con il frontend — l'Ingress del frontend
+# (frontend/k8s/ingress.yaml) referenzia lo stesso secretName ma SENZA
+# l'annotazione cert-manager, per non far litigare i due Ingress sulla stessa
+# richiesta di certificato. Traefik unisce le regole di più Ingress sullo
+# stesso host: qui solo /api, l'altro fa da default per "/".
+#
+# Il backend non ha un hostname proprio: espone già tutte le sue route sotto
+# il prefisso /api (vedi backend/src/server.ts), e il client frontend chiama
+# ${VITE_API_BASE_URL}/api/... — un solo host condiviso, routing per path.
 #
 # Assume Traefik come Ingress Controller (incluso di default in k3s, ingressClassName
 # "traefik") e cert-manager con il ClusterIssuer "letsencrypt", entrambi configurati da
@@ -10,7 +15,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: clubmanager
+  name: clubmanager-backend
   namespace: ${KUBE_NAMESPACE}
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
@@ -29,12 +34,5 @@ spec:
             backend:
               service:
                 name: clubmanager-backend
-                port:
-                  number: 80
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: clubmanager-frontend
                 port:
                   number: 80

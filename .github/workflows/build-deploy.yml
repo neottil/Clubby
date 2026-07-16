@@ -1,5 +1,12 @@
 name: Build & Deploy
 
+# Backend e frontend sono due scope completamente indipendenti: ognuno ha i
+# propri manifest k8s colocati nel proprio folder (backend/k8s/, frontend/k8s/
+# — non più un k8s/templates/app/ condiviso), il proprio tag Git
+# "<scope>-<branch>-<data>" (stesso tag sia da riferimento per il diff della
+# prossima run, sia da riferimento per il workflow Tag: niente più due
+# famiglie di tag separate), e build/deploy che girano solo se necessario,
+# senza mai toccare il Deployment k8s dell'altro componente.
 on:
   push:
     branches:
@@ -9,62 +16,80 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  # Calcola le versioni "reali" (da package.json) e un tag univoco basato sulla
-  # data (yyyymmdd_HHMM) usato per taggare immagini Docker e commit durante
-  # questa run. Il tag reale (server-vX.Y.Z / client-vX.Y.Z / k8s-vX.Y.Z) viene
-  # assegnato solo dopo un deploy riuscito, dal workflow Tag.
+  # Calcola le versioni "reali" (da package.json) e decide, per backend e
+  # frontend INDIPENDENTEMENTE, cosa serve davvero eseguire.
   versions:
     runs-on: ubuntu-latest
     environment: development
-    permissions:
-      contents: write
     outputs:
       server: ${{ steps.v.outputs.server }}
       client: ${{ steps.v.outputs.client }}
-      k8s: ${{ steps.v.outputs.k8s }}
       date_tag: ${{ steps.v.outputs.date_tag }}
       sha: ${{ steps.v.outputs.sha }}
+      has_backend: ${{ steps.analyze.outputs.has_backend }}
+      has_frontend: ${{ steps.analyze.outputs.has_frontend }}
+      deploy_backend: ${{ steps.analyze.outputs.deploy_backend }}
+      deploy_frontend: ${{ steps.analyze.outputs.deploy_frontend }}
     steps:
+      # fetch-depth: 0 necessario per "git tag --merged" e il diff nello step
+      # di analisi sotto (serve tutta la history + i tag, non solo l'ultimo commit).
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Per ciascuno scope (backend/frontend), cerca l'ultimo tag
+      # "<scope>-<branch>-*" di QUESTO branch e diffa SOLO il proprio folder:
+      #   - qualcosa sotto <scope>/ (esclusi i manifest) cambiato -> rebuild
+      #     (has_<scope>=true)
+      #   - solo <scope>/k8s/ cambiato (manifest, non codice) -> nessun
+      #     rebuild, ma il manifest va comunque riapplicato riusando l'ultima
+      #     immagine di quello scope effettivamente deployata (deploy_<scope>
+      #     =true, has_<scope>=false)
+      #   - niente cambiato sotto <scope>/ -> il job di deploy di quello scope
+      #     non gira affatto, il suo Deployment resta esattamente com'era
+      # Se non è mai stata fatta una build per quello scope su questo branch
+      # (nessun tag trovato), builda e deploya tutto per sicurezza.
+      - name: Analizza modifiche (backend e frontend indipendentemente)
+        id: analyze
+        run: |
+          BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
+
+          for SCOPE in backend frontend; do
+            PREV_TAG=$(git tag --merged HEAD --sort=-creatordate -l "${SCOPE}-${BRANCH_SLUG}-*" | head -1)
+
+            if [ -z "$PREV_TAG" ]; then
+              echo "[$SCOPE] Nessun tag precedente su questo branch: prima build, eseguo tutto."
+              HAS_CODE=true
+              HAS_K8S=true
+            else
+              CHANGED=$(git diff --name-only "$PREV_TAG" HEAD -- "${SCOPE}/")
+              echo "[$SCOPE] Diff rispetto a $PREV_TAG..HEAD:"
+              echo "$CHANGED"
+
+              HAS_CODE=false; HAS_K8S=false
+              echo "$CHANGED" | grep -qE "^${SCOPE}/k8s/" && HAS_K8S=true || true
+              echo "$CHANGED" | grep -vE "^${SCOPE}/k8s/" | grep -qE "^${SCOPE}/" && HAS_CODE=true || true
+            fi
+
+            DEPLOY=false
+            if $HAS_CODE || $HAS_K8S; then DEPLOY=true; fi
+
+            echo "has_${SCOPE}=$HAS_CODE"     >> "$GITHUB_OUTPUT"
+            echo "deploy_${SCOPE}=$DEPLOY"    >> "$GITHUB_OUTPUT"
+            echo "[$SCOPE] -> has_${SCOPE}=$HAS_CODE  deploy_${SCOPE}=$DEPLOY"
+          done
 
       - id: v
         run: |
+          BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
           echo "server=$(node -p "require('./backend/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "client=$(node -p "require('./frontend/package.json').version")" >> "$GITHUB_OUTPUT"
-          echo "k8s=$(node -p "require('./k8s/package.json').version")" >> "$GITHUB_OUTPUT"
-          echo "date_tag=$(date -u +%Y%m%d_%H%M)" >> "$GITHUB_OUTPUT"
+          echo "date_tag=${BRANCH_SLUG}-$(date -u +%Y%m%d_%H%M)" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      # Tag "di build" sul repo, univoco per run grazie alla data: permette di
-      # risalire esattamente al commit buildato/deployato da questa run, anche
-      # quando i package.json non sono stati bumpati. Il workflow Tag lo rimuove
-      # dopo aver assegnato il tag reale.
-      - name: Crea tag di build sul repo
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "build-${{ steps.v.outputs.date_tag }}" -m "Build ${{ steps.v.outputs.date_tag }}"
-          git push origin "build-${{ steps.v.outputs.date_tag }}"
-
-      - name: Scrivi versions.json
-        run: |
-          cat > versions.json <<EOF
-          {
-            "server": "${{ steps.v.outputs.server }}",
-            "client": "${{ steps.v.outputs.client }}",
-            "k8s": "${{ steps.v.outputs.k8s }}",
-            "date_tag": "${{ steps.v.outputs.date_tag }}",
-            "sha": "${{ steps.v.outputs.sha }}"
-          }
-          EOF
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: versions
-          path: versions.json
 
   build-backend:
     needs: versions
+    if: needs.versions.outputs.has_backend == 'true'
     runs-on: ubuntu-latest
     environment: development
     permissions:
@@ -105,6 +130,7 @@ jobs:
 
   build-frontend:
     needs: versions
+    if: needs.versions.outputs.has_frontend == 'true'
     runs-on: ubuntu-latest
     environment: development
     permissions:
@@ -164,23 +190,64 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ needs.versions.outputs.date_tag }}
             ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:latest
 
-  deploy:
-    needs: [versions, build-backend, build-frontend]
+  # Applica SOLO i manifest sotto backend/k8s/ e fa il rollout del solo
+  # Deployment backend. Se frontend non cambia, il suo Deployment non viene
+  # MAI toccato da questa run.
+  deploy-backend:
+    needs: [versions, build-backend]
+    # always() perché build-backend può essere "skipped" (non "success")
+    # quando has_backend è false — di norma GitHub Actions salterebbe anche
+    # questo job in quel caso, ma qui deve girare comunque se è cambiato solo
+    # un manifest sotto backend/k8s/ (deploy_backend=true, build-backend skipped).
+    if: |
+      always() &&
+      needs.versions.outputs.deploy_backend == 'true' &&
+      needs.versions.result == 'success' &&
+      (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped')
     runs-on: ubuntu-latest
     environment: development
+    permissions:
+      contents: write
     steps:
+      # fetch-depth: 0 necessario per cercare l'ultimo tag backend-<branch>-*
+      # (vedi step sotto), sia per riusare l'immagine sia per lo spostamento
+      # del tag a fine job.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      # Sostituisce i placeholder ${VAR} nei template k8s/templates/app/*.yaml
-      # (solo backend/frontend: namespace, Postgres e Keycloak sono gestiti dal
-      # workflow Infra, non da questo) con i valori reali presi da GitHub
-      # Variables/Secrets. L'output (k8s/rendered/) non viene mai committato:
-      # contiene credenziali in chiaro (vedi .gitignore).
-      - name: Renderizza manifest k8s
+      - name: Config git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Se questa run ha ribuildato il backend, usa quell'immagine (tag nuovo,
+      # verrà creato a fine job). Altrimenti (deploy_backend=true solo per un
+      # cambio manifest) NON esiste un tag :latest generico da riusare: cerca
+      # l'ultimo tag "backend-<branch>-*" — che identifica esattamente l'ultima
+      # immagine backend davvero deployata con successo su questo branch — e
+      # riusa quella, senza rebuild.
+      - name: Determina l'immagine backend da usare
+        id: image
+        run: |
+          BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
+          echo "branch_slug=$BRANCH_SLUG" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ needs.versions.outputs.has_backend }}" = "true" ]; then
+            echo "image_tag=${{ needs.versions.outputs.date_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            PREV=$(git tag -l "backend-${BRANCH_SLUG}-*" --sort=-creatordate | head -1)
+            if [ -z "$PREV" ]; then
+              echo "ERRORE: nessuna immagine backend risulta mai deployata su questo branch, e questa run non ne ha buildata una nuova. Impossibile continuare." >&2
+              exit 1
+            fi
+            echo "image_tag=${PREV#backend-}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Renderizza manifest k8s (backend)
         env:
           KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
-          BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ needs.versions.outputs.date_tag }}
-          FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ needs.versions.outputs.date_tag }}
+          BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ steps.image.outputs.image_tag }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT || 3000 }}
           DB_HOST: ${{ vars.DB_HOST }}
           DB_PORT: ${{ vars.DB_PORT || 5432 }}
@@ -195,12 +262,16 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered
-          VARS='$KUBE_NAMESPACE $BACKEND_IMAGE $FRONTEND_IMAGE $BACKEND_PORT $DB_HOST $DB_PORT $DB_NAME $DB_USER $DB_PASSWORD $KEYCLOAK_URL $KEYCLOAK_REALM $KEYCLOAK_ADMIN_CLIENT_ID $KEYCLOAK_ADMIN_CLIENT_SECRET $APP_DOMAIN'
-          for f in k8s/templates/app/*.yaml; do
-            envsubst "$VARS" < "$f" > "k8s/rendered/$(basename "$f")"
+          VARS='$KUBE_NAMESPACE $BACKEND_IMAGE $BACKEND_PORT $DB_HOST $DB_PORT $DB_NAME $DB_USER $DB_PASSWORD $KEYCLOAK_URL $KEYCLOAK_REALM $KEYCLOAK_ADMIN_CLIENT_ID $KEYCLOAK_ADMIN_CLIENT_SECRET $APP_DOMAIN'
+          # Prefisso "backend-" nel nome renderizzato: frontend usa file con
+          # lo stesso nome (deployment.yaml, service.yaml, ...) nella propria
+          # cartella, ma sulla VPS finiscono nella STESSA directory di deploy
+          # (DEPLOY_PATH, condivisa) — senza prefisso si sovrascriverebbero.
+          for f in backend/k8s/*.yaml; do
+            envsubst "$VARS" < "$f" > "k8s/rendered/backend-$(basename "$f")"
           done
 
-      - name: Copia manifest sulla VPS via SSH
+      - name: Copia manifest backend sulla VPS via SSH
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ vars.SSH_HOST }}
@@ -211,18 +282,19 @@ jobs:
           target: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
           strip_components: 2
 
-      - name: Applica manifest e verifica rollout
+      - name: Applica manifest backend e verifica rollout
         uses: appleboy/ssh-action@v1.2.0
         env:
           NS: ${{ vars.KUBE_NAMESPACE }}
           GHCR_USER: ${{ github.repository_owner }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
-          envs: NS,GHCR_USER,GHCR_PAT
+          envs: NS,GHCR_USER,GHCR_PAT,DEPLOY_PATH
           script: |
             set -e
             # Vedi commento in infra.yml: kubectl (symlink a k3s) senza
@@ -235,23 +307,158 @@ jobs:
             # in ImagePullBackOff. GHCR_PAT è un token dedicato (read:packages),
             # non il GITHUB_TOKEN della run: quello è valido solo per la durata
             # della pipeline, i pod invece devono poter fare pull in qualunque
-            # momento futuro (restart, rischedulazione, ecc.).
+            # momento futuro (restart, rischedulazione, ecc.). Idempotente:
+            # ricreato anche da deploy-frontend, non fa danno.
             kubectl create secret docker-registry ghcr-secret -n "$NS" \
               --docker-server=ghcr.io \
               --docker-username="$GHCR_USER" \
               --docker-password="$GHCR_PAT" \
               --dry-run=client -o yaml | kubectl apply -f -
 
-            kubectl apply -f ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
-            kubectl rollout status deployment/clubmanager-backend -n ${{ vars.KUBE_NAMESPACE }} --timeout=180s
-            kubectl rollout status deployment/clubmanager-frontend -n ${{ vars.KUBE_NAMESPACE }} --timeout=180s
+            kubectl apply -f "$DEPLOY_PATH/backend-configmap.yaml"
+            kubectl apply -f "$DEPLOY_PATH/backend-secret.yaml"
+            kubectl apply -f "$DEPLOY_PATH/backend-deployment.yaml"
+            kubectl apply -f "$DEPLOY_PATH/backend-service.yaml"
+            kubectl apply -f "$DEPLOY_PATH/backend-ingress.yaml"
+            kubectl rollout status deployment/clubmanager-backend -n "$NS" --timeout=180s
+
+      # Se questa run ha ribuildato: crea un tag NUOVO (nome = nuova data,
+      # riferisce la nuova immagine). Se invece era solo un deploy
+      # manifest-only: SPOSTA in avanti il tag ESISTENTE più recente sul
+      # commit di questa run (stesso nome quindi stessa immagine referenziata,
+      # ma segna "fino a qui è già stato deployato" per il diff del prossimo
+      # run — altrimenti lo stesso cambio manifest verrebbe rilevato di nuovo
+      # ad ogni run successiva).
+      - name: Registra il deploy di backend
+        run: |
+          if [ "${{ needs.versions.outputs.has_backend }}" = "true" ]; then
+            TAG="backend-${{ needs.versions.outputs.date_tag }}"
+            git tag -a "$TAG" -m "$TAG"
+            git push origin "$TAG"
+          else
+            TAG=$(git tag -l "backend-${{ steps.image.outputs.branch_slug }}-*" --sort=-creatordate | head -1)
+            git tag -fa "$TAG" -m "$TAG"
+            git push origin "$TAG" --force
+          fi
+
+  # Applica SOLO i manifest sotto frontend/k8s/ e fa il rollout del solo
+  # Deployment frontend. Se backend non cambia, il suo Deployment non viene
+  # MAI toccato da questa run.
+  deploy-frontend:
+    needs: [versions, build-frontend]
+    if: |
+      always() &&
+      needs.versions.outputs.deploy_frontend == 'true' &&
+      needs.versions.result == 'success' &&
+      (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: development
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Config git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Vedi commento gemello in deploy-backend.
+      - name: Determina l'immagine frontend da usare
+        id: image
+        run: |
+          BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
+          echo "branch_slug=$BRANCH_SLUG" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ needs.versions.outputs.has_frontend }}" = "true" ]; then
+            echo "image_tag=${{ needs.versions.outputs.date_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            PREV=$(git tag -l "frontend-${BRANCH_SLUG}-*" --sort=-creatordate | head -1)
+            if [ -z "$PREV" ]; then
+              echo "ERRORE: nessuna immagine frontend risulta mai deployata su questo branch, e questa run non ne ha buildata una nuova. Impossibile continuare." >&2
+              exit 1
+            fi
+            echo "image_tag=${PREV#frontend-}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Renderizza manifest k8s (frontend)
+        env:
+          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
+          FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ steps.image.outputs.image_tag }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p k8s/rendered
+          VARS='$KUBE_NAMESPACE $FRONTEND_IMAGE $APP_DOMAIN'
+          for f in frontend/k8s/*.yaml; do
+            envsubst "$VARS" < "$f" > "k8s/rendered/frontend-$(basename "$f")"
+          done
+
+      - name: Copia manifest frontend sulla VPS via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          source: "k8s/rendered/*"
+          target: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+          strip_components: 2
+
+      - name: Applica manifest frontend e verifica rollout
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          NS: ${{ vars.KUBE_NAMESPACE }}
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          envs: NS,GHCR_USER,GHCR_PAT,DEPLOY_PATH
+          script: |
+            set -e
+            export KUBECONFIG="$HOME/.kube/config"
+
+            kubectl create secret docker-registry ghcr-secret -n "$NS" \
+              --docker-server=ghcr.io \
+              --docker-username="$GHCR_USER" \
+              --docker-password="$GHCR_PAT" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl apply -f "$DEPLOY_PATH/frontend-deployment.yaml"
+            kubectl apply -f "$DEPLOY_PATH/frontend-service.yaml"
+            kubectl apply -f "$DEPLOY_PATH/frontend-ingress.yaml"
+            kubectl rollout status deployment/clubmanager-frontend -n "$NS" --timeout=180s
+
+      - name: Registra il deploy di frontend
+        run: |
+          if [ "${{ needs.versions.outputs.has_frontend }}" = "true" ]; then
+            TAG="frontend-${{ needs.versions.outputs.date_tag }}"
+            git tag -a "$TAG" -m "$TAG"
+            git push origin "$TAG"
+          else
+            TAG=$(git tag -l "frontend-${{ steps.image.outputs.branch_slug }}-*" --sort=-creatordate | head -1)
+            git tag -fa "$TAG" -m "$TAG"
+            git push origin "$TAG" --force
+          fi
 
   # A fine deploy, ripulisce dal registry le immagini taggate con la sola data,
   # mantenendo solo le 3 più recenti per repository immagine. I tag di versione
   # reale (X.Y.Z, assegnati dal workflow Tag) sono esclusi e non vengono mai
   # toccati da questa pulizia.
   cleanup-registry:
-    needs: [versions, deploy]
+    needs: [versions, deploy-backend, deploy-frontend]
+    if: |
+      always() &&
+      needs.versions.result == 'success' &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped') &&
+      (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped') &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-frontend.result == 'success')
     runs-on: ubuntu-latest
     environment: development
     permissions:

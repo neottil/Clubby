@@ -1,6 +1,0 @@
-{
-  "name": "clubmanager-k8s",
-  "private": true,
-  "version": "1.0.0",
-  "description": "Versione dei manifest Kubernetes di ClubManager. Non è un pacchetto npm installabile: il campo version è letto dalla pipeline Build & Deploy per calcolare il tag k8s-vX.Y.Z."
-}

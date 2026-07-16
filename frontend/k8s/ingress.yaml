@@ -1,0 +1,28 @@
+# Ingress del frontend: stesso host e stesso secretName TLS dell'Ingress del
+# backend (backend/k8s/ingress.yaml), ma SENZA l'annotazione cert-manager —
+# la richiesta del certificato è di competenza esclusiva dell'Ingress del
+# backend, per evitare che due Ingress litighino sulla stessa Certificate
+# di cert-manager. Traefik unisce le regole di più Ingress sullo stesso host:
+# qui "/" (tutto il resto, default), il backend gestisce "/api".
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clubmanager-frontend
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ${APP_DOMAIN}
+      secretName: clubmanager-tls
+  rules:
+    - host: ${APP_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: clubmanager-frontend
+                port:
+                  number: 80
