@@ -1,23 +1,35 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
-  <!-- Persone: silhouette laterali (blu) + centrale (teal), sfondo trasparente -->
-  <g>
-    <!-- persona sinistra -->
-    <circle cx="62" cy="118" r="16" fill="#7ab8e0"/>
-    <path d="M32 172 c0 -26 14 -42 30 -42 s30 16 30 42 z" fill="#7ab8e0"/>
+<svg width="100%" viewBox="0 0 680 380" role="img" style="" xmlns="http://www.w3.org/2000/svg">
+<title style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">Logo concept for Clubby, a dog club and social meetup app</title>
+<desc style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">A circular coral badge containing a simplified white dog head silhouette, with a small two-circle accent representing people meeting, and the wordmark "clubby" below in dark rounded text.</desc>
+<defs>
+<clipPath id="badgeClip"><circle cx="340" cy="150" r="108"/></clipPath>
+</defs>
 
-    <!-- persona destra -->
-    <circle cx="138" cy="118" r="16" fill="#7ab8e0"/>
-    <path d="M108 172 c0 -26 14 -42 30 -42 s30 16 30 42 z" fill="#7ab8e0"/>
 
-    <!-- persona centrale, più grande e in primo piano -->
-    <circle cx="100" cy="104" r="20" fill="#2ec4a6"/>
-    <path d="M62 172 c0 -34 17 -54 38 -54 s38 20 38 54 z" fill="#2ec4a6"/>
-  </g>
+<circle cx="340" cy="150" r="108" fill="#FF6B4A" style="fill:rgb(255, 107, 74);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
 
-  <!-- CM sovrapposto alle persone -->
-  <text x="100" y="112" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
-        font-weight="700" font-size="92">
-    <tspan fill="#16213e" fill-opacity="0.94">C</tspan><tspan fill="#2ec4a6">M</tspan>
-  </text>
+
+<g clip-path="url(#badgeClip)" style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
+  
+  <path d="M 275 95 Q 255 60 285 65 Q 300 95 300 118 Z" fill="#FFFFFF" style="fill:rgb(255, 255, 255);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  <path d="M 405 95 Q 425 60 395 65 Q 380 95 380 118 Z" fill="#FFFFFF" style="fill:rgb(255, 255, 255);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  
+  <ellipse cx="340" cy="150" rx="72" ry="66" fill="#FFFFFF" style="fill:rgb(255, 255, 255);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  
+  <ellipse cx="340" cy="180" rx="34" ry="26" fill="#FF6B4A" style="fill:rgb(255, 107, 74);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  
+  <ellipse cx="340" cy="168" rx="12" ry="9" fill="#FFFFFF" style="fill:rgb(255, 255, 255);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  
+  <circle cx="312" cy="135" r="7" fill="#FF6B4A" style="fill:rgb(255, 107, 74);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  <circle cx="368" cy="135" r="7" fill="#FF6B4A" style="fill:rgb(255, 107, 74);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+</g>
+
+
+<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
+  <circle cx="410" cy="225" r="20" fill="#2E2A26" style="fill:rgb(46, 42, 38);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  <circle cx="432" cy="238" r="20" fill="#F5C36B" style="fill:rgb(245, 195, 107);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+</g>
+
+
+<text x="340" y="345" text-anchor="middle" font-family="var(--font-sans)" font-weight="500" font-size="34" fill="var(--text-primary)" style="fill:rgb(11, 11, 11);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, sans-serif;font-size:34px;font-weight:500;text-anchor:middle;dominant-baseline:auto">clubby</text>
 </svg>
