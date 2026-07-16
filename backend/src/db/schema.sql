@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS socio (
 
 CREATE INDEX IF NOT EXISTS idx_socio_email    ON socio(email);
 CREATE INDEX IF NOT EXISTS idx_socio_viewer   ON socio(id_viewer);
+-- listSoci() (soci.service.ts) ordina sempre per cognome, nome: senza questo
+-- indice Postgres fa un sort separato dopo lo scan della tabella.
+CREATE INDEX IF NOT EXISTS idx_socio_cognome_nome ON socio(cognome, nome);
 
 -- ============================================================
 -- Tabella: incontro
@@ -46,8 +49,15 @@ CREATE TABLE IF NOT EXISTS incontro (
 -- (installazioni precedenti a questo schema).
 ALTER TABLE incontro ADD COLUMN IF NOT EXISTS attivita VARCHAR(100);
 
-CREATE INDEX IF NOT EXISTS idx_incontro_socio      ON incontro(socio_id);
+-- idx_incontro_data resta: serve alla lista globale (listIncontri() senza
+-- filtro socio, incontri.service.ts) ordinata per data su tutti i soci.
 CREATE INDEX IF NOT EXISTS idx_incontro_data       ON incontro(data_incontro);
+-- Sostituisce idx_incontro_socio (colonna singola, ridondante: un prefisso
+-- di questo indice composito copre già "WHERE socio_id = ..." da solo).
+-- listIncontri(socioId) filtra per socio_id E ordina per data_incontro DESC:
+-- questo indice evita il sort separato dopo il filtro.
+DROP INDEX IF EXISTS idx_incontro_socio;
+CREATE INDEX IF NOT EXISTS idx_incontro_socio_data ON incontro(socio_id, data_incontro DESC);
 
 -- ============================================================
 -- Tabella: buono
@@ -68,6 +78,9 @@ CREATE TABLE IF NOT EXISTS buono (
 ALTER TABLE buono DROP COLUMN IF EXISTS attivo;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_buono_socio ON buono(socio_id);
+-- listBuoni() senza filtro socio (buoni.service.ts) ordina sempre per
+-- data_creazione DESC su tutti i buoni.
+CREATE INDEX IF NOT EXISTS idx_buono_data ON buono(data_creazione DESC);
 
 -- ============================================================
 -- Tabella: movimento_buono
@@ -86,8 +99,14 @@ CREATE TABLE IF NOT EXISTS movimento_buono (
 -- (installazioni precedenti a questo schema).
 ALTER TABLE movimento_buono ADD COLUMN IF NOT EXISTS incontro_id UUID REFERENCES incontro(id) ON DELETE CASCADE;
 
-CREATE INDEX IF NOT EXISTS idx_movimento_buono ON movimento_buono(buono_id);
-CREATE INDEX IF NOT EXISTS idx_movimento_data  ON movimento_buono(data_movimento);
+-- Sostituisce idx_movimento_buono e idx_movimento_data (colonne singole):
+-- listMovimenti() (buoni.service.ts) filtra sempre per buono_id E ordina per
+-- data_movimento DESC nella stessa query — idx_movimento_data da solo non
+-- veniva mai usato (nessuna query ordina per data senza filtrare per buono),
+-- e idx_movimento_buono è ridondante col prefisso di questo indice composito.
+DROP INDEX IF EXISTS idx_movimento_buono;
+DROP INDEX IF EXISTS idx_movimento_data;
+CREATE INDEX IF NOT EXISTS idx_movimento_buono_data ON movimento_buono(buono_id, data_movimento DESC);
 -- Un incontro genera al più un movimento (creato/aggiornato/rimosso in modo atomico insieme all'incontro)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_movimento_incontro_unique ON movimento_buono(incontro_id) WHERE incontro_id IS NOT NULL;
 
