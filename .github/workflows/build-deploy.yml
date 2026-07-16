@@ -25,7 +25,7 @@ jobs:
       date_tag: ${{ steps.v.outputs.date_tag }}
       sha: ${{ steps.v.outputs.sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - id: v
         run: |
@@ -58,7 +58,7 @@ jobs:
           }
           EOF
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: versions
           path: versions.json
@@ -71,9 +71,9 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -87,7 +87,7 @@ jobs:
           npm ci
           npm run build
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -95,7 +95,7 @@ jobs:
 
       # Tag pushati: solo quello di data + latest. Il tag di versione reale
       # (server-vX.Y.Z) viene aggiunto dal workflow Tag dopo un deploy riuscito.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: ./backend
           push: true
@@ -111,9 +111,9 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -150,13 +150,13 @@ jobs:
           npm ci
           npm run build
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: ./frontend
           push: true
@@ -169,7 +169,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: development
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Sostituisce i placeholder ${VAR} nei template k8s/templates/app/*.yaml
       # (solo backend/frontend: namespace, Postgres e Keycloak sono gestiti dal

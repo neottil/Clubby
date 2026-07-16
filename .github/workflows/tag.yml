@@ -25,7 +25,7 @@ jobs:
       packages: write
       actions: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -98,13 +98,13 @@ jobs:
             git push origin "$tag" --force
           done
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Aggiunge il tag di versione reale allo stesso digest già pushato con il
       # tag di data (nessun rebuild: solo un nuovo riferimento sul registry).

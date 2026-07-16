@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { theme } from '../theme';
+import { config } from '../config';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -20,7 +21,7 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div style={styles.wrapper}>
       <nav style={styles.nav}>
-        <span style={styles.brand}>ClubManager</span>
+        <span style={styles.brand}>{config.tenantName}</span>
         <div style={styles.links}>
           {navLinks.map(link => (
             <Link
