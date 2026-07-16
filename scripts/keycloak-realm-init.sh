@@ -51,7 +51,7 @@ for i in $(seq 1 60); do
 done
 
 echo "▶ Ottengo token admin..."
-ADMIN_TOKEN=$(curl -f -X POST \
+ADMIN_TOKEN=$(curl -sf -X POST \
   "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=$ADMIN_USER" \

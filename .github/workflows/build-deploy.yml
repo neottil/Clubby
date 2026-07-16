@@ -213,17 +213,35 @@ jobs:
 
       - name: Applica manifest e verifica rollout
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          NS: ${{ vars.KUBE_NAMESPACE }}
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
+          envs: NS,GHCR_USER,GHCR_PAT
           script: |
             set -e
             # Vedi commento in infra.yml: kubectl (symlink a k3s) senza
             # KUBECONFIG esplicito risolve su /etc/rancher/k3s/k3s.yaml
             # (root:root), illeggibile dall'utente di deploy.
             export KUBECONFIG="$HOME/.kube/config"
+
+            # I package ghcr.io sono privati di default: senza questo Secret
+            # (referenziato da imagePullSecrets nei Deployment) i pod restano
+            # in ImagePullBackOff. GHCR_PAT è un token dedicato (read:packages),
+            # non il GITHUB_TOKEN della run: quello è valido solo per la durata
+            # della pipeline, i pod invece devono poter fare pull in qualunque
+            # momento futuro (restart, rischedulazione, ecc.).
+            kubectl create secret docker-registry ghcr-secret -n "$NS" \
+              --docker-server=ghcr.io \
+              --docker-username="$GHCR_USER" \
+              --docker-password="$GHCR_PAT" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
             kubectl apply -f ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
             kubectl rollout status deployment/clubmanager-backend -n ${{ vars.KUBE_NAMESPACE }} --timeout=180s
             kubectl rollout status deployment/clubmanager-frontend -n ${{ vars.KUBE_NAMESPACE }} --timeout=180s

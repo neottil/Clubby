@@ -301,6 +301,7 @@ namespace-<tenant>/
 ├── Ingress     clubmanager-keycloak (routing verso Keycloak, TLS)                                      [infra]
 ├── Secret      clubmanager-secrets (DB_PASSWORD, KEYCLOAK_ADMIN_CLIENT_SECRET, per backend)            [build-deploy]
 ├── Secret      clubmanager-infra-secrets (DB_PASSWORD, KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD)              [infra]
+├── Secret      ghcr-secret (imagePullSecrets: pull immagini private da ghcr.io)                        [build-deploy]
 └── ConfigMap   clubmanager-config (DB_HOST/PORT/NAME/USER, KEYCLOAK_URL/REALM/CLIENT_ID, PORT)         [build-deploy]
 ```
 
@@ -499,6 +500,7 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 | `DB_PASSWORD` | Password del database Postgres condiviso (app + Keycloak) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
 | `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Password dell'admin console Keycloak (bootstrap, distinto dall'admin applicativo) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
 | `KEYCLOAK_ADMIN_CLIENT_SECRET` | Client secret del client confidential `clubmanager-backend` su Keycloak — **generato/riusato da Infra** | *(copiata dal riepilogo della run Infra)* |
+| `GHCR_PAT` | Personal Access Token GitHub con scope `read:packages`, usato da **Build & Deploy** per creare il Secret k8s `ghcr-secret` (`imagePullSecrets` di backend/frontend) — i package su `ghcr.io` sono privati di default, senza questo token i pod restano in `ImagePullBackOff`. **Non riusare il `GITHUB_TOKEN` automatico**: è valido solo per la durata della run, i pod devono poter fare pull in qualunque momento futuro. Genera il token da GitHub → Settings (personali) → Developer settings → Personal access tokens → Tokens (classic) → scope `read:packages` | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* |
 
 #### Variables
 
