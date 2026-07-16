@@ -663,6 +663,10 @@ personale — non lasciarla aperta a tutto internet.
 In DBeaver: host `<IP_VPS>` (o un DNS che punta allo stesso IP, es. `db-dev.clubby.click`), porta
 `DB_NODE_PORT`, stesse credenziali del metodo 1.
 
+## Package.json script
+
+npm run version -- [frontend|backend] [major|minor|patch]
+
 ## TODO
 
 - [ ] Configurare il DNS di `APP_DOMAIN`/`KEYCLOAK_HOST` verso l'IP pubblico della VPS
