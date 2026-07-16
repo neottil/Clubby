@@ -227,7 +227,7 @@ crea_incontro_con_addebito() {
 
 # Mario Rossi: due incontri, saldo finale 100 - 20 - 25 = 55
 crea_incontro_con_addebito "$MARIO_ID" "$MARIO_BUONO_ID" "$(days_ago 10)" "Dog Dance" 20.00 "Lezione di gruppo"
-crea_incontro_con_addebito "$MARIO_ID" "$MARIO_BUONO_ID" "$(days_ago 3)" "Mantrailing" 25.00 "Uscita individuale"
+crea_incontro_con_addebito "$MARIO_ID" "$MARIO_BUONO_ID" "$(days_ago 3)" "Mantrailing" 25.00 "Incontro individuale"
 
 # Giulia Verdi: due incontri, saldo finale 50 - 20 - 15 = 15
 crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_BUONO_ID" "$(days_ago 20)" "Educazione singolo" 20.00 "Primo incontro"
@@ -239,7 +239,7 @@ psql_exec "
   INSERT INTO movimento_buono (buono_id, incontro_id, data_movimento, importo, descrizione)
   VALUES ('$LAURA_BUONO_ID', NULL, NOW() - INTERVAL '15 days', 50.00, 'Ricarica voucher');
 "
-crea_incontro_con_addebito "$LAURA_ID" "$LAURA_BUONO_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "Corso avanzato"
+crea_incontro_con_addebito "$LAURA_ID" "$LAURA_BUONO_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "Visto stand a 3 stazioni, passo laterale"
 crea_incontro_con_addebito "$LAURA_ID" "$LAURA_BUONO_ID" "$(days_ago 1)" "Piscina" 60.00 "Idroterapia"
 # Saldo Laura: 30 (iniziale) + 50 (ricarica) - 40 - 60 = -20 (negativo, come richiesto)
 

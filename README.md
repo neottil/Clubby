@@ -598,6 +598,7 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 | `VITE_TENANT_NAME` | Nome tenant visualizzato in UI, compilato nel bundle frontend | `ASD Roma` | Build & Deploy |
 | `KEYCLOAK_HOST` | Hostname pubblico di Keycloak (bare host) — usato sia nell'Ingress di Infra sia per costruire `KEYCLOAK_URL` (`https://` + questo valore); non punta al DNS interno del cluster, il backend valida il claim `iss` del JWT confrontandolo esattamente con `https://KEYCLOAK_HOST` (vedi nota sull'issuer JWT sopra) | `auth.clubmanager.example.com` | Infra, Build & Deploy |
 | `DB_HOST` | Host del Postgres condiviso raggiungibile dal cluster (nome del Service creato da Infra, include il namespace) | `clubmanager-postgres.clubmanager-prod.svc.cluster.local` | Build & Deploy |
+| `VITE_ACTIVITY_SELECT_VALUES_MAPPING` | Mapping JSON attività→costo di default per il form "Nuovo incontro", compilato nel bundle frontend | `{"Dog Dance":20,"Mantrailing":20,"K9 Cross Training":25,"Educazione singolo":20,"Passeggiata":25,"Piscina":25}` | Build & Deploy |
 
 ##### Opzionali (default applicato se non impostate)
 
@@ -617,7 +618,6 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 | `KEYCLOAK_REALM` | Realm Keycloak del tenant | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
 | `KEYCLOAK_ADMIN_CLIENT_ID` | Client ID del client confidential backend | `clubmanager-backend` | `clubmanager-backend` | Build & Deploy |
 | `KEYCLOAK_CLIENT_ID` | Client ID pubblico SPA (compilato nel frontend come `VITE_KEYCLOAK_CLIENT_ID`) | `clubmanager-spa` | `clubmanager-spa` | Build & Deploy |
-| `VITE_ACTIVITY_SELECT_VALUES_MAPPING` | Mapping JSON attività→costo di default per il form "Nuovo incontro", compilato nel bundle frontend | `{"Dog Dance":20,"Mantrailing":20,"K9 Cross Training":25,"Educazione singolo":20,"Passeggiata":25,"Piscina":25}` | `{}` (select vuota) | Build & Deploy |
 | `VITE_THEME_PRIMARY` | Colore primario (bottoni, link attivi) | `#FF6B4A` | `#FF6B4A` | Build & Deploy |
 | `VITE_THEME_PRIMARY_TEXT` | Colore del testo sopra il colore primario | `#ffffff` | `#ffffff` | Build & Deploy |
 | `VITE_THEME_DANGER` | Colore per importi negativi/azioni distruttive | `#dc2626` | `#dc2626` | Build & Deploy |

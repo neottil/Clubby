@@ -58,7 +58,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: theme.navBg,
     color: theme.navText,
   },
-  brandLogo: { height: 32, width: 32, marginRight: 4 },
+  brandLogo: { height: 40, width: 40, marginRight: 4 },
   brand: { fontWeight: 700, fontSize: 20, marginRight: 16, color: theme.navText },
   links: { display: 'flex', gap: 8, flex: 1 },
   link: {
