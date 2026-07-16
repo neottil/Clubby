@@ -8,8 +8,8 @@ export default function LoginPage() {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>ClubManager</h1>
-        <p style={styles.subtitle}>{config.tenantName}</p>
+        <h1 style={styles.title}>{config.tenantName}ClubManager</h1>
+        <p style={styles.subtitle}>ClubManager</p>
         {sessionExpired && (
           <div style={styles.sessionExpired}>
             La sessione è scaduta. Accedi di nuovo per continuare.
