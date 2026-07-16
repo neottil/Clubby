@@ -148,7 +148,7 @@ kc_api POST "/$REALM/roles" '{"name": "viewer", "description": "Viewer ClubManag
 
 echo "▶ Creo il primo utente admin ($INITIAL_ADMIN_EMAIL), password temporanea..."
 kc_api POST "/$REALM/users" "{
-  \"username\": \"$INITIAL_ADMIN_EMAIL\",
+  \"username\": \"adminapp\",
   \"email\": \"$INITIAL_ADMIN_EMAIL\",
   \"emailVerified\": true,
   \"enabled\": true
