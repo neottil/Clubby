@@ -1,4 +1,4 @@
-<svg width="100%" viewBox="0 0 680 380" role="img" style="" xmlns="http://www.w3.org/2000/svg">
+<svg width="100%" viewBox="220 30 240 240" role="img" style="" xmlns="http://www.w3.org/2000/svg">
 <title style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">Logo concept for Clubby, a dog club and social meetup app</title>
 <desc style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">A circular coral badge containing a simplified white dog head silhouette, with a small two-circle accent representing people meeting, and the wordmark "clubby" below in dark rounded text.</desc>
 <defs>
@@ -30,6 +30,4 @@
   <circle cx="432" cy="238" r="20" fill="#F5C36B" style="fill:rgb(245, 195, 107);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
 </g>
 
-
-<text x="340" y="345" text-anchor="middle" font-family="var(--font-sans)" font-weight="500" font-size="34" fill="var(--text-primary)" style="fill:rgb(11, 11, 11);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, sans-serif;font-size:34px;font-weight:500;text-anchor:middle;dominant-baseline:auto">clubby</text>
 </svg>

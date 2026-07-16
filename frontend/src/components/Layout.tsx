@@ -21,6 +21,7 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div style={styles.wrapper}>
       <nav style={styles.nav}>
+        <img src="/logo.svg" alt="" style={styles.brandLogo} />
         <span style={styles.brand}>{config.tenantName}</span>
         <div style={styles.links}>
           {navLinks.map(link => (
@@ -57,6 +58,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: theme.navBg,
     color: theme.navText,
   },
+  brandLogo: { height: 32, width: 32, marginRight: 4 },
   brand: { fontWeight: 700, fontSize: 20, marginRight: 16, color: theme.navText },
   links: { display: 'flex', gap: 8, flex: 1 },
   link: {

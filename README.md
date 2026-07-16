@@ -638,7 +638,7 @@ Due modi per collegarti da un client locale:
 
 Da terminale locale:
 ```bash
-ssh -L 5432:localhost:5432 deploy@<IP_VPS> \
+ssh -i ~/.ssh/k9_deploy 5432:localhost:5432 deploy@<IP_VPS> \
   'export KUBECONFIG=/home/deploy/.kube/config && kubectl port-forward -n <namespace> svc/clubmanager-postgres 5432:5432'
 ```
 (sostituisci `<IP_VPS>` e `<namespace>`, es. `clubmanager-dev`; sostituisci `deploy` se il tuo `SSH_USER` è
@@ -662,6 +662,17 @@ personale — non lasciarla aperta a tutto internet.
 
 In DBeaver: host `<IP_VPS>` (o un DNS che punta allo stesso IP, es. `db-dev.clubby.click`), porta
 `DB_NODE_PORT`, stesse credenziali del metodo 1.
+
+#### 3. Docker
+
+```bash
+docker run --rm -it \
+  -v "$(pwd)/scripts:/scripts" \
+  -e DB_HOST=<IP_VPS> -e DB_PORT=<...> -e DB_PASSWORD=<...> \
+  -e KEYCLOAK_URL=https://auth-dev.clubby.click -e KEYCLOAK_ADMIN_USER=<...> -e KEYCLOAK_ADMIN_PASSWORD=<...> \
+  postgres:16-alpine \
+  sh -c "apk add --no-cache bash curl jq && bash /scripts/seed-demo-data.sh"
+```
 
 ## Package.json script
 

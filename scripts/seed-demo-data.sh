@@ -1,0 +1,297 @@
+#!/bin/bash
+# ============================================================
+# Popola il database (e Keycloak) con dati di esempio per demo/test manuali.
+#
+# Crea 3 soci:
+#   - Mario Rossi   -> collegato a un account Keycloak (viewer), voucher con
+#                      saldo positivo, incontri di vario tipo
+#   - Laura Bianchi -> collegata a un account Keycloak (viewer), voucher con
+#                      una ricarica E un saldo finale NEGATIVO (per testare
+#                      la UI in quel caso)
+#   - Giulia Verdi  -> NESSUn account Keycloak (socio "solo gestionale",
+#                      senza accesso all'area viewer), voucher con saldo
+#                      positivo
+#
+# Username/password degli account Keycloak sono nome/cognome del socio
+# (vedi in fondo per il riepilogo credenziali stampato a fine esecuzione).
+#
+# Idempotente: ad ogni esecuzione elimina prima i 3 soci demo (email fisse,
+# vedi sotto) — a cascata anche voucher/incontri/movimenti collegati — e i
+# relativi utenti Keycloak, poi li ricrea da zero. Rieseguibile senza
+# accumulare dati duplicati ad ogni lancio.
+#
+# Non interattivo: tutti i parametri arrivano da variabili d'ambiente, con
+# default adatti a un ambiente locale (docker-compose).
+#
+# Prerequisiti: psql, curl, jq
+#
+# Variabili DB (default = ambiente locale via docker-compose):
+#   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+# Variabili Keycloak (default = ambiente locale):
+#   KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_ADMIN_USER, KEYCLOAK_ADMIN_PASSWORD
+#
+# Uso:
+#   ./scripts/seed-demo-data.sh
+#   DB_HOST=1.2.3.4 KEYCLOAK_URL=https://auth.example.com ./scripts/seed-demo-data.sh
+# ============================================================
+set -euo pipefail
+
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+DB_NAME="${DB_NAME:-clubmanager}"
+DB_USER="${DB_USER:-clubmanager}"
+DB_PASSWORD="${DB_PASSWORD:-clubmanager}"
+
+KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8080}"
+KEYCLOAK_URL=auth-dev.clubby.click
+KEYCLOAK_REALM="${KEYCLOAK_REALM:-clubmanager}"
+KEYCLOAK_ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
+KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
+
+# ------------------------------------------------------------
+# Helper: esegue una query e ritorna un solo valore scalare
+# ------------------------------------------------------------
+psql_scalar() {
+  PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
+    -tAc "$1" | head -n1
+}
+
+psql_exec() {
+  PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
+    -c "$1" > /dev/null
+}
+
+echo "▶ Verifico connessione al DB ($DB_HOST:$DB_PORT/$DB_NAME)..."
+psql_scalar "SELECT 1;" > /dev/null
+echo "  OK."
+
+# ------------------------------------------------------------
+# 0. Token admin Keycloak (serve sia per la pulizia che per la creazione)
+# ------------------------------------------------------------
+echo "▶ Ottengo token admin Keycloak..."
+TOKEN_RESPONSE=$(curl -s -w '\n%{http_code}' -X POST \
+  "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=$KEYCLOAK_ADMIN_USER" \
+  -d "password=$KEYCLOAK_ADMIN_PASSWORD" \
+  -d "grant_type=password" \
+  -d "client_id=admin-cli")
+TOKEN_HTTP_CODE=$(echo "$TOKEN_RESPONSE" | tail -n1)
+TOKEN_BODY=$(echo "$TOKEN_RESPONSE" | sed '$d')
+
+if [ "$TOKEN_HTTP_CODE" != "200" ]; then
+  echo "ERRORE: richiesta token Keycloak fallita (HTTP $TOKEN_HTTP_CODE): $TOKEN_BODY" >&2
+  exit 1
+fi
+
+ADMIN_TOKEN=$(echo "$TOKEN_BODY" | jq -r '.access_token')
+if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" = "null" ]; then
+  echo "ERRORE: impossibile ottenere token admin Keycloak (risposta: $TOKEN_BODY)." >&2
+  exit 1
+fi
+echo "  Token ottenuto."
+
+# kc_api NON usa "curl -f": in caso di errore HTTP vogliamo vedere status +
+# corpo della risposta (motivo dell'errore), non un fallimento silenzioso.
+kc_api() {
+  local method="$1" path="$2" data="${3:-}"
+  local response http_code body
+  if [ -n "$data" ]; then
+    response=$(curl -s -w '\n%{http_code}' -X "$method" "$KEYCLOAK_URL/admin/realms$path" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$data")
+  else
+    response=$(curl -s -w '\n%{http_code}' -X "$method" "$KEYCLOAK_URL/admin/realms$path" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -H "Content-Type: application/json")
+  fi
+  http_code=$(echo "$response" | tail -n1)
+  body=$(echo "$response" | sed '$d')
+
+  if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+    echo "$body"
+  else
+    echo "  [kc_api] $method $path -> HTTP $http_code: $body" >&2
+    return 1
+  fi
+}
+
+# ------------------------------------------------------------
+# 1. Pulizia dati demo da run precedenti (idempotenza)
+# ------------------------------------------------------------
+echo "▶ Pulisco eventuali dati di esempio da run precedenti..."
+
+elimina_utente_keycloak_se_esiste() {
+  local username="$1"
+  local kc_user_id
+  kc_user_id=$(kc_api GET "/$KEYCLOAK_REALM/users?username=$username" | jq -r '.[0].id // empty')
+  if [ -n "$kc_user_id" ]; then
+    kc_api DELETE "/$KEYCLOAK_REALM/users/$kc_user_id" > /dev/null
+    echo "  Utente Keycloak '$username' (esistente) eliminato."
+  fi
+}
+
+elimina_utente_keycloak_se_esiste "mario.rossi"
+elimina_utente_keycloak_se_esiste "laura.bianchi"
+
+# A cascata (ON DELETE CASCADE) elimina anche buono/incontro/movimento_buono
+# collegati a questi soci — vedi backend/src/db/schema.sql.
+psql_exec "
+  DELETE FROM socio WHERE email IN (
+    'mario.rossi@example.local',
+    'laura.bianchi@example.local',
+    'giulia.verdi@example.local'
+  );
+"
+echo "  Dati precedenti (se presenti) rimossi."
+
+# ------------------------------------------------------------
+# 2. Soci
+# ------------------------------------------------------------
+echo "▶ Creo i soci..."
+
+MARIO_ID=$(psql_scalar "
+  INSERT INTO socio (nome, cognome, email, telefono, data_iscrizione, note)
+  VALUES ('Mario', 'Rossi', 'mario.rossi@example.local', '+39 333 1111111', CURRENT_DATE - INTERVAL '6 months', 'Socio di esempio, saldo positivo')
+  RETURNING id;
+")
+
+LAURA_ID=$(psql_scalar "
+  INSERT INTO socio (nome, cognome, email, telefono, data_iscrizione, note)
+  VALUES ('Laura', 'Bianchi', 'laura.bianchi@example.local', '+39 333 2222222', CURRENT_DATE - INTERVAL '3 months', 'Socio di esempio, saldo negativo dopo ricarica + addebiti')
+  RETURNING id;
+")
+
+GIULIA_ID=$(psql_scalar "
+  INSERT INTO socio (nome, cognome, email, telefono, data_iscrizione, note)
+  VALUES ('Giulia', 'Verdi', 'giulia.verdi@example.local', '+39 333 3333333', CURRENT_DATE - INTERVAL '1 year', 'Socio di esempio, nessun account viewer')
+  RETURNING id;
+")
+
+echo "  Mario Rossi   -> $MARIO_ID"
+echo "  Laura Bianchi -> $LAURA_ID"
+echo "  Giulia Verdi  -> $GIULIA_ID"
+
+# ------------------------------------------------------------
+# 3. Voucher (buono) — uno per socio
+# ------------------------------------------------------------
+echo "▶ Creo i voucher..."
+
+MARIO_BUONO_ID=$(psql_scalar "
+  INSERT INTO buono (socio_id, saldo_iniziale, note)
+  VALUES ('$MARIO_ID', 100.00, 'Voucher iniziale')
+  RETURNING id;
+")
+
+LAURA_BUONO_ID=$(psql_scalar "
+  INSERT INTO buono (socio_id, saldo_iniziale, note)
+  VALUES ('$LAURA_ID', 30.00, 'Voucher iniziale')
+  RETURNING id;
+")
+
+GIULIA_BUONO_ID=$(psql_scalar "
+  INSERT INTO buono (socio_id, saldo_iniziale, note)
+  VALUES ('$GIULIA_ID', 50.00, 'Voucher iniziale')
+  RETURNING id;
+")
+
+# ------------------------------------------------------------
+# 4. Incontri (di vario tipo) + movimenti di addebito collegati
+# ------------------------------------------------------------
+echo "▶ Creo gli incontri e i relativi addebiti..."
+
+# Data di N giorni fa in formato YYYY-MM-DD, portabile: "-d '@epoch'" è
+# supportato sia da GNU date che da BusyBox date (usato in postgres:16-alpine),
+# a differenza di "-d '10 days ago'" (solo GNU) o "-v-10d" (solo BSD/macOS).
+days_ago() {
+  local n="$1"
+  local now
+  now=$(date -u +%s)
+  date -u -d "@$((now - n * 86400))" +%F 2>/dev/null || date -u -v-"${n}"d +%F
+}
+
+crea_incontro_con_addebito() {
+  local socio_id="$1" buono_id="$2" data="$3" attivita="$4" costo="$5" note="$6"
+  local incontro_id
+  incontro_id=$(psql_scalar "
+    INSERT INTO incontro (socio_id, data_incontro, attivita, costo, note)
+    VALUES ('$socio_id', '$data', '$attivita', $costo, '$note')
+    RETURNING id;
+  ")
+  psql_exec "
+    INSERT INTO movimento_buono (buono_id, incontro_id, data_movimento, importo, descrizione)
+    VALUES ('$buono_id', '$incontro_id', '$data', -$costo, 'Addebito incontro: $attivita');
+  "
+}
+
+# Mario Rossi: due incontri, saldo finale 100 - 20 - 25 = 55
+crea_incontro_con_addebito "$MARIO_ID" "$MARIO_BUONO_ID" "$(days_ago 10)" "Dog Dance" 20.00 "Lezione di gruppo"
+crea_incontro_con_addebito "$MARIO_ID" "$MARIO_BUONO_ID" "$(days_ago 3)" "Mantrailing" 25.00 "Uscita individuale"
+
+# Giulia Verdi: due incontri, saldo finale 50 - 20 - 15 = 15
+crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_BUONO_ID" "$(days_ago 20)" "Educazione singolo" 20.00 "Primo incontro"
+crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_BUONO_ID" "$(days_ago 5)" "Passeggiata" 15.00 "Passeggiata di gruppo"
+
+# Laura Bianchi: ricarica + due incontri più costosi -> saldo finale negativo
+# Ricarica (movimento senza incontro collegato), precedente ai due incontri
+psql_exec "
+  INSERT INTO movimento_buono (buono_id, incontro_id, data_movimento, importo, descrizione)
+  VALUES ('$LAURA_BUONO_ID', NULL, NOW() - INTERVAL '15 days', 50.00, 'Ricarica voucher');
+"
+crea_incontro_con_addebito "$LAURA_ID" "$LAURA_BUONO_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "Corso avanzato"
+crea_incontro_con_addebito "$LAURA_ID" "$LAURA_BUONO_ID" "$(days_ago 1)" "Piscina" 60.00 "Idroterapia"
+# Saldo Laura: 30 (iniziale) + 50 (ricarica) - 40 - 60 = -20 (negativo, come richiesto)
+
+# ------------------------------------------------------------
+# 5. Account Keycloak per Mario e Laura (Giulia resta senza)
+# ------------------------------------------------------------
+VIEWER_ROLE_JSON=$(kc_api GET "/$KEYCLOAK_REALM/roles/viewer")
+
+crea_utente_viewer() {
+  local socio_id="$1" nome="$2" cognome="$3" email="$4"
+  local username="${nome,,}.${cognome,,}"
+  local password="${nome}${cognome}"
+
+  echo "  Creo utente Keycloak '$username'..."
+  kc_api POST "/$KEYCLOAK_REALM/users" "{
+    \"username\": \"$username\",
+    \"email\": \"$email\",
+    \"firstName\": \"$nome\",
+    \"lastName\": \"$cognome\",
+    \"emailVerified\": true,
+    \"enabled\": true
+  }" > /dev/null || echo "    (utente già esistente, salto creazione)"
+
+  local kc_user_id
+  kc_user_id=$(kc_api GET "/$KEYCLOAK_REALM/users?username=$username" | jq -r '.[0].id')
+  if [ -z "$kc_user_id" ] || [ "$kc_user_id" = "null" ]; then
+    echo "ERRORE: impossibile recuperare l'utente Keycloak appena creato ($username)." >&2
+    exit 1
+  fi
+
+  kc_api PUT "/$KEYCLOAK_REALM/users/$kc_user_id/reset-password" \
+    "{\"type\":\"password\",\"value\":\"$password\",\"temporary\":false}" > /dev/null
+
+  kc_api POST "/$KEYCLOAK_REALM/users/$kc_user_id/role-mappings/realm" "[$VIEWER_ROLE_JSON]" > /dev/null || true
+
+  psql_exec "UPDATE socio SET id_viewer = '$kc_user_id' WHERE id = '$socio_id';"
+
+  echo "    username: $username / password: $password"
+}
+
+crea_utente_viewer "$MARIO_ID" "Mario" "Rossi" "mario.rossi@example.local"
+crea_utente_viewer "$LAURA_ID" "Laura" "Bianchi" "laura.bianchi@example.local"
+
+echo ""
+echo "=== Fatto ==="
+echo ""
+echo "Soci creati:"
+echo "  Mario Rossi   (saldo voucher atteso: 55.00,  con account viewer)"
+echo "  Laura Bianchi (saldo voucher atteso: -20.00, con account viewer e una ricarica)"
+echo "  Giulia Verdi  (saldo voucher atteso: 15.00,  SENZA account viewer)"
+echo ""
+echo "Credenziali account viewer creati:"
+echo "  mario.rossi / MarioRossi"
+echo "  laura.bianchi / LauraBianchi"
+echo ""
