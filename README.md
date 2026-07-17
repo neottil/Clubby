@@ -450,15 +450,21 @@ I manifest renderizzati (`k8s/rendered/`, contengono credenziali in chiaro) non 
 #### `Cleanup build tags` ([cleanup-build-tags.yml](.github/workflows/cleanup-build-tags.yml))
 
 **Attivazione manuale**, oppure **automatica** (fire-and-forget) alla fine di ogni promozione riuscita del
-workflow **Tag**, scoped a `branch=main` e `preserve_latest=true`. I tag `<scope>-<branch>-*` **non sono
-usa-e-getta**: sono anche la baseline del diff della prossima run di `Build & Deploy` su quel branch e il
-riferimento del workflow **Tag** — per questo, di default (`preserve_latest=true`), per ciascuno scope e
-per ciascun branch coinvolto viene sempre **mantenuto il tag più recente** (Git e immagine Docker
-corrispondente), eliminando solo quelli più vecchi. Così è sicuro lanciarlo — anche in automatico — su un
-branch ancora attivo come `main`: dopo la pulizia resta comunque un tag da cui `Build & Deploy` può
+workflow **Tag**, scoped a `branch=main` e `preserve_latest=true` (e a `scope` limitato al solo scope
+appena promosso, se **Tag** ne ha promosso uno solo in quella run — vedi sotto). I tag `<scope>-<branch>-*`
+**non sono usa-e-getta**: sono anche la baseline del diff della prossima run di `Build & Deploy` su quel
+branch e il riferimento del workflow **Tag** — per questo, di default (`preserve_latest=true`), per
+ciascuno scope e per ciascun branch coinvolto viene sempre **mantenuto il tag più recente** (Git e immagine
+Docker corrispondente), eliminando solo quelli più vecchi. Così è sicuro lanciarlo — anche in automatico —
+su un branch ancora attivo come `main`: dopo la pulizia resta comunque un tag da cui `Build & Deploy` può
 calcolare il prossimo diff.
 
-Accetta tre input:
+Accetta quattro input:
+- `scope` (opzionale): `backend`, `frontend`, o vuoto per **entrambi** (default). Backend e frontend sono
+  processati come scope completamente indipendenti (tag Git, immagini Docker, tutto separato) — questo
+  input limita la pulizia a uno solo dei due. Usato dal trigger automatico da **Tag** quando ha promosso un
+  solo scope in quella run (l'altro non è cambiato, non c'è motivo di ripulirlo). Per una pulizia manuale di
+  un branch `feature/**`/`fix/**` concluso, di solito si lascia vuoto (entrambi gli scope).
 - `branch` (opzionale): se valorizzato (es. `main`, `feature/x`), ripulisce **solo** i tag di quel branch —
   sia Git (`backend-<branch>-*`, `frontend-<branch>-*`) sia le immagini Docker corrispondenti su `ghcr.io`
   (`clubmanager-backend`/`clubmanager-frontend`), tramite l'API di GitHub Packages (non
@@ -484,27 +490,40 @@ separata (quando ci sarà la pipeline `Promote`, questo workflow verrà rivisto)
 
 Non prende in input l'ID di una run di `Build & Deploy` da promuovere: dato che backend e frontend deployano
 in modo indipendente (vedi sopra), non esiste "la run da promuovere" — ogni scope avanza per conto suo,
-potenzialmente in run diverse. Per ciascuno dei due scope (`backend`, `frontend`), il workflow:
+potenzialmente in run diverse. Agisce **solo sugli scope che ne hanno davvero bisogno**: non sposta mai un tag
+di versione reale se quello scope non ha nulla di nuovo da promuovere. Per ciascuno dei due scope (`backend`,
+`frontend`), il workflow:
 
 1. Cerca l'ultimo tag `<scope>-main-*` (creato/avanzato da `deploy-backend`/`deploy-frontend` solo dopo un
-   rollout riuscito, vedi sopra) — se non lo trova, fallisce con un errore esplicito (quello scope non è mai
-   stato deployato su main).
-2. Legge la versione dal `package.json` **al commit di quel tag specifico** (`git show <tag>:<scope>/package.json`
-   — non da `HEAD`: backend e frontend possono essere più avanti/indietro l'uno rispetto all'altro).
-3. **Crea o sposta** (force-update) il tag di versione reale corrispondente su quel commit:
+   rollout riuscito, vedi sopra) — se non lo trova, **salta** quello scope (non è mai stato deployato su
+   main, non c'è nulla da promuovere; non è più un errore fatale).
+2. Controlla se il commit di quel tag è **già coperto da un tag di versione reale** (`git tag --points-at
+   <commit>` filtrato su `server-v*`/`client-v*`) — se sì, quello scope è già stato promosso l'ultima volta:
+   **salta** (nessuno spostamento di tag, nessun ri-tag Docker). Questo controllo si basa solo sui tag Git già
+   nel repo — niente artifact né `run_id` da `Build & Deploy`: backend e frontend buildano/promuovono in run
+   indipendenti e asincrone, quindi "l'ultima run di Build & Deploy" non sarebbe comunque un riferimento
+   affidabile su cosa è cambiato dall'ultima promozione (i tag Git, essendo stato persistente nel repo, lo sono).
+3. Se invece c'è qualcosa di nuovo, legge la versione dal `package.json` **al commit di quel tag specifico**
+   (`git show <tag>:<scope>/package.json` — non da `HEAD`: backend e frontend possono essere più
+   avanti/indietro l'uno rispetto all'altro).
+4. **Crea o sposta** (force-update) il tag di versione reale corrispondente su quel commit:
 
    | Scope | Tag reale | Fonte versione |
    |---|---|---|
    | `backend` | `server-vX.Y.Z` | `backend/package.json` → `version` |
    | `frontend` | `client-vX.Y.Z` | `frontend/package.json` → `version` |
 
-4. **Assegna il tag di versione reale** (`X.Y.Z`) all'immagine già pushata col tag di data ricavato dal nome
+5. **Assegna il tag di versione reale** (`X.Y.Z`) all'immagine già pushata col tag di data ricavato dal nome
    del tag `<scope>-*` stesso (nessuna variabile/artifact separato), tramite `docker buildx imagetools
    create` (nessun rebuild: aggiunge solo un riferimento sullo stesso digest già presente sul registry).
-5. **Triggera** (fire-and-forget, non aspetta che finisca) il workflow **Cleanup build tags** scoped a
-   `branch=main` e `preserve_latest=true`, per ripulire i tag `backend-main-*`/`frontend-main-*` (Git e
-   Docker) rimasti da eventuali tentativi precedenti su `main` mai promossi — mantenendo sempre il più
-   recente per scope, così il prossimo diff di `Build & Deploy` ha ancora una baseline da cui partire.
+6. Se **almeno uno** scope è stato promosso, **triggera** (fire-and-forget, non aspetta che finisca) il
+   workflow **Cleanup build tags** scoped a `branch=main` e `preserve_latest=true`, per ripulire i tag
+   `backend-main-*`/`frontend-main-*` (Git e Docker) rimasti da eventuali tentativi precedenti su `main` mai
+   promossi — mantenendo sempre il più recente per scope, così il prossimo diff di `Build & Deploy` ha ancora
+   una baseline da cui partire. Se è stato promosso **un solo** scope, il trigger passa anche `scope=<quello>`
+   — l'altro scope non è cambiato, non c'è motivo di ripulirlo in questa run; se sono stati promossi
+   entrambi, `scope` resta vuoto (pulisce entrambi). Se nessuno scope è stato promosso (tutto già allineato), questo step non gira:
+   non c'è nessuna nuova baseline da preservare.
 
 **Nota sul tag di data e i limiti di GHCR**: il tag di data **non** viene eliminato dall'immagine appena
 promossa nello step 4. L'API di GitHub Packages cancella per *versione* (= digest), non per singolo tag:

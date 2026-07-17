@@ -6,7 +6,10 @@ name: Cleanup build tags
 #
 # Attivazione MANUALE, oppure AUTOMATICA (fire-and-forget) alla fine di ogni
 # promozione riuscita del workflow Tag, scoped a branch=main e
-# preserve_latest=true.
+# preserve_latest=true. Backend e frontend sono scope indipendenti (vedi
+# input "scope" sotto): il trigger automatico da Tag lo passa quando ha
+# promosso un solo scope in quella run, per non ripulire (e non generare
+# rumore nei log/summary) uno scope che non ha subito nessuna modifica.
 #
 # Questi tag non sono "usa e getta": sono anche la baseline che Build & Deploy
 # usa per calcolare il diff della prossima run su quel branch (vedi
@@ -26,6 +29,15 @@ name: Cleanup build tags
 on:
   workflow_dispatch:
     inputs:
+      scope:
+        description: >-
+          Scope da ripulire: "backend", "frontend", o vuoto per entrambi
+          (default). Usa questo per limitare la pulizia a un solo scope — es.
+          il trigger automatico da Tag lo imposta quando ha promosso un solo
+          scope in quella run; per una pulizia manuale di un branch
+          feature/fix di solito si lascia vuoto (entrambi).
+        required: false
+        default: ''
       branch:
         description: >-
           Branch da ripulire (es. "main", "feature/x" — usa lo stesso slug
@@ -59,6 +71,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Determina gli scope da processare
+        id: scopes
+        run: |
+          case "${{ inputs.scope }}" in
+            '')
+              echo "list=backend frontend" >> "$GITHUB_OUTPUT"
+              ;;
+            backend|frontend)
+              echo "list=${{ inputs.scope }}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "ERRORE: scope non valido '${{ inputs.scope }}' (valori ammessi: backend, frontend, o vuoto per entrambi)." >&2
+              exit 1
+              ;;
+          esac
+
       # Per ciascuno scope, elenca i tag "<scope>-<branch>-<data>" che
       # matchano il branch richiesto (o tutti, se vuoto), li raggruppa per
       # branch — estraendo lo slug dal nome: tutto tra "<scope>-" e la data
@@ -71,7 +99,7 @@ jobs:
           mkdir -p /tmp/cleanup
           BRANCH_FILTER=$(echo "${{ inputs.branch }}" | tr '/' '-')
 
-          for SCOPE in backend frontend; do
+          for SCOPE in ${{ steps.scopes.outputs.list }}; do
             : > "/tmp/cleanup/${SCOPE}_delete_git.txt"
             : > "/tmp/cleanup/${SCOPE}_keep_datetags.txt"
 
@@ -112,7 +140,7 @@ jobs:
 
       - name: Elimina i tag Git
         run: |
-          for SCOPE in backend frontend; do
+          for SCOPE in ${{ steps.scopes.outputs.list }}; do
             FILE="/tmp/cleanup/${SCOPE}_delete_git.txt"
             if [ ! -s "$FILE" ]; then
               echo "[$SCOPE] Nessun tag Git da eliminare."
@@ -154,7 +182,7 @@ jobs:
 
           declare -A IMAGE=( [backend]=clubmanager-backend [frontend]=clubmanager-frontend )
 
-          for SCOPE in backend frontend; do
+          for SCOPE in ${{ steps.scopes.outputs.list }}; do
             IMG="${IMAGE[$SCOPE]}"
             KEEP_FILE="/tmp/cleanup/${SCOPE}_keep_datetags.txt"
 

@@ -141,15 +141,26 @@ digest Docker già pushato (`docker buildx imagetools create --tag <img>:X.Y.Z <
 
 Punto chiave se i componenti sono indipendenti (pattern 2/3): **non esiste più "una singola run da
 promuovere"**, perché ogni scope può essere avanzato in run diverse. La promozione quindi:
-1. Cerca, **per ciascuno scope indipendentemente**, l'ultimo tag `<scope>-<branch-di-produzione>-*`.
-2. Legge la versione da leggere (es. `package.json`) **al commit di quel tag specifico** via
-   `git show <tag>:<path>/package.json` — non da `HEAD`, che potrebbe essere più avanti di quello scope.
-3. Crea/sposta il tag di versione reale su quel commit specifico.
-4. Ricava il tag Docker da riferire facendo lo string-stripping inverso del punto 3 sopra (nessun
+1. Cerca, **per ciascuno scope indipendentemente**, l'ultimo tag `<scope>-<branch-di-produzione>-*` — se
+   non lo trova, salta quello scope (mai deployato lì, nulla da promuovere).
+2. **Controlla se quello scope è già promosso**: se il commit di quel tag ha già un tag di versione reale
+   che punta esattamente lì, salta — nessuno spostamento di tag, nessun ri-tag Docker. Questo controllo
+   basta farlo sui tag Git già nel repo: **non serve leggere lo stato dell'ultima run di build** (né
+   artifact né `run_id`) — con scope indipendenti che buildano in run asincrone, "l'ultima run" non è
+   comunque un riferimento affidabile su cosa è cambiato dall'ultima promozione, mentre i tag Git (stato
+   persistente nel repo) lo sono sempre.
+3. Se invece c'è qualcosa di nuovo da promuovere, legge la versione (es. `package.json`) **al commit di
+   quel tag specifico** via `git show <tag>:<path>/package.json` — non da `HEAD`, che potrebbe essere più
+   avanti di quello scope.
+4. Crea/sposta il tag di versione reale su quel commit specifico.
+5. Ricava il tag Docker da riferire facendo lo string-stripping inverso del punto 4 sopra (nessun
    `run_id` da passare a mano, nessun artifact da scaricare).
-5. Triggera (fire-and-forget) il workflow di pulizia (pattern 5) scoped al branch di produzione con
-   `preserve_latest=true` — sicuro perché mantiene comunque il tag appena promosso come baseline per il
-   prossimo diff.
+6. Se **almeno uno** scope è stato promosso, triggera (fire-and-forget) il workflow di pulizia (pattern 5)
+   scoped al branch di produzione con `preserve_latest=true` — sicuro perché mantiene comunque il tag
+   appena promosso come baseline per il prossimo diff. Se è stato promosso **un solo** scope, passa anche lo
+   scope specifico (l'altro non è cambiato, non c'è motivo di ripulirlo in questa run); se sono stati
+   promossi entrambi, lo scope resta vuoto (pulizia di entrambi). Se nessuno scope è stato promosso, questo
+   step non gira: non c'è nessuna nuova baseline da preservare.
 
 Sicurezza incorporata: se lo schema dei tag include sempre il nome del branch "di produzione" (qui `main`),
 il workflow di promozione **non ha bisogno di validare esplicitamente il branch** — strutturalmente non può
@@ -171,6 +182,13 @@ trovati per (scope, branch) — estraendo lo slug del branch dal nome del tag, d
 (Git + immagine Docker corrispondente), eliminando solo quelli più vecchi. Questo lo rende sicuro da
 lanciare **anche in automatico su un branch ancora attivo**: dopo la pulizia resta comunque un tag da cui
 calcolare il prossimo diff.
+
+Con componenti indipendenti (pattern 2/3), anche la pulizia va scoped **per scope**, non solo per branch: un
+input `scope` (vuoto = entrambi, o un singolo scope) permette di limitare l'esecuzione a un solo componente.
+Serve soprattutto al trigger automatico dopo una promozione (pattern 4): se in quella run è stato promosso
+un solo scope, non ha senso ripulire anche l'altro, che non è cambiato — passare `scope=<quello>` evita
+lavoro (e rumore nei log) inutile. Per una pulizia manuale di un intero branch concluso, di solito si lascia
+vuoto (entrambi gli scope).
 
 `preserve_latest=false` è per un caso diverso: un branch **concluso/mergiato**, i cui tag non servono più a
 nessuno — lì si può ripulire per intero senza mantenere nulla.
@@ -278,19 +296,25 @@ ma non le modifica né le ricrea.
 **Trigger**: manuale, nessun input (vedi pattern 4 — non serve più specificare cosa promuovere).
 
 **Cosa fa**: applica il pattern 4 — per ciascuno scope, trova l'ultimo tag di deploy sul branch di
-produzione, legge la versione al commit giusto, crea/sposta il tag di versione reale, ri-tagga l'immagine
-Docker esistente senza rebuild, poi triggera (fire-and-forget) `cleanup-build-tags.yml` scoped al branch di
-produzione con `preserve_latest=true`.
+produzione; se quel commit è già coperto da un tag di versione reale, **salta** quello scope (già
+promosso, nessuna modifica); altrimenti legge la versione al commit giusto, crea/sposta il tag di versione
+reale, ri-tagga l'immagine Docker esistente senza rebuild. Se **almeno uno** scope è stato promosso,
+triggera (fire-and-forget) `cleanup-build-tags.yml` scoped al branch di produzione con
+`preserve_latest=true` — e con `scope` limitato al solo scope appena promosso, se ne è stato promosso uno
+solo (vuoto, cioè entrambi, se sono stati promossi entrambi); se nessuno scope aveva bisogno di essere
+promosso, questo step non gira.
 
 ### `cleanup-build-tags.yml`
 
-**Trigger**: manuale, oppure automatico (fire-and-forget) a fine `tag.yml`. Input: `branch` (opzionale:
-vuoto = tutti i branch), `preserve_latest` (default `true`) e `dry_run` (default `true`).
+**Trigger**: manuale, oppure automatico (fire-and-forget) a fine `tag.yml`. Input: `scope` (opzionale:
+vuoto = entrambi, `backend`/`frontend` per uno solo), `branch` (opzionale: vuoto = tutti i branch),
+`preserve_latest` (default `true`) e `dry_run` (default `true`).
 
-**Cosa fa**: applica il pattern 5 — elimina i tag Git e le immagini Docker superate di un branch,
-raggruppati per (scope, branch), mantenendo sempre il più recente di ciascun gruppo se
-`preserve_latest=true`, con salvaguardia sulle versioni aliasate a un tag reale. `dry_run=true` di default:
-primo lancio sempre "a vuoto" per rivedere cosa verrebbe toccato prima di cancellare davvero.
+**Cosa fa**: applica il pattern 5 — elimina i tag Git e le immagini Docker superate di un branch (e, se
+specificato, di un solo scope), raggruppati per (scope, branch), mantenendo sempre il più recente di
+ciascun gruppo se `preserve_latest=true`, con salvaguardia sulle versioni aliasate a un tag reale.
+`dry_run=true` di default: primo lancio sempre "a vuoto" per rivedere cosa verrebbe toccato prima di
+cancellare davvero.
 
 ## Come adattarlo a un altro progetto
 

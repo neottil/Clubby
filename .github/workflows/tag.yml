@@ -11,6 +11,19 @@ name: Tag
 # (vedi build-deploy.yml, job deploy-backend/deploy-frontend). È
 # intrinsecamente "solo main": questi tag esistono solo con "-main-" nel
 # nome, quindi non c'è modo di promuovere per sbaglio un branch diverso.
+#
+# Agisce SOLO sugli scope che ne hanno davvero bisogno: per ciascuno scope,
+# se il commit dell'ultimo tag "<scope>-main-*" ha GIÀ un tag di versione
+# reale (server-v*/client-v*) che punta esattamente lì, quello scope è già
+# stato promosso l'ultima volta — non c'è nulla di nuovo, viene saltato
+# (nessuno spostamento di tag, nessun ri-tag Docker). Stesso discorso se
+# quello scope non ha mai avuto un tag "<scope>-main-*" (mai deployato su
+# main): salta invece di fallire. Il controllo si basa solo sui tag Git già
+# presenti nel repo — non c'è bisogno di leggere lo stato di Build & Deploy
+# (né artefatti né run_id): i due scope buildano/promuovono in run
+# indipendenti e asincrone, quindi "l'ultima run di Build & Deploy" non è
+# comunque un riferimento affidabile per sapere cosa è cambiato dall'ultima
+# promozione — i tag Git invece sì, sono stato persistente nel repo.
 on:
   workflow_dispatch: {}
 
@@ -40,26 +53,37 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      # Per ciascuno dei 2 scope: trova l'ultimo tag <scope>-main-*, legge la
-      # versione dal package.json AL COMMIT di quel tag (non da HEAD: ogni
-      # scope può essere più avanti/indietro rispetto all'altro), crea o
-      # sposta il tag di versione reale corrispondente su quel commit, e
-      # aggiunge il tag di versione reale allo stesso digest Docker già
-      # pushato col tag di data (nessun rebuild).
-      - name: Promuovi backend e frontend
+      # Per ciascuno dei 2 scope: trova l'ultimo tag <scope>-main-*, controlla
+      # se il suo commit è già coperto da un tag di versione reale (già
+      # promosso: salta), altrimenti legge la versione dal package.json AL
+      # COMMIT di quel tag (non da HEAD: ogni scope può essere più
+      # avanti/indietro rispetto all'altro), crea o sposta il tag di versione
+      # reale corrispondente su quel commit, e aggiunge il tag di versione
+      # reale allo stesso digest Docker già pushato col tag di data (nessun
+      # rebuild).
+      - name: Promuovi backend e frontend (solo gli scope che ne hanno bisogno)
+        id: promuovi
         run: |
           declare -A REAL_PREFIX=( [backend]=server [frontend]=client )
           declare -A IMAGE=( [backend]=clubmanager-backend [frontend]=clubmanager-frontend )
+          declare -A PROMOTED=( [backend]=false [frontend]=false )
 
           for SCOPE in backend frontend; do
             echo "=== $SCOPE ==="
             DEPLOY_TAG=$(git tag -l "${SCOPE}-main-*" --sort=-creatordate | head -1)
             if [ -z "$DEPLOY_TAG" ]; then
-              echo "ERRORE: nessun tag ${SCOPE}-main-* trovato. '$SCOPE' non è mai stato deployato su main." >&2
-              exit 1
+              echo "  Nessun tag ${SCOPE}-main-* trovato: '$SCOPE' non è mai stato deployato su main, salto."
+              continue
             fi
 
             COMMIT=$(git rev-list -n1 "$DEPLOY_TAG")
+
+            ALREADY_PROMOTED=$(git tag --points-at "$COMMIT" | grep -E "^${REAL_PREFIX[$SCOPE]}-v[0-9]+\.[0-9]+\.[0-9]+$" || true)
+            if [ -n "$ALREADY_PROMOTED" ]; then
+              echo "  $DEPLOY_TAG (commit $COMMIT) è già promosso come $ALREADY_PROMOTED: nessuna modifica, salto."
+              continue
+            fi
+
             VERSION=$(git show "${DEPLOY_TAG}:${SCOPE}/package.json" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).version)")
             REAL_TAG="${REAL_PREFIX[$SCOPE]}-v${VERSION}"
 
@@ -72,7 +96,31 @@ jobs:
             docker buildx imagetools create \
               --tag "ghcr.io/${{ github.repository_owner }}/${IMAGE[$SCOPE]}:${VERSION}" \
               "ghcr.io/${{ github.repository_owner }}/${IMAGE[$SCOPE]}:${DATE_TAG}"
+
+            PROMOTED[$SCOPE]=true
           done
+
+          PROMOTED_ANY=false
+          if [ "${PROMOTED[backend]}" = "true" ] || [ "${PROMOTED[frontend]}" = "true" ]; then
+            PROMOTED_ANY=true
+          else
+            echo ""
+            echo "Nessuno scope aveva bisogno di essere promosso."
+          fi
+
+          # Scope da passare al trigger di cleanup: se è stato promosso un
+          # solo scope, limita la pulizia a quello (non ha senso ripulire
+          # anche l'altro, che non è cambiato); se sono stati promossi
+          # entrambi, vuoto = pulisce entrambi.
+          CLEANUP_SCOPE=""
+          if [ "${PROMOTED[backend]}" = "true" ] && [ "${PROMOTED[frontend]}" != "true" ]; then
+            CLEANUP_SCOPE="backend"
+          elif [ "${PROMOTED[frontend]}" = "true" ] && [ "${PROMOTED[backend]}" != "true" ]; then
+            CLEANUP_SCOPE="frontend"
+          fi
+
+          echo "promoted_any=$PROMOTED_ANY" >> "$GITHUB_OUTPUT"
+          echo "cleanup_scope=$CLEANUP_SCOPE" >> "$GITHUB_OUTPUT"
 
       # NOTA sui limiti di GHCR: il tag di data NON viene eliminato
       # dall'immagine qui sopra. L'API di GitHub Packages cancella per
@@ -88,13 +136,20 @@ jobs:
       # da tentativi precedenti su main non promossi, MANTENENDO il più
       # recente per scope (preserve_latest=true, il default): quello appena
       # promosso qui sopra resta come baseline per il prossimo diff di
-      # Build & Deploy. Fire-and-forget: non aspetta che finisca.
+      # Build & Deploy. Fire-and-forget: non aspetta che finisca. Gira solo
+      # se è stato promosso almeno uno scope (altrimenti non c'è nessun nuovo
+      # tag da usare come baseline, e non ha senso rilanciare la pulizia).
+      # Se è stato promosso UN SOLO scope, la pulizia viene limitata a quello
+      # (steps.promuovi.outputs.cleanup_scope) — l'altro scope non è cambiato,
+      # non c'è motivo di ripulirlo/toccarlo in questa run.
       - name: Pulisci i vecchi tag backend-main-*/frontend-main-* (Git e Docker)
+        if: steps.promuovi.outputs.promoted_any == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh workflow run cleanup-build-tags.yml \
             --repo "${{ github.repository }}" \
             -f branch=main \
+            -f scope="${{ steps.promuovi.outputs.cleanup_scope }}" \
             -f preserve_latest=true \
             -f dry_run=false
