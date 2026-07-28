@@ -57,6 +57,9 @@ export const config = {
   keycloakClientId:     requireEnv('VITE_KEYCLOAK_CLIENT_ID'),
   tenantName:           requireEnv('VITE_TENANT_NAME'),
   activityCostMapping:  parseActivityMapping(),
+  // Popolata dalla pipeline Build & Deploy da frontend/package.json; in
+  // locale (nessuna VITE_APP_VERSION impostata) resta 'dev'.
+  appVersion:           (import.meta.env.VITE_APP_VERSION as string | undefined) ?? 'dev',
 } as const;
 
 /** Base URL for Keycloak OIDC endpoints */

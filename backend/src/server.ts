@@ -23,6 +23,7 @@ import { handler as incontriHandler } from './handlers/incontri.js';
 import { handler as buoniHandler } from './handlers/buoni.js';
 import { handler as adminHandler } from './handlers/admin.js';
 import { handler as authHandler } from './handlers/auth.js';
+import { handler as versionHandler } from './handlers/version.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0'; // 0.0.0.0 necessario nei container
@@ -41,6 +42,7 @@ const ROUTES: Array<{
   param: string | null;
 }> = [
   { pattern: /^\/api\/auth\/register$/,              handler: authHandler,      param: null },
+  { pattern: /^\/api\/version$/,                     handler: versionHandler,   param: null },
   { pattern: /^\/api\/soci\/([^/]+)$/,               handler: sociHandler,      param: 'id' },
   { pattern: /^\/api\/soci$/,                        handler: sociHandler,      param: null },
   { pattern: /^\/api\/incontri\/([^/]+)$/,           handler: incontriHandler,  param: 'id' },

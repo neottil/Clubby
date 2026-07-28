@@ -85,6 +85,9 @@ export function createApiClient(token: string | null) {
     getMovimenti:   (buonoId: string)     => request<any[]>(`/api/buoni/${buonoId}/movimenti`, {}, token),
     createMovimento:(buonoId: string, body: any) => request<any>(`/api/buoni/${buonoId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
 
+    // Versione
+    getVersion:     ()                    => request<{ version: string }>('/api/version', {}, token),
+
     // Admin
     getAdminUsers:  ()                    => request<any[]>('/api/admin/users', {}, token),
     associaViewer:  (body: any)           => request<any>('/api/admin/associa-viewer', { method: 'POST', body: JSON.stringify(body) }, token),

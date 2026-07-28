@@ -7,6 +7,7 @@ import SociPage from './pages/SociPage';
 import IncontriPage from './pages/IncontriPage';
 import BuoniPage from './pages/BuoniPage';
 import AdminPage from './pages/AdminPage';
+import InfoPage from './pages/InfoPage';
 
 function CallbackPage() {
   const { user, isLoading } = useAuth();
@@ -38,6 +39,7 @@ function ProtectedRoutes() {
         <Route path='/incontri' element={<IncontriPage />} />
         <Route path='/buoni'    element={<BuoniPage />} />
         <Route path='/admin'    element={<AdminPage />} />
+        <Route path='/info'     element={<InfoPage />} />
         <Route path='*'         element={<Navigate to={defaultRoute} replace />} />
       </Routes>
     </Layout>
