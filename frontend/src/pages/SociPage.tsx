@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
 import { useTableSort } from '../hooks/useTableSort';
+import TableScroll from '../components/TableScroll';
 import { theme } from '../theme';
 
 interface Socio {
@@ -137,38 +138,40 @@ export default function SociPage() {
         </div>
       )}
 
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            {([
-              ['cognome', 'Cognome'], ['nome', 'Nome'], ['email', 'Email'],
-              ['telefono', 'Telefono'], ['data_iscrizione', 'Iscritto dal'],
-            ] as const).map(([key, label]) => (
-              <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
-                {label}{sortIndicator(key)}
-              </th>
-            ))}
-            {user?.isAdmin && <th style={styles.th}>Azioni</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map(s => (
-            <tr key={s.id} style={styles.tr}>
-              <td style={styles.td}>{s.cognome}</td>
-              <td style={styles.td}>{s.nome}</td>
-              <td style={styles.td}>{s.email ?? '—'}</td>
-              <td style={styles.td}>{s.telefono ?? '—'}</td>
-              <td style={styles.td}>{String(s.data_iscrizione).split('T')[0]}</td>
-              {user?.isAdmin && (
-                <td style={styles.td}>
-                  <button style={styles.btnSmall} onClick={() => openEdit(s)}>Modifica</button>
-                  <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => remove(s.id)}>Elimina</button>
-                </td>
-              )}
+      <TableScroll>
+        <table style={styles.table}>
+          <thead>
+            <tr>
+              {([
+                ['cognome', 'Cognome'], ['nome', 'Nome'], ['email', 'Email'],
+                ['telefono', 'Telefono'], ['data_iscrizione', 'Iscritto dal'],
+              ] as const).map(([key, label]) => (
+                <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
+                  {label}{sortIndicator(key)}
+                </th>
+              ))}
+              {user?.isAdmin && <th style={styles.th}>Azioni</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {sorted.map(s => (
+              <tr key={s.id} style={styles.tr}>
+                <td style={styles.td}>{s.cognome}</td>
+                <td style={styles.td}>{s.nome}</td>
+                <td style={styles.td}>{s.email ?? '—'}</td>
+                <td style={styles.td}>{s.telefono ?? '—'}</td>
+                <td style={styles.td}>{String(s.data_iscrizione).split('T')[0]}</td>
+                {user?.isAdmin && (
+                  <td style={styles.td}>
+                    <button style={styles.btnSmall} onClick={() => openEdit(s)}>Modifica</button>
+                    <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => remove(s.id)}>Elimina</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
 
       {sorted.length === 0 && !loading && (
         <p style={styles.empty}>{filter ? 'Nessun socio corrisponde alla ricerca.' : 'Nessun socio presente.'}</p>
@@ -183,9 +186,9 @@ const styles: Record<string, React.CSSProperties> = {
   title: { margin: 0, fontSize: 22, fontWeight: 700 },
   loading: { padding: 48, textAlign: 'center', color: '#666' },
   error: { background: '#fee', color: theme.danger, padding: '10px 16px', borderRadius: 8, marginBottom: 16 },
-  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
-  btnSecondary: { background: '#e5e7eb', color: '#333', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
-  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13, marginRight: 6 },
+  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600 },
+  btnSecondary: { background: '#e5e7eb', color: '#333', border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600 },
+  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '8px 14px', minHeight: 40, cursor: 'pointer', fontSize: 13, marginRight: 6 },
   btnDanger: { background: '#fee', color: theme.danger },
   formCard: { background: '#fff', borderRadius: 12, padding: 24, marginBottom: 24, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' },
   formTitle: { margin: '0 0 16px', fontSize: 16, fontWeight: 700 },

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
+import TableScroll from '../components/TableScroll';
 import { theme } from '../theme';
 
 interface KeycloakUser { sub: string; email: string; groups: string[]; enabled: boolean; }
@@ -113,58 +114,62 @@ export default function AdminPage() {
       {/* Lista soci con utente associato */}
       <section style={styles.section}>
         <h3 style={styles.sectionTitle}>Soci con utente associato</h3>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              {['Socio', 'Email socio', 'Email utente Registrato', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {soci.filter(s => s.id_viewer).map(s => {
-              const kcEmail = kcEmailByViewerId(s.id_viewer!);
-              const mismatch = s.email && kcEmail !== '—' && s.email !== kcEmail;
-              return (
-                <tr key={s.id} style={styles.tr}>
-                  <td style={styles.td}>{s.cognome} {s.nome}</td>
-                  <td style={styles.td}>{s.email ?? '—'}</td>
-                  <td style={{ ...styles.td, ...(mismatch ? styles.emailMismatch : {}) }}>
-                    {kcEmail}{mismatch && ' ⚠️'}
-                  </td>
-                  <td style={styles.td}>
-                    <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => disassocia(s.id)}>Rimuovi</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <TableScroll>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Socio', 'Email socio', 'Email utente Registrato', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {soci.filter(s => s.id_viewer).map(s => {
+                const kcEmail = kcEmailByViewerId(s.id_viewer!);
+                const mismatch = s.email && kcEmail !== '—' && s.email !== kcEmail;
+                return (
+                  <tr key={s.id} style={styles.tr}>
+                    <td style={styles.td}>{s.cognome} {s.nome}</td>
+                    <td style={styles.td}>{s.email ?? '—'}</td>
+                    <td style={{ ...styles.td, ...(mismatch ? styles.emailMismatch : {}) }}>
+                      {kcEmail}{mismatch && ' ⚠️'}
+                    </td>
+                    <td style={styles.td}>
+                      <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => disassocia(s.id)}>Rimuovi</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
         {soci.filter(s => s.id_viewer).length === 0 && <p style={styles.empty}>Nessun viewer associato.</p>}
       </section>
 
       {/* Lista utenti Registrati */}
       <section style={styles.section}>
         <h3 style={styles.sectionTitle}>Utenti Registrati</h3>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              {['Email', 'Ruoli', 'Stato', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {keycloakUsers.map(u => (
-              <tr key={u.sub} style={styles.tr}>
-                <td style={styles.td}>{u.email}</td>
-                <td style={styles.td}>{u.groups.join(', ') || 'viewer'}</td>
-                <td style={styles.td}>{u.enabled ? '✓ Attivo' : '✗ Disabilitato'}</td>
-                <td style={styles.td}>
-                  {!u.groups.includes('admin') && (
-                    <button style={styles.btnSmall} onClick={() => promuovi(u.email)}>Promuovi admin</button>
-                  )}
-                </td>
+        <TableScroll>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Email', 'Ruoli', 'Stato', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {keycloakUsers.map(u => (
+                <tr key={u.sub} style={styles.tr}>
+                  <td style={styles.td}>{u.email}</td>
+                  <td style={styles.td}>{u.groups.join(', ') || 'viewer'}</td>
+                  <td style={styles.td}>{u.enabled ? '✓ Attivo' : '✗ Disabilitato'}</td>
+                  <td style={styles.td}>
+                    {!u.groups.includes('admin') && (
+                      <button style={styles.btnSmall} onClick={() => promuovi(u.email)}>Promuovi admin</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       </section>
     </div>
   );
@@ -182,8 +187,8 @@ const styles: Record<string, React.CSSProperties> = {
   row: { display: 'flex', gap: 16, alignItems: 'flex-start' },
   label: { display: 'block', fontSize: 13, color: '#555', marginBottom: 4, fontWeight: 500 },
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
-  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' },
-  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13, marginRight: 6 },
+  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' },
+  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '8px 14px', minHeight: 40, cursor: 'pointer', fontSize: 13, marginRight: 6 },
   btnDanger: { background: '#fee', color: theme.danger },
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { padding: '12px 16px', textAlign: 'left', background: '#f1f5f9', fontSize: 13, fontWeight: 600, color: '#555', borderBottom: '1px solid #e5e7eb' },

@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
 import SocioSelect from '../components/SocioSelect';
 import { useTableSort } from '../hooks/useTableSort';
+import TableScroll from '../components/TableScroll';
 import { theme } from '../theme';
 
 interface Buono {
@@ -206,39 +207,41 @@ export default function BuoniPage() {
       <div style={styles.grid}>
         {/* Lista buoni */}
         <div>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                {([
-                  ['socioNome', 'Socio'], ['data_creazione', 'Data'], ['saldo_iniziale', 'Iniziale'],
-                  ['saldo_residuo', 'Residuo'],
-                ] as const).map(([key, label]) => (
-                  <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
-                    {label}{sortIndicator(key)}
-                  </th>
-                ))}
-                <th style={styles.th}>Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedBuoni.map(b => (
-                <tr key={b.id} style={{ ...styles.tr, ...(selectedBuono?.id === b.id ? styles.trSelected : {}) }}>
-                  <td style={styles.td}>{b.socioNome}</td>
-                  <td style={styles.td}>{b.data_creazione.split('T')[0]}</td>
-                  <td style={styles.td}>€ {Number(b.saldo_iniziale).toFixed(2)}</td>
-                  <td style={{ ...styles.td, fontWeight: 600, color: Number(b.saldo_residuo) > 0 ? theme.success : theme.danger }}>
-                    € {Number(b.saldo_residuo).toFixed(2)}
-                  </td>
-                  <td style={styles.td}>
-                    <button style={styles.btnSmall} onClick={() => loadMovimenti(b)}>Movimenti</button>
-                    {user?.isAdmin && (
-                      <button style={styles.btnSmall} onClick={() => openRicarica(b)}>+ Ricarica</button>
-                    )}
-                  </td>
+          <TableScroll>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  {([
+                    ['socioNome', 'Socio'], ['data_creazione', 'Data'], ['saldo_iniziale', 'Iniziale'],
+                    ['saldo_residuo', 'Residuo'],
+                  ] as const).map(([key, label]) => (
+                    <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
+                      {label}{sortIndicator(key)}
+                    </th>
+                  ))}
+                  <th style={styles.th}>Azioni</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sortedBuoni.map(b => (
+                  <tr key={b.id} style={{ ...styles.tr, ...(selectedBuono?.id === b.id ? styles.trSelected : {}) }}>
+                    <td style={styles.td}>{b.socioNome}</td>
+                    <td style={styles.td}>{b.data_creazione.split('T')[0]}</td>
+                    <td style={styles.td}>€ {Number(b.saldo_iniziale).toFixed(2)}</td>
+                    <td style={{ ...styles.td, fontWeight: 600, color: Number(b.saldo_residuo) > 0 ? theme.success : theme.danger }}>
+                      € {Number(b.saldo_residuo).toFixed(2)}
+                    </td>
+                    <td style={styles.td}>
+                      <button style={styles.btnSmall} onClick={() => loadMovimenti(b)}>Movimenti</button>
+                      {user?.isAdmin && (
+                        <button style={styles.btnSmall} onClick={() => openRicarica(b)}>+ Ricarica</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
           {sortedBuoni.length === 0 && (
             <p style={styles.empty}>{filter ? 'Nessun voucher corrisponde alla ricerca.' : 'Nessun voucher presente.'}</p>
           )}
@@ -275,29 +278,31 @@ export default function BuoniPage() {
               </div>
             )}
 
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  {['Data', 'Importo', 'Descrizione', 'Origine'].map(h => <th key={h} style={styles.th}>{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {movimenti.map(m => (
-                  <tr key={m.id} style={styles.tr}>
-                    <td style={styles.td}>{m.data_movimento.split('T')[0]}</td>
-                    <td style={{ ...styles.td, fontWeight: 600, color: m.importo >= 0 ? theme.success : theme.danger }}>
-                      {m.importo >= 0 ? '+' : ''}€ {Number(m.importo).toFixed(2)}
-                    </td>
-                    <td style={styles.td}>{m.descrizione ?? '—'}</td>
-                    <td style={styles.td}>
-                      {m.incontro_id
-                        ? <button style={styles.badgeIncontro} onClick={() => openIncontroDetail(m.incontro_id!)}>{incontroLabel(m)}</button>
-                        : <span style={styles.badgeManuale}>Manuale</span>}
-                    </td>
+            <TableScroll>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {['Data', 'Importo', 'Descrizione', 'Origine'].map(h => <th key={h} style={styles.th}>{h}</th>)}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {movimenti.map(m => (
+                    <tr key={m.id} style={styles.tr}>
+                      <td style={styles.td}>{m.data_movimento.split('T')[0]}</td>
+                      <td style={{ ...styles.td, fontWeight: 600, color: m.importo >= 0 ? theme.success : theme.danger }}>
+                        {m.importo >= 0 ? '+' : ''}€ {Number(m.importo).toFixed(2)}
+                      </td>
+                      <td style={styles.td}>{m.descrizione ?? '—'}</td>
+                      <td style={styles.td}>
+                        {m.incontro_id
+                          ? <button style={styles.badgeIncontro} onClick={() => openIncontroDetail(m.incontro_id!)}>{incontroLabel(m)}</button>
+                          : <span style={styles.badgeManuale}>Manuale</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableScroll>
             {movimenti.length === 0 && <p style={styles.empty}>Nessun movimento.</p>}
           </div>
         )}
@@ -334,9 +339,9 @@ const styles: Record<string, React.CSSProperties> = {
   title: { margin: 0, fontSize: 22, fontWeight: 700 },
   loading: { padding: 48, textAlign: 'center', color: '#666' },
   error: { background: '#fee', color: theme.danger, padding: '10px 16px', borderRadius: 8, marginBottom: 16 },
-  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
-  btnSecondary: { background: '#e5e7eb', color: '#333', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
-  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13, marginRight: 6 },
+  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600 },
+  btnSecondary: { background: '#e5e7eb', color: '#333', border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600 },
+  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '8px 14px', minHeight: 40, cursor: 'pointer', fontSize: 13, marginRight: 6 },
   formCard: { background: '#fff', borderRadius: 12, padding: 24, marginBottom: 24, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' },
   formTitle: { margin: '0 0 16px', fontSize: 16, fontWeight: 700 },
   field: { marginBottom: 14 },

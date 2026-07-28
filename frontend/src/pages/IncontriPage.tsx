@@ -5,6 +5,7 @@ import { config } from '../config';
 import SocioSelect from '../components/SocioSelect';
 import ActivitySelect from '../components/ActivitySelect';
 import { useTableSort } from '../hooks/useTableSort';
+import TableScroll from '../components/TableScroll';
 import { theme } from '../theme';
 
 interface Incontro {
@@ -194,38 +195,40 @@ export default function IncontriPage() {
         </div>
       )}
 
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            {([
-              ['socioNome', 'Socio'], ['data_incontro', 'Data'], ['attivita', 'Attività'], ['costo', 'Costo'],
-            ] as const).map(([key, label]) => (
-              <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
-                {label}{sortIndicator(key)}
-              </th>
-            ))}
-            <th style={styles.th}>Note</th>
-            {user?.isAdmin && <th style={styles.th}>Azioni</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map(i => (
-            <tr key={i.id} style={styles.tr}>
-              <td style={styles.td}>{i.socioNome}</td>
-              <td style={styles.td}>{String(i.data_incontro).split('T')[0]}</td>
-              <td style={styles.td}>{i.attivita ?? '—'}</td>
-              <td style={styles.td}>€ {Number(i.costo).toFixed(2)}</td>
-              <td style={styles.td}>{i.note ?? '—'}</td>
-              {user?.isAdmin && (
-                <td style={styles.td}>
-                  <button style={styles.btnSmall} onClick={() => openEdit(i)}>Modifica</button>
-                  <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => remove(i.id)}>Elimina</button>
-                </td>
-              )}
+      <TableScroll>
+        <table style={styles.table}>
+          <thead>
+            <tr>
+              {([
+                ['socioNome', 'Socio'], ['data_incontro', 'Data'], ['attivita', 'Attività'], ['costo', 'Costo'],
+              ] as const).map(([key, label]) => (
+                <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
+                  {label}{sortIndicator(key)}
+                </th>
+              ))}
+              <th style={styles.th}>Note</th>
+              {user?.isAdmin && <th style={styles.th}>Azioni</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {sorted.map(i => (
+              <tr key={i.id} style={styles.tr}>
+                <td style={styles.td}>{i.socioNome}</td>
+                <td style={styles.td}>{String(i.data_incontro).split('T')[0]}</td>
+                <td style={styles.td}>{i.attivita ?? '—'}</td>
+                <td style={styles.td}>€ {Number(i.costo).toFixed(2)}</td>
+                <td style={styles.td}>{i.note ?? '—'}</td>
+                {user?.isAdmin && (
+                  <td style={styles.td}>
+                    <button style={styles.btnSmall} onClick={() => openEdit(i)}>Modifica</button>
+                    <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => remove(i.id)}>Elimina</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
       {sorted.length === 0 && !loading && (
         <p style={styles.empty}>{filter || attivitaFilter ? 'Nessun incontro corrisponde ai filtri.' : 'Nessun incontro registrato.'}</p>
       )}
@@ -239,9 +242,9 @@ const styles: Record<string, React.CSSProperties> = {
   title: { margin: 0, fontSize: 22, fontWeight: 700 },
   loading: { padding: 48, textAlign: 'center', color: '#666' },
   error: { background: '#fee', color: theme.danger, padding: '10px 16px', borderRadius: 8, marginBottom: 16 },
-  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
-  btnSecondary: { background: '#e5e7eb', color: '#333', border: 'none', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontWeight: 600 },
-  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13, marginRight: 6 },
+  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600 },
+  btnSecondary: { background: '#e5e7eb', color: '#333', border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600 },
+  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '8px 14px', minHeight: 40, cursor: 'pointer', fontSize: 13, marginRight: 6 },
   btnDanger: { background: '#fee', color: theme.danger },
   formCard: { background: '#fff', borderRadius: 12, padding: 24, marginBottom: 24, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' },
   formTitle: { margin: '0 0 16px', fontSize: 16, fontWeight: 700 },
