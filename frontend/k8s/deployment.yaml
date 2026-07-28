@@ -17,11 +17,26 @@ spec:
     spec:
       imagePullSecrets:
         - name: ghcr-secret
+      volumes:
+        # Montato come DIRECTORY (non subPath sul singolo file): con subPath
+        # kubelet copia il file una volta sola e non lo aggiorna più quando il
+        # ConfigMap cambia, quindi /version.json resterebbe fermo alla prima
+        # versione deployata su quel pod.
+        - name: version
+          configMap:
+            name: clubmanager-frontend-config
       containers:
         - name: frontend
           image: ${FRONTEND_IMAGE}
           ports:
             - containerPort: 80
+          volumeMounts:
+            # Fuori da /usr/share/nginx/html: montarci dentro nasconderebbe
+            # gli asset statici dell'immagine. nginx.conf lo espone su
+            # /version.json con una location dedicata.
+            - name: version
+              mountPath: /etc/frontend-version
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /

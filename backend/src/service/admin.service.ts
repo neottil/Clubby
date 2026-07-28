@@ -83,7 +83,13 @@ export async function listKeycloakUsers(): Promise<KeycloakUser[]> {
       // Get user's realm roles
       const rolesRes = await keycloakAdminFetch(`/users/${u.id}/role-mappings/realm`);
       const roles: any[] = rolesRes.ok ? await rolesRes.json() : [];
-      const groups = roles.map((r: any) => r.name);
+      // "default-roles-<realm>" è un ruolo composito che Keycloak assegna
+      // automaticamente a OGNI utente della sua istanza (offline_access,
+      // uma_authorization) — non è un ruolo applicativo, va solo escluso
+      // dalla UI per non confonderlo con admin/viewer.
+      const groups = roles
+        .map((r: any) => r.name)
+        .filter((name: string) => !name.startsWith('default-roles-'));
 
       return {
         sub: u.id,
@@ -128,6 +134,38 @@ export async function promuoviAdmin(keycloakUserId: string): Promise<void> {
   });
   if (!res.ok) {
     throw new Error(`Failed to assign admin role: ${res.status}`);
+  }
+}
+
+// ---------------------------------------------------------------
+// Retrocedi utente da admin a solo viewer (rimuove il ruolo admin, il
+// ruolo viewer resta invariato — assegnato a tutti gli utenti registrati
+// fin dalla registrazione)
+// ---------------------------------------------------------------
+export async function retrocediAdmin(keycloakUserId: string, requestingUserId: string): Promise<void> {
+  let userId = keycloakUserId;
+
+  if (keycloakUserId.includes('@')) {
+    const searchRes = await keycloakAdminFetch(`/users?email=${encodeURIComponent(keycloakUserId)}`);
+    if (!searchRes.ok) throw new NotFoundError(`Utente '${keycloakUserId}' non trovato`);
+    const users: any[] = await searchRes.json();
+    if (users.length === 0) throw new NotFoundError(`Utente '${keycloakUserId}' non trovato`);
+    userId = users[0].id;
+  }
+
+  // Non permettere l'auto-retrocessione: rimuoversi da soli il ruolo admin
+  // potrebbe lasciare il pannello senza nessun admin in grado di ripristinarlo.
+  if (userId === requestingUserId) {
+    throw new BadRequestError('Non puoi retrocedere te stesso da admin.');
+  }
+
+  const role = await getRealmRole('admin');
+  const res = await keycloakAdminFetch(`/users/${userId}/role-mappings/realm`, {
+    method: 'DELETE',
+    body: JSON.stringify([role]),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to remove admin role: ${res.status}`);
   }
 }
 

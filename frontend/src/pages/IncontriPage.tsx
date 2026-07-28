@@ -155,10 +155,17 @@ export default function IncontriPage() {
             onChange={e => setFilter(e.target.value)}
           />
         )}
-        <select style={styles.filterSelect} value={attivitaFilter} onChange={e => setAttivitaFilter(e.target.value)}>
-          <option value=''>Tutte le attività</option>
-          {attivitaPresenti.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
+        {/* Filtra tra le sole attività effettivamente presenti negli incontri
+            caricati, non tra quelle configurate: filtrare per un'attività che
+            nessun incontro ha svuoterebbe la tabella senza motivo apparente. */}
+        <div style={styles.filterSelect}>
+          <ActivitySelect
+            options={attivitaPresenti}
+            value={attivitaFilter}
+            onChange={setAttivitaFilter}
+            resetLabel='Tutte le attività'
+          />
+        </div>
       </div>
 
       {showForm && (
@@ -256,7 +263,9 @@ const styles: Record<string, React.CSSProperties> = {
   formActions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 },
   filterRow: { display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' },
   filterInput: { flex: 1, minWidth: 240, padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
-  filterSelect: { padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, background: '#fff' },
+  // Contenitore dell'ActivitySelect di filtro: il bordo/padding sono ora del
+  // suo input interno, qui resta solo la larghezza nella riga dei filtri.
+  filterSelect: { width: 220, minWidth: 220 },
   table: { width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' },
   th: { padding: '12px 16px', textAlign: 'left', background: '#f1f5f9', fontSize: 13, fontWeight: 600, color: '#555', borderBottom: '1px solid #e5e7eb' },
   thSortable: {

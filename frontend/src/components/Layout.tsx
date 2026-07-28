@@ -15,10 +15,11 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Voucher è la home (vedi App.tsx): primo nel menu.
   const navLinks = [
+    { to: '/buoni',   label: 'Voucher' },
     ...(user?.isAdmin ? [{ to: '/soci', label: 'Soci' }] : []),
     { to: '/incontri', label: 'Incontri' },
-    { to: '/buoni',   label: 'Voucher' },
     { to: '/info',    label: 'Info' },
     ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin' }] : []),
   ];
@@ -48,8 +49,10 @@ export default function Layout({ children }: LayoutProps) {
         }
       `}</style>
       <nav style={styles.nav}>
-        <img src="/logo.svg" alt="" style={styles.brandLogo} />
-        <span style={styles.brand}>{config.tenantName}</span>
+        <Link to="/buoni" style={styles.brandLink}>
+          <img src="/logo.svg" alt="" style={styles.brandLogo} />
+          <span style={styles.brand}>{config.tenantName}</span>
+        </Link>
 
         <button
           style={styles.hamburgerBtn}
@@ -118,6 +121,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: theme.navBg,
     color: theme.navText,
   },
+  brandLink: { display: 'flex', alignItems: 'center', textDecoration: 'none', flexShrink: 0 },
   brandLogo: { height: 40, width: 40, marginRight: 4, flexShrink: 0 },
   brand: { fontWeight: 700, fontSize: 20, color: theme.navText, flexShrink: 0 },
   hamburgerBtn: {

@@ -85,13 +85,14 @@ export function createApiClient(token: string | null) {
     getMovimenti:   (buonoId: string)     => request<any[]>(`/api/buoni/${buonoId}/movimenti`, {}, token),
     createMovimento:(buonoId: string, body: any) => request<any>(`/api/buoni/${buonoId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
 
-    // Versione
-    getVersion:     ()                    => request<{ version: string }>('/api/version', {}, token),
-
     // Admin
     getAdminUsers:  ()                    => request<any[]>('/api/admin/users', {}, token),
     associaViewer:  (body: any)           => request<any>('/api/admin/associa-viewer', { method: 'POST', body: JSON.stringify(body) }, token),
     disassociaViewer:(socioId: string)    => request<void>(`/api/admin/associa-viewer/${socioId}`, { method: 'DELETE' }, token),
     promuoviAdmin:  (body: any)           => request<any>('/api/admin/promuovi', { method: 'POST', body: JSON.stringify(body) }, token),
+    retrocediAdmin: (body: any)           => request<any>('/api/admin/retrocedi', { method: 'POST', body: JSON.stringify(body) }, token),
+
+    // Versione del backend in esecuzione (pagina Info)
+    getVersion:     ()                    => request<{ version: string }>('/api/version', {}, token),
   };
 }

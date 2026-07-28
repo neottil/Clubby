@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
 import TableScroll from '../components/TableScroll';
+import SocioSelect from '../components/SocioSelect';
+import SearchSelect from '../components/SearchSelect';
 import { theme } from '../theme';
 
 interface KeycloakUser { sub: string; email: string; groups: string[]; enabled: boolean; }
@@ -71,6 +73,15 @@ export default function AdminPage() {
     } catch (e: any) { setError(e.message); }
   };
 
+  const retrocedi = async (userEmail: string) => {
+    if (!confirm(`Retrocedere ${userEmail} a solo viewer?`)) return;
+    try {
+      await api.retrocediAdmin({ keycloak_user_id: userEmail });
+      setSuccessMsg(`${userEmail} retrocesso a viewer`);
+      load();
+    } catch (e: any) { setError(e.message); }
+  };
+
   if (loading) return <div style={styles.loading}>Caricamento...</div>;
 
 
@@ -89,19 +100,25 @@ export default function AdminPage() {
         <div style={styles.row}>
           <div style={{ flex: 1 }}>
             <label style={styles.label}>Socio</label>
-            <select style={styles.input} value={assocForm.socio_id} onChange={e => setAssocForm({ ...assocForm, socio_id: e.target.value })}>
-              <option value=''>— Seleziona socio —</option>
-              {soci.map(s => <option key={s.id} value={s.id}>{s.cognome} {s.nome}</option>)}
-            </select>
+            <SocioSelect
+              soci={soci}
+              value={assocForm.socio_id}
+              onChange={id => setAssocForm({ ...assocForm, socio_id: id })}
+            />
           </div>
           <div style={{ flex: 1 }}>
             <label style={styles.label}>Utente registrato (email)</label>
-            <select style={styles.input} value={assocForm.keycloak_user_id} onChange={e => setAssocForm({ ...assocForm, keycloak_user_id: e.target.value })}>
-              <option value=''>— Seleziona utente —</option>
-              {keycloakUsers.filter(u => !u.groups.includes('admin')).map(u => (
-                <option key={u.sub} value={u.email}>{u.email}</option>
-              ))}
-            </select>
+            {/* Il backend identifica l'utente Keycloak per email, non per sub:
+                getValue restituisce quindi l'email, non u.sub. */}
+            <SearchSelect
+              options={keycloakUsers.filter(u => !u.groups.includes('admin'))}
+              value={assocForm.keycloak_user_id}
+              onChange={email => setAssocForm({ ...assocForm, keycloak_user_id: email })}
+              getValue={u => u.email}
+              getLabel={u => u.email}
+              placeholder='Cerca per email...'
+              emptyLabel='Nessun utente trovato'
+            />
           </div>
           <div style={{ alignSelf: 'flex-end' }}>
             <button style={styles.btn} onClick={associa} disabled={saving || !assocForm.socio_id || !assocForm.keycloak_user_id}>
@@ -163,6 +180,9 @@ export default function AdminPage() {
                   <td style={styles.td}>
                     {!u.groups.includes('admin') && (
                       <button style={styles.btnSmall} onClick={() => promuovi(u.email)}>Promuovi admin</button>
+                    )}
+                    {u.groups.includes('admin') && u.email !== user?.email && (
+                      <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => retrocedi(u.email)}>Retrocedi a viewer</button>
                     )}
                   </td>
                 </tr>

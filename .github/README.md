@@ -7,18 +7,26 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 
 ## Indice
 
-- [Panoramica](#panoramica)
-- [Pattern architetturali](#pattern-architetturali)
-  1. [GitHub Environments come "ambiente target"](#1-github-environments-come-ambiente-target)
-  2. [Build/deploy condizionali via tag Git](#2-builddeploy-condizionali-via-tag-git)
-  3. [Ciclo di vita del tag `<scope>-<branch>-<data>`](#3-ciclo-di-vita-del-tag-scope-branch-data)
-  4. [Deploy come workflow riutilizzabile per scope](#4-deploy-come-workflow-riutilizzabile-per-scope)
-  5. [Tag e Promote separati](#5-tag-e-promote-separati)
-  6. [Pulizia dei tag superati](#6-pulizia-dei-tag-superati)
-  7. [Segreti generati una tantum, riusati non rigenerati](#7-segreti-generati-una-tantum-riusati-non-rigenerati)
-- [Insidie note (gotcha)](#insidie-note-gotcha)
-- [Workflow, uno per uno](#workflow-uno-per-uno)
-- [Come adattarlo a un altro progetto](#come-adattarlo-a-un-altro-progetto)
+- [CI/CD — Workflow GitHub Actions](#cicd--workflow-github-actions)
+  - [Indice](#indice)
+  - [Panoramica](#panoramica)
+  - [Pattern architetturali](#pattern-architetturali)
+    - [1. GitHub Environments come "ambiente target"](#1-github-environments-come-ambiente-target)
+    - [2. Build/deploy condizionali via tag Git](#2-builddeploy-condizionali-via-tag-git)
+    - [3. Ciclo di vita del tag `<scope>-<branch>-<data>`](#3-ciclo-di-vita-del-tag-scope-branch-data)
+    - [4. Deploy come workflow riutilizzabile per scope](#4-deploy-come-workflow-riutilizzabile-per-scope)
+    - [5. Tag e Promote separati](#5-tag-e-promote-separati)
+    - [6. Pulizia dei tag superati](#6-pulizia-dei-tag-superati)
+    - [7. Segreti generati una tantum, riusati non rigenerati](#7-segreti-generati-una-tantum-riusati-non-rigenerati)
+  - [Insidie note (gotcha)](#insidie-note-gotcha)
+  - [Workflow, uno per uno](#workflow-uno-per-uno)
+    - [`infra.yml`](#infrayml)
+    - [`build-deploy.yml`](#build-deployyml)
+    - [`deploy-backend.yml` / `deploy-frontend.yml`](#deploy-backendyml--deploy-frontendyml)
+    - [`tag.yml`](#tagyml)
+    - [`promote.yml`](#promoteyml)
+    - [`cleanup-build-tags.yml`](#cleanup-build-tagsyml)
+  - [Come adattarlo a un altro progetto](#come-adattarlo-a-un-altro-progetto)
 
 ---
 

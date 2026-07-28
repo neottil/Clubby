@@ -28,8 +28,8 @@ function ProtectedRoutes() {
   if (isLoading) return <div style={{ padding: 64, textAlign: 'center' }}>Caricamento...</div>;
   if (!user)     return <Navigate to='/login' replace />;
 
-  // La scheda "Soci" è riservata all'admin: un viewer atterra su "Incontri".
-  const defaultRoute = user.isAdmin ? '/soci' : '/incontri';
+  // Voucher è la home per tutti: sia admin che viewer atterrano lì dopo il login.
+  const defaultRoute = '/buoni';
 
   return (
     <Layout>

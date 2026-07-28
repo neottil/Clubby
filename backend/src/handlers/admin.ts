@@ -8,6 +8,7 @@ import { ok, noContent, errorResponse } from '../middleware/response.js';
 import {
   listKeycloakUsers,
   promuoviAdmin,
+  retrocediAdmin,
   associaViewerASocio,
   disassociaViewerDaSocio,
 } from '../service/admin.service.js';
@@ -57,6 +58,16 @@ export const handler = async (
       const body = JSON.parse(event.body ?? '{}');
       await promuoviAdmin(body.keycloak_user_id);
       return ok({ message: `Utente promosso ad admin` });
+    }
+
+    // -----------------------------------------------------------
+    // POST /api/admin/retrocedi
+    // Body: { keycloak_user_id }
+    // -----------------------------------------------------------
+    if (method === 'POST' && path.endsWith('/retrocedi')) {
+      const body = JSON.parse(event.body ?? '{}');
+      await retrocediAdmin(body.keycloak_user_id, auth.userId);
+      return ok({ message: `Utente retrocesso a viewer` });
     }
 
     return errorResponse({ statusCode: 404, message: 'Route non trovata' });

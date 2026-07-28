@@ -28,10 +28,11 @@ jobs:
           KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
           FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ inputs.image_tag }}
           APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          APP_VERSION: ${{ inputs.image_tag }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered
-          VARS='$KUBE_NAMESPACE $FRONTEND_IMAGE $APP_DOMAIN'
+          VARS='$KUBE_NAMESPACE $FRONTEND_IMAGE $APP_DOMAIN $APP_VERSION'
           for f in frontend/k8s/*.yaml; do
             envsubst "$VARS" < "$f" > "k8s/rendered/frontend-$(basename "$f")"
           done
@@ -70,6 +71,7 @@ jobs:
               --docker-password="$GHCR_PAT" \
               --dry-run=client -o yaml | kubectl apply -f -
 
+            kubectl apply -f "$DEPLOY_PATH/frontend-configmap.yaml"
             kubectl apply -f "$DEPLOY_PATH/frontend-deployment.yaml"
             kubectl apply -f "$DEPLOY_PATH/frontend-service.yaml"
             kubectl apply -f "$DEPLOY_PATH/frontend-ingress.yaml"

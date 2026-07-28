@@ -184,7 +184,6 @@ jobs:
           VITE_KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'clubmanager' }}
           VITE_KEYCLOAK_CLIENT_ID: ${{ vars.KEYCLOAK_CLIENT_ID || 'clubmanager-spa' }}
           VITE_TENANT_NAME: ${{ vars.VITE_TENANT_NAME }}
-          VITE_APP_VERSION: ${{ needs.versions.outputs.client }}
           VITE_ACTIVITY_SELECT_VALUES_MAPPING: ${{ vars.VITE_ACTIVITY_SELECT_VALUES_MAPPING }}
           VITE_THEME_PRIMARY: ${{ vars.VITE_THEME_PRIMARY }}
           VITE_THEME_PRIMARY_TEXT: ${{ vars.VITE_THEME_PRIMARY_TEXT }}

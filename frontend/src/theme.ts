@@ -9,12 +9,12 @@
  * oro #F5C36B (accento persone).
  *
  * Variabili:
- *   VITE_THEME_PRIMARY      = #FF6B4A   (bottoni, link attivi, evidenze)
+ *   VITE_THEME_PRIMARY      = #F28379   (bottoni, link attivi, evidenze)
  *   VITE_THEME_PRIMARY_TEXT = #ffffff   (testo sopra il colore primario)
  *   VITE_THEME_DANGER       = #dc2626   (importi negativi, azioni distruttive)
  *   VITE_THEME_SUCCESS      = #16a34a   (importi positivi, conferme)
- *   VITE_THEME_NAV_BG       = #2E2A26   (sfondo barra di navigazione)
- *   VITE_THEME_NAV_TEXT     = #F5C36B   (testo/voci di menu sulla barra di navigazione)
+ *   VITE_THEME_NAV_BG       = #F2F2F2   (sfondo barra di navigazione)
+ *   VITE_THEME_NAV_TEXT     = #F2B66D   (testo/voci di menu sulla barra di navigazione)
  */
 function envColor(name: string, fallback: string): string {
   const value = import.meta.env[name];

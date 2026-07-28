@@ -57,10 +57,27 @@ export const config = {
   keycloakClientId:     requireEnv('VITE_KEYCLOAK_CLIENT_ID'),
   tenantName:           requireEnv('VITE_TENANT_NAME'),
   activityCostMapping:  parseActivityMapping(),
-  // Popolata dalla pipeline Build & Deploy da frontend/package.json; in
-  // locale (nessuna VITE_APP_VERSION impostata) resta 'dev'.
-  appVersion:           (import.meta.env.VITE_APP_VERSION as string | undefined) ?? 'dev',
 } as const;
+
+/**
+ * Versione del frontend in esecuzione: il tag dell'immagine deployata, servito
+ * da nginx su /version.json a partire da un ConfigMap valorizzato al deploy
+ * (frontend/k8s/configmap.yaml). NON è una VITE_* compilata nel bundle: il
+ * bundle è buildato una volta sola e non sa con quale tag l'immagine verrà poi
+ * deployata — Promote la ri-tagga X.Y.Z senza ribuildarla.
+ *
+ * In locale (vite dev) il file non esiste: si ripiega su 'dev'.
+ */
+export async function fetchFrontendVersion(): Promise<string> {
+  try {
+    const res = await fetch('/version.json', { cache: 'no-store' });
+    if (!res.ok) return 'dev';
+    const data = await res.json() as { version?: string };
+    return data.version || 'dev';
+  } catch {
+    return 'dev';
+  }
+}
 
 /** Base URL for Keycloak OIDC endpoints */
 function oidcBase(): string {
