@@ -170,17 +170,20 @@ ClubManager/
 ├── .github/
 │   └── workflows/
 │       ├── infra.yml               # Provisiona namespace + Postgres condiviso + Keycloak (manuale)
-│       ├── build-deploy.yml        # Build immagini + deploy k8s (be/fe indipendenti) via SSH
-│       ├── tag.yml                 # Crea/sposta i tag server-v*/client-v* (manuale)
+│       ├── build-deploy.yml        # Build immagini + deploy in sviluppo (be/fe indipendenti)
+│       ├── deploy-backend.yml      # Riutilizzabile (workflow_call): applica backend/k8s/*
+│       ├── deploy-frontend.yml     # Riutilizzabile (workflow_call): applica frontend/k8s/*
+│       ├── tag.yml                 # Crea/sposta i tag server-v*/client-v* + GitHub Release (manuale)
+│       ├── promote.yml             # Deploy in produzione di una versione già taggata (manuale)
 │       └── cleanup-build-tags.yml  # Ripulisce i tag <scope>-<branch>-* superati (manuale)
 ├── backend/
 │   ├── src/
-│   │   ├── handlers/       # Handler HTTP (soci, incontri, buoni, admin, auth)
+│   │   ├── handlers/       # Handler HTTP (soci, incontri, buoni, admin, auth, version)
 │   │   ├── service/        # Business logic
 │   │   ├── middleware/      # Auth (Keycloak JWT), response helpers, error classes
 │   │   ├── db/             # Database client (pg Pool) + schema SQL
 │   │   └── server.ts       # Entry point HTTP (locale e produzione)
-│   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-backend
+│   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-backend.yml
 │   ├── Dockerfile
 │   ├── package.json
 │   └── tsconfig.json
@@ -188,10 +191,10 @@ ClubManager/
 │   ├── src/
 │   │   ├── auth/           # AuthContext (Keycloak OIDC + PKCE)
 │   │   ├── api/            # API client factory
-│   │   ├── pages/          # SociPage, IncontriPage, BuoniPage, AdminPage, LoginPage
-│   │   ├── components/     # Layout
-│   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID)
-│   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-frontend
+│   │   ├── pages/          # SociPage, IncontriPage, BuoniPage, AdminPage, InfoPage, LoginPage
+│   │   ├── components/     # Layout (navbar a hamburger), TableScroll
+│   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID, versione app)
+│   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-frontend.yml
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
@@ -312,20 +315,24 @@ lanciato prima, una tantum per namespace.
 
 ### Pipeline CI/CD (GitHub Actions)
 
-Tre workflow in [.github/workflows](.github/workflows), scope separato: **Infra** provisiona una tantum
-namespace/Postgres/Keycloak, **Build & Deploy** builda e deploya solo backend e frontend a ogni push,
-**Tag** promuove manualmente un deploy a "versione reale".
+Sei workflow in [.github/workflows](.github/workflows), scope separato: **Infra** provisiona una tantum
+namespace/Postgres/Keycloak; **Build & Deploy** builda e deploya backend/frontend in sviluppo a ogni push;
+**Deploy Backend**/**Deploy Frontend** sono workflow riutilizzabili (nessun trigger proprio) che applicano
+davvero i manifest k8s, chiamati sia da `Build & Deploy` sia da `Promote`; **Tag** promuove manualmente un
+deploy a "versione reale" (senza deployare nulla); **Promote** deploya in produzione una versione già
+taggata (senza taggare nulla).
 
 **GitHub Environments (`dev`/`prod`)**: `Build & Deploy` e `Tag` sono agganciati (job-level `environment:
 dev`) sempre e solo all'Environment `dev` del repo — ogni push builda/deploya sempre in sviluppo, mai in
 produzione. `Infra` invece accetta un input obbligatorio `env` (di tipo `environment`: il menu a tendina in
 GitHub mostra gli Environment realmente configurati sul repo) e aggancia il job all'Environment scelto
 (`environment: ${{ inputs.env }}`), perché va lanciato manualmente una tantum sia per provisionare `dev` che
-`prod`. Le **Variables/Secrets** vanno quindi configurate per-Environment (Settings → Environments → `dev` /
-`prod`, non più solo a livello di repository): ogni Environment ha i propri valori di
-`KUBE_NAMESPACE`/`APP_DOMAIN`/`KEYCLOAK_HOST`/`DB_*`/`SSH_*`/ecc. Una pipeline `Promote` futura userà le
-immagini Docker già pushate su `ghcr.io` da `Build & Deploy` (già taggate per data e per versione reale) per
-promuoverle da `dev` a `prod` senza rebuild.
+`prod`. `Promote` deploya sempre e solo sull'Environment `prod` (job-level `environment: production` dentro
+`Deploy Backend`/`Deploy Frontend`, chiamati con `environment: production`). Le **Variables/Secrets** vanno
+quindi configurate per-Environment (Settings → Environments → `dev` / `prod`, non più solo a livello di
+repository): ogni Environment ha i propri valori di `KUBE_NAMESPACE`/`APP_DOMAIN`/`KEYCLOAK_HOST`/`DB_*`/
+`SSH_*`/ecc. `Promote` riusa le immagini Docker già pushate su `ghcr.io` da `Build & Deploy` (già taggate per
+versione reale da `Tag`) — nessun rebuild.
 
 #### Infra
 
@@ -390,9 +397,9 @@ condiviso) — e il proprio tag Git `<scope>-<branch>-<data>` (es. `backend-main
 non due: serve sia da baseline per il diff della run successiva sullo stesso branch, sia da riferimento per
 il workflow **Tag** (vedi sotto) — niente più distinzione tra tag "di build" e tag "di deploy".
 
-Job separati (`build-backend`/`deploy-backend` e `build-frontend`/`deploy-frontend`), ciascuno gira **solo**
-se serve davvero, e **non tocca mai** il Deployment k8s dell'altro componente se quello non è cambiato
-(nessun riavvio/rollout inutile). Il job `versions` diffa `HEAD` contro l'ultimo tag `<scope>-<branch>-*` —
+Job separati per scope, ciascuno gira **solo** se serve davvero, e **non tocca mai** il Deployment k8s
+dell'altro componente se quello non è cambiato (nessun riavvio/rollout inutile). Il job `versions` diffa
+`HEAD` contro l'ultimo tag `<scope>-<branch>-*` —
 **per ciascuno scope indipendentemente**, limitato al proprio folder (`backend/` o `frontend/`, `k8s/`
 incluso in quanto sottocartella) — e decide:
 - qualcosa sotto `backend/` (o `frontend/`), **escluso** `backend/k8s/` (o `frontend/k8s/`), è cambiato →
@@ -409,8 +416,8 @@ Se non trova nessun tag `<scope>-<branch>-*` precedente per uno scope su questo 
 assoluto, o dopo una pulizia con il workflow **Cleanup build tags**, vedi sotto), builda e deploya sempre
 tutto per quello scope, per sicurezza.
 
-**Come avanza il tag `<scope>-<branch>-*`**, sempre a fine job (`deploy-backend`/`deploy-frontend`), solo
-dopo un rollout riuscito:
+**Come avanza il tag `<scope>-<branch>-*`**, sempre a fine job (`register-backend-tag`/`register-frontend-tag`,
+dopo che il job di deploy corrispondente è andato a buon fine):
 - se c'era un **rebuild**: crea un tag **nuovo** (`<scope>-<branch>-<data-di-questa-run>`), sul commit appena
   deployato — riferisce la nuova immagine appena pushata.
 - se era un deploy **manifest-only** (nessun rebuild): **sposta in avanti** (force-update) il tag
@@ -419,30 +426,35 @@ dopo un rollout riuscito:
   ora segna "fino a qui il manifest è già stato applicato", cosicché la prossima run non rilevi di nuovo lo
   stesso cambiamento già gestito.
 
-Job:
+Job (per ciascuno scope: nomi mostrati per `backend`, `frontend` è identico):
 
 1. **versions**: legge il campo `version` di `backend/package.json` e `frontend/package.json`, calcola un
    **tag di data** `<branch>-yyyymmdd_HHMM` (UTC) univoco per questa run (usato per le immagini Docker e
    come base del nome dei tag Git di ciascuno scope).
-2. **build-backend** / **build-frontend** (condizionali, vedi sopra): la **compilazione avviene qui, nella
-   pipeline** (`npm ci && npm run build`), non nel Dockerfile — `backend/Dockerfile` e `frontend/Dockerfile`
-   si limitano a impacchettare l'output già compilato (`dist/`) rispettivamente in un'immagine Node runtime e
-   in un'immagine nginx. Le variabili `VITE_*` sono passate come variabili d'ambiente allo step `npm run
-   build` del frontend (Vite le compila nel bundle statico a build-time). Le immagini vengono pushate su
-   GitHub Container Registry (`ghcr.io`) taggate **solo** con il tag di data (branch-scoped) e con `latest` —
-   il tag di versione reale (`X.Y.Z`) viene assegnato in seguito dal workflow Tag, solo dopo la promozione.
-3. **deploy-backend** (condizionale, vedi sopra): applica **solo** i manifest sotto `backend/k8s/`
-   (`configmap.yaml`, `secret.yaml`, `deployment.yaml`, `service.yaml`, `ingress.yaml` — quest'ultimo
-   possiede la richiesta TLS/cert-manager per l'host condiviso), poi `kubectl rollout status` sul solo
-   Deployment backend.
-4. **deploy-frontend** (condizionale, vedi sopra): applica **solo** i manifest sotto `frontend/k8s/`
-   (`deployment.yaml`, `service.yaml`, `ingress.yaml` — stesso host/secret TLS di quello del backend, ma
-   senza l'annotazione cert-manager, per non farli litigare sulla stessa `Certificate`), poi `kubectl
-   rollout status` sul solo Deployment frontend.
-5. **cleanup-registry**: dopo almeno un deploy riuscito, ripulisce dal registry le immagini taggate solo con
+2. **build-backend** (condizionale, vedi sopra): la **compilazione avviene qui, nella pipeline** (`npm ci &&
+   npm run build`), non nel Dockerfile — `backend/Dockerfile` si limita a impacchettare l'output già
+   compilato (`dist/`) in un'immagine Node runtime (per il frontend: build Vite + immagine nginx, variabili
+   `VITE_*` passate come env allo step `npm run build`, compilate nel bundle a build-time). Le immagini
+   vengono pushate su GitHub Container Registry (`ghcr.io`) taggate **solo** con il tag di data
+   (branch-scoped) e con `latest` — il tag di versione reale (`X.Y.Z`) viene assegnato in seguito dal
+   workflow Tag, solo dopo la promozione.
+3. **resolve-backend-image** (condizionale, vedi sopra): decide quale tag immagine questa run deve
+   deployare — il tag di data appena pushato se c'è stato un rebuild, altrimenti l'ultimo tag
+   `backend-<branch>-*` esistente (immagine riusata, nessun rebuild). Logica specifica di questa run
+   (branch, history dei tag): resta fuori dal workflow riutilizzabile di deploy al punto successivo.
+4. **deploy-backend**: chiama il workflow riutilizzabile [`deploy-backend.yml`](.github/workflows/deploy-backend.yml)
+   con `environment: development` e il tag risolto al punto precedente — applica **solo** i manifest sotto
+   `backend/k8s/` (`configmap.yaml`, `secret.yaml`, `deployment.yaml`, `service.yaml`, `ingress.yaml` —
+   quest'ultimo possiede la richiesta TLS/cert-manager per l'host condiviso), poi `kubectl rollout status`
+   sul solo Deployment backend. Lo stesso identico workflow è chiamato anche da **Promote** per la
+   produzione (vedi sotto) — nessuna logica di deploy duplicata tra i due contesti.
+5. **register-backend-tag**: solo dopo un deploy riuscito, crea/sposta il tag `backend-<branch>-*` (vedi
+   sopra "Come avanza il tag").
+6. **cleanup-registry**: dopo almeno un deploy riuscito, ripulisce dal registry le immagini taggate solo con
    la data, mantenendo le **3 più recenti** per repository immagine (`clubmanager-backend`,
    `clubmanager-frontend`), a prescindere dal branch. I tag di versione reale (`X.Y.Z`) sono sempre esclusi
-   da questa pulizia.
+   da questa pulizia. Non usa più `actions/delete-package-versions` (dismessa, girava forzata su un runtime
+   Node deprecato): usa direttamente l'API di GitHub Packages via `gh api`.
 
 I manifest renderizzati (`k8s/rendered/`, contengono credenziali in chiaro) non vengono mai committati
 (vedi `.gitignore`) e vivono solo per la durata della run della pipeline.
@@ -483,10 +495,11 @@ Accetta quattro input:
 
 **Attivazione manuale** (`workflow_dispatch`, nessun input, tab Actions → Tag → Run workflow): non parte da
 solo dopo `Build & Deploy`. Anche questo workflow è sempre agganciato all'Environment `dev`
-(`environment: development`): assegna il tag di versione reale alle immagini già buildate in sviluppo.
-Promuove sempre e solo **main**, per costruzione (vedi sotto) — coerente col fatto che, per ora, `feature/**`
-e `fix/**` deployano sullo stesso namespace di sviluppo di `main` e non rappresentano ancora una produzione
-separata (quando ci sarà la pipeline `Promote`, questo workflow verrà rivisto).
+(`environment: development`): assegna il tag di versione reale alle immagini già buildate in sviluppo, e crea
+la GitHub Release corrispondente. **Non deploya nulla** — il deploy in produzione di una versione già
+taggata qui è compito separato del workflow **Promote** (vedi sotto). Promuove sempre e solo **main**, per
+costruzione (vedi sotto) — coerente col fatto che `feature/**` e `fix/**` deployano sullo stesso namespace di
+sviluppo di `main` e non rappresentano una produzione separata.
 
 Non prende in input l'ID di una run di `Build & Deploy` da promuovere: dato che backend e frontend deployano
 in modo indipendente (vedi sopra), non esiste "la run da promuovere" — ogni scope avanza per conto suo,
@@ -516,7 +529,9 @@ di versione reale se quello scope non ha nulla di nuovo da promuovere. Per ciasc
 5. **Assegna il tag di versione reale** (`X.Y.Z`) all'immagine già pushata col tag di data ricavato dal nome
    del tag `<scope>-*` stesso (nessuna variabile/artifact separato), tramite `docker buildx imagetools
    create` (nessun rebuild: aggiunge solo un riferimento sullo stesso digest già presente sul registry).
-6. Se **almeno uno** scope è stato promosso, **triggera** (fire-and-forget, non aspetta che finisca) il
+6. **Crea la GitHub Release** per quel tag di versione reale (idempotente: se esiste già — es. dopo uno
+   spostamento del tag sullo stesso nome — la lascia invariata invece di fallire).
+7. Se **almeno uno** scope è stato promosso, **triggera** (fire-and-forget, non aspetta che finisca) il
    workflow **Cleanup build tags** scoped a `branch=main` e `preserve_latest=true`, per ripulire i tag
    `backend-main-*`/`frontend-main-*` (Git e Docker) rimasti da eventuali tentativi precedenti su `main` mai
    promossi — mantenendo sempre il più recente per scope, così il prossimo diff di `Build & Deploy` ha ancora
@@ -535,6 +550,36 @@ versione rimuoverebbe anche il tag reale appena assegnato — sia `cleanup-regis
 Per rilasciare una nuova versione di un componente, alza a mano il campo `version` nel `package.json`
 corrispondente prima del push su `main`: la pipeline la userà per il tag Git e per il tag Docker al momento
 della promozione.
+
+#### `Deploy Backend` / `Deploy Frontend` ([deploy-backend.yml](.github/workflows/deploy-backend.yml) / [deploy-frontend.yml](.github/workflows/deploy-frontend.yml))
+
+**Solo `workflow_call`**: non compaiono nella tab Actions come workflow lanciabili direttamente — esistono
+solo per essere chiamati da `Build & Deploy` (sviluppo) e da `Promote` (produzione). Prendono in input
+`environment` (Environment GitHub da usare) e `image_tag` (tag dell'immagine da deployare — di data o
+versione reale, indifferentemente): renderizzano i manifest k8s del proprio scope con `envsubst` leggendo le
+Variables/Secrets **dell'Environment ricevuto in input**, li copiano sulla VPS via SSH, li applicano e
+verificano il rollout. Nessuna conoscenza di *perché* si sta deployando quel tag né di *chi* li ha chiamati —
+un cambiamento a come si deploya (nuovo step, nuovo manifest, nuova secret) si scrive una volta sola e vale
+sia per lo sviluppo sia per la produzione.
+
+#### `Promote` ([promote.yml](.github/workflows/promote.yml))
+
+**Attivazione manuale**, con input `backend_version`/`frontend_version` (entrambi opzionali come stringa,
+es. `1.4.0` — ma **almeno uno richiesto**): puoi promuovere in produzione solo backend, solo frontend, o
+entrambi nella stessa run. **Non tagga nulla, non crea Release** — richiede che la versione indicata sia già
+stata creata da **Tag** in precedenza.
+
+1. **validate**: per ciascuna versione indicata, verifica che il tag `server-v<versione>`/`client-v<versione>`
+   esista davvero nel repo — altrimenti fallisce subito con un `::error::` esplicito, invece di procedere con
+   un'immagine inesistente/sbagliata (un input testo libero, senza validazione, rischierebbe esattamente
+   questo su un semplice typo).
+2. **deploy-production-backend** / **deploy-production-frontend** (uno o entrambi, a seconda degli input
+   valorizzati): chiamano `deploy-backend.yml`/`deploy-frontend.yml` con `environment: production` e il tag
+   di versione validato — stesso identico workflow di deploy usato da `Build & Deploy` per lo sviluppo,
+   nessuna logica duplicata.
+
+Sicuro da rilanciare più volte con lo stesso input (es. per riallineare la produzione dopo un incidente):
+non essendoci alcuno stato/tag da spostare, non ha effetti collaterali oltre al deploy stesso.
 
 ### Struttura dei manifest k8s
 

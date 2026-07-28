@@ -8,6 +8,8 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+const MOBILE_BREAKPOINT = 640;
+
 export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const location = useLocation();
@@ -23,6 +25,28 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div style={styles.wrapper}>
+      {/* Sopra MOBILE_BREAKPOINT il menu diventa un dropdown ancorato in alto
+          a destra (come un tipico menu desktop), con un overlay che lo chiude
+          al click fuori; sotto resta a tutta larghezza sotto la navbar (come
+          un menu mobile). Media query non esprimibile con gli style inline
+          React, da qui questo <style> scoped via classi. */}
+      <style>{`
+        .navbar-overlay { display: none; }
+        @media (min-width: ${MOBILE_BREAKPOINT + 1}px) {
+          .navbar-menu {
+            position: absolute;
+            top: 100%;
+            right: 32px;
+            width: 260px;
+            border-top: none !important;
+            border-radius: 10px;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.28);
+          }
+          .navbar-overlay.open {
+            display: block;
+          }
+        }
+      `}</style>
       <nav style={styles.nav}>
         <img src="/logo.svg" alt="" style={styles.brandLogo} />
         <span style={styles.brand}>{config.tenantName}</span>
@@ -37,32 +61,43 @@ export default function Layout({ children }: LayoutProps) {
           <span style={styles.hamburgerBar} />
           <span style={styles.hamburgerBar} />
         </button>
+
+        {menuOpen && (
+          <div className="navbar-menu" style={styles.menu}>
+            {navLinks.map(link => (
+              <Link
+                key={link.to}
+                to={link.to}
+                onClick={() => setMenuOpen(false)}
+                style={{
+                  ...styles.menuLink,
+                  ...(location.pathname.startsWith(link.to) ? styles.linkActive : {}),
+                }}
+              >
+                {link.label}
+              </Link>
+            ))}
+            <div style={styles.menuDivider} />
+            <span style={styles.menuEmail}>{user?.email}</span>
+            <button
+              style={styles.menuLogoutBtn}
+              onClick={() => { setMenuOpen(false); logout(); }}
+            >
+              Esci
+            </button>
+          </div>
+        )}
       </nav>
 
+      {/* Overlay: solo desktop (vedi media query sopra) — chiude il menu al
+          click fuori, come un tipico menu a tendina. Su mobile resta sempre
+          nascosto (display:none), il menu lì è già a piena larghezza. */}
       {menuOpen && (
-        <div style={styles.menu}>
-          {navLinks.map(link => (
-            <Link
-              key={link.to}
-              to={link.to}
-              onClick={() => setMenuOpen(false)}
-              style={{
-                ...styles.menuLink,
-                ...(location.pathname.startsWith(link.to) ? styles.linkActive : {}),
-              }}
-            >
-              {link.label}
-            </Link>
-          ))}
-          <div style={styles.menuDivider} />
-          <span style={styles.menuEmail}>{user?.email}</span>
-          <button
-            style={styles.menuLogoutBtn}
-            onClick={() => { setMenuOpen(false); logout(); }}
-          >
-            Esci
-          </button>
-        </div>
+        <div
+          className={`navbar-overlay${menuOpen ? ' open' : ''}`}
+          style={styles.overlay}
+          onClick={() => setMenuOpen(false)}
+        />
       )}
 
       <main style={styles.main}>{children}</main>
@@ -73,11 +108,13 @@ export default function Layout({ children }: LayoutProps) {
 const styles: Record<string, React.CSSProperties> = {
   wrapper: { minHeight: '100vh', background: '#f8f9fa' },
   nav: {
+    position: 'relative',
     display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 12,
     padding: '0 32px',
-    height: 56,
+    minHeight: 56,
     background: theme.navBg,
     color: theme.navText,
   },
@@ -104,12 +141,24 @@ const styles: Record<string, React.CSSProperties> = {
     background: theme.navText,
     borderRadius: 1,
   },
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.15)',
+    zIndex: 100,
+  },
   menu: {
+    // flexBasis 100%: dentro il <nav> flex (flexWrap:wrap), forza il menu a
+    // occupare una riga propria a piena larghezza sotto logo/brand/hamburger
+    // (mobile). Ignorato quando la media query desktop lo passa a
+    // position:absolute (esce dal flusso flex).
+    flexBasis: '100%',
     display: 'flex',
     flexDirection: 'column',
     background: theme.navBg,
     borderTop: `1px solid rgba(255,255,255,0.15)`,
     padding: '8px 16px 16px',
+    zIndex: 101,
   },
   menuLink: {
     color: theme.navText,

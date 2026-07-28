@@ -1,0 +1,76 @@
+name: Deploy Frontend
+
+# Solo workflow_call — gemello di deploy-backend.yml per frontend/k8s/*.
+# Vedi commenti lì per il razionale.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment GitHub da usare (development, production, ...)'
+        required: true
+        type: string
+      image_tag:
+        description: 'Tag dell''immagine ghcr.io/.../clubmanager-frontend da deployare (tag di data o versione reale X.Y.Z)'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Renderizza manifest k8s (frontend)
+        env:
+          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
+          FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ inputs.image_tag }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p k8s/rendered
+          VARS='$KUBE_NAMESPACE $FRONTEND_IMAGE $APP_DOMAIN'
+          for f in frontend/k8s/*.yaml; do
+            envsubst "$VARS" < "$f" > "k8s/rendered/frontend-$(basename "$f")"
+          done
+
+      - name: Copia manifest frontend sulla VPS via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          source: "k8s/rendered/*"
+          target: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+          strip_components: 2
+
+      - name: Applica manifest frontend e verifica rollout
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          NS: ${{ vars.KUBE_NAMESPACE }}
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          envs: NS,GHCR_USER,GHCR_PAT,DEPLOY_PATH
+          script: |
+            set -e
+            export KUBECONFIG="$HOME/.kube/config"
+
+            kubectl create secret docker-registry ghcr-secret -n "$NS" \
+              --docker-server=ghcr.io \
+              --docker-username="$GHCR_USER" \
+              --docker-password="$GHCR_PAT" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl apply -f "$DEPLOY_PATH/frontend-deployment.yaml"
+            kubectl apply -f "$DEPLOY_PATH/frontend-service.yaml"
+            kubectl apply -f "$DEPLOY_PATH/frontend-ingress.yaml"
+            kubectl rollout status deployment/clubmanager-frontend -n "$NS" --timeout=180s

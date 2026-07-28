@@ -24,6 +24,11 @@ name: Tag
 # indipendenti e asincrone, quindi "l'ultima run di Build & Deploy" non è
 # comunque un riferimento affidabile per sapere cosa è cambiato dall'ultima
 # promozione — i tag Git invece sì, sono stato persistente nel repo.
+#
+# Per ciascuno scope promosso crea anche la GitHub Release corrispondente
+# (idempotente: se esiste già, la lascia invariata). Questo workflow decide
+# le versioni e basta — NON deploya nulla: il deploy in produzione di una
+# versione già taggata qui è compito separato del workflow Promote.
 on:
   workflow_dispatch: {}
 
@@ -35,6 +40,8 @@ jobs:
       contents: write
       packages: write
       actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -58,9 +65,11 @@ jobs:
       # promosso: salta), altrimenti legge la versione dal package.json AL
       # COMMIT di quel tag (non da HEAD: ogni scope può essere più
       # avanti/indietro rispetto all'altro), crea o sposta il tag di versione
-      # reale corrispondente su quel commit, e aggiunge il tag di versione
-      # reale allo stesso digest Docker già pushato col tag di data (nessun
-      # rebuild).
+      # reale corrispondente su quel commit, aggiunge il tag di versione reale
+      # allo stesso digest Docker già pushato col tag di data (nessun
+      # rebuild), e crea la GitHub Release per quella versione (idempotente:
+      # se esiste già — es. dopo uno spostamento del tag sullo stesso nome —
+      # la lascia invariata invece di fallire).
       - name: Promuovi backend e frontend (solo gli scope che ne hanno bisogno)
         id: promuovi
         run: |
@@ -96,6 +105,14 @@ jobs:
             docker buildx imagetools create \
               --tag "ghcr.io/${{ github.repository_owner }}/${IMAGE[$SCOPE]}:${VERSION}" \
               "ghcr.io/${{ github.repository_owner }}/${IMAGE[$SCOPE]}:${DATE_TAG}"
+
+            if gh release view "$REAL_TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+              echo "  Release $REAL_TAG già esistente, la lascio invariata."
+            else
+              gh release create "$REAL_TAG" --repo "${{ github.repository }}" \
+                --title "$REAL_TAG" \
+                --notes "Promosso da $DEPLOY_TAG (commit $COMMIT)."
+            fi
 
             PROMOTED[$SCOPE]=true
           done

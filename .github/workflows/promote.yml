@@ -1,0 +1,93 @@
+name: Promote
+
+# Attivazione MANUALE, con la versione da deployare come INPUT ESPLICITO
+# (backend_version/frontend_version, es. "1.4.0" — non un tag Git per
+# esteso, solo il numero) — non decide nulla, non tagga nulla: quello è
+# compito esclusivo di tag.yml. Questo workflow fa solo il deploy in
+# produzione della versione indicata, già promossa da Tag in precedenza.
+#
+# Separato da tag.yml perché tag/versioning e deploy in produzione hanno un
+# ciclo di vita diverso: taggare una versione è una decisione (rara,
+# revisionabile via GitHub Release), farla girare in produzione è
+# un'operazione che può servire ripetere (es. per riallineare l'ambiente
+# dopo un incidente) senza dover ripassare da Tag. Rilanciabile più volte con
+# lo stesso input, in sicurezza.
+#
+# Accetta uno o entrambi gli scope: puoi promuovere solo backend, solo
+# frontend, o entrambi nella stessa run — ognuno deploya indipendentemente
+# tramite lo stesso workflow riutilizzabile usato da Build & Deploy per lo
+# staging (deploy-backend.yml/deploy-frontend.yml), solo con
+# environment: production invece di development.
+on:
+  workflow_dispatch:
+    inputs:
+      backend_version:
+        description: 'Versione backend da deployare in produzione (es. 1.4.0) — deve esistere già come tag server-vX.Y.Z (creato da Tag)'
+        required: false
+        default: ''
+      frontend_version:
+        description: 'Versione frontend da deployare in produzione (es. 1.4.0) — deve esistere già come tag client-vX.Y.Z (creato da Tag)'
+        required: false
+        default: ''
+
+jobs:
+  # Valida gli input PRIMA di deployare qualunque cosa: un input libero come
+  # questo (nessun menu a tendina, solo testo) rischia di deployare
+  # un'immagine sbagliata/inesistente su un typo. Verifica che il tag di
+  # versione esista davvero nel repo, altrimenti fallisce subito con un
+  # errore chiaro invece di procedere.
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_image_tag: ${{ steps.check.outputs.backend_image_tag }}
+      frontend_image_tag: ${{ steps.check.outputs.frontend_image_tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verifica input e tag di versione esistenti
+        id: check
+        run: |
+          if [ -z "${{ inputs.backend_version }}" ] && [ -z "${{ inputs.frontend_version }}" ]; then
+            echo "::error::Specifica almeno una tra backend_version e frontend_version."
+            exit 1
+          fi
+
+          if [ -n "${{ inputs.backend_version }}" ]; then
+            TAG="server-v${{ inputs.backend_version }}"
+            if ! git tag -l "$TAG" | grep -qx "$TAG"; then
+              echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
+              exit 1
+            fi
+            echo "backend_image_tag=${{ inputs.backend_version }}" >> "$GITHUB_OUTPUT"
+            echo "Backend: $TAG trovato, verrà deployata la versione ${{ inputs.backend_version }}."
+          fi
+
+          if [ -n "${{ inputs.frontend_version }}" ]; then
+            TAG="client-v${{ inputs.frontend_version }}"
+            if ! git tag -l "$TAG" | grep -qx "$TAG"; then
+              echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
+              exit 1
+            fi
+            echo "frontend_image_tag=${{ inputs.frontend_version }}" >> "$GITHUB_OUTPUT"
+            echo "Frontend: $TAG trovato, verrà deployata la versione ${{ inputs.frontend_version }}."
+          fi
+
+  deploy-production-backend:
+    needs: validate
+    if: inputs.backend_version != ''
+    uses: ./.github/workflows/deploy-backend.yml
+    with:
+      environment: production
+      image_tag: ${{ needs.validate.outputs.backend_image_tag }}
+    secrets: inherit
+
+  deploy-production-frontend:
+    needs: validate
+    if: inputs.frontend_version != ''
+    uses: ./.github/workflows/deploy-frontend.yml
+    with:
+      environment: production
+      image_tag: ${{ needs.validate.outputs.frontend_image_tag }}
+    secrets: inherit

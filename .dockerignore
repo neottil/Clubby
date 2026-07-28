@@ -1,0 +1,14 @@
+# Usato solo dal build del backend (context = radice del repo, vedi
+# backend/Dockerfile e build-deploy.yml). Il build del frontend usa un
+# contesto/dockerignore separati (frontend/.dockerignore), non toccati da
+# questo file.
+frontend
+node_modules
+backend/node_modules
+backend/src
+backend/k8s
+.git
+.github
+k8s
+*.md
+docker-compose.yml

@@ -21,18 +21,32 @@
 # accumulare dati duplicati ad ogni lancio.
 #
 # Non interattivo: tutti i parametri arrivano da variabili d'ambiente, con
-# default adatti a un ambiente locale (docker-compose).
+# default adatti a un ambiente locale (docker-compose) — le stesse identiche
+# variabili sono già presenti nell'ambiente del pod backend (ConfigMap
+# clubmanager-config + Secret clubmanager-secrets), quindi lo script gira
+# SENZA OVERRIDE anche dentro un pod backend già deployato (utile per
+# popolare dati demo in staging). Il pod backend include già bash/curl/jq/
+# psql e questo stesso script (vedi backend/Dockerfile) — nessun `kubectl cp`
+# necessario, basta un `kubectl exec`.
 #
-# Prerequisiti: psql, curl, jq
+# Prerequisiti (in locale): bash, psql, curl, jq
 #
 # Variabili DB (default = ambiente locale via docker-compose):
 #   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
-# Variabili Keycloak (default = ambiente locale):
-#   KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_ADMIN_USER, KEYCLOAK_ADMIN_PASSWORD
+# Variabili Keycloak (default = ambiente locale): usa le stesse credenziali
+# del client confidential "clubmanager-backend" (grant client_credentials,
+# stesso meccanismo di backend/src/service/admin.service.ts) — non le
+# credenziali dell'admin bootstrap della console Keycloak (quelle non sono
+# mai presenti nei pod applicativi, solo nei GitHub Secrets di Infra):
+#   KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_ADMIN_CLIENT_ID, KEYCLOAK_ADMIN_CLIENT_SECRET
 #
-# Uso:
+# Uso in locale:
 #   ./scripts/seed-demo-data.sh
 #   DB_HOST=1.2.3.4 KEYCLOAK_URL=https://auth.example.com ./scripts/seed-demo-data.sh
+#
+# Uso dentro un pod backend già deployato (staging/prod), nessuna variabile
+# da passare — sono già tutte nell'ambiente del pod:
+#   kubectl exec -it <pod-backend> -n <namespace> -- bash /app/scripts/seed-demo-data.sh
 # ============================================================
 set -euo pipefail
 
@@ -43,11 +57,9 @@ DB_USER="${DB_USER:-clubmanager}"
 DB_PASSWORD="${DB_PASSWORD:-clubmanager}"
 
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8080}"
-KEYCLOAK_URL=auth-dev.clubby.click
 KEYCLOAK_REALM="${KEYCLOAK_REALM:-clubmanager}"
-KEYCLOAK_ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
-KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
-
+KEYCLOAK_ADMIN_CLIENT_ID="${KEYCLOAK_ADMIN_CLIENT_ID:-clubmanager-backend}"
+KEYCLOAK_ADMIN_CLIENT_SECRET="${KEYCLOAK_ADMIN_CLIENT_SECRET:-clubmanager-backend-secret}"
 # ------------------------------------------------------------
 # Helper: esegue una query e ritorna un solo valore scalare
 # ------------------------------------------------------------
@@ -68,14 +80,20 @@ echo "  OK."
 # ------------------------------------------------------------
 # 0. Token admin Keycloak (serve sia per la pulizia che per la creazione)
 # ------------------------------------------------------------
+# grant_type=client_credentials sul realm applicativo (non username/password
+# sul realm master): stesso identico meccanismo usato dal backend stesso
+# (getAdminToken() in backend/src/service/admin.service.ts), con le stesse
+# credenziali già presenti nell'ambiente del pod backend (service account del
+# client confidential "clubmanager-backend", permessi manage-users/
+# manage-realm assegnati da scripts/keycloak-realm-init.sh) — niente
+# credenziali di bootstrap separate da procurarsi a parte.
 echo "▶ Ottengo token admin Keycloak..."
 TOKEN_RESPONSE=$(curl -s -w '\n%{http_code}' -X POST \
-  "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+  "$KEYCLOAK_URL/realms/$KEYCLOAK_REALM/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=$KEYCLOAK_ADMIN_USER" \
-  -d "password=$KEYCLOAK_ADMIN_PASSWORD" \
-  -d "grant_type=password" \
-  -d "client_id=admin-cli")
+  -d "grant_type=client_credentials" \
+  -d "client_id=$KEYCLOAK_ADMIN_CLIENT_ID" \
+  -d "client_secret=$KEYCLOAK_ADMIN_CLIENT_SECRET")
 TOKEN_HTTP_CODE=$(echo "$TOKEN_RESPONSE" | tail -n1)
 TOKEN_BODY=$(echo "$TOKEN_RESPONSE" | sed '$d')
 

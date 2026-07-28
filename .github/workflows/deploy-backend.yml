@@ -1,0 +1,107 @@
+name: Deploy Backend
+
+# Solo workflow_call: non compare come workflow lanciabile a sé nella tab
+# Actions. Applica i manifest backend/k8s/* sull'Environment/immagine indicati
+# dal chiamante e verifica il rollout — nessuna conoscenza di *perché* si sta
+# deployando quel tag né di *dove* venga da (tag di data effimero da
+# build-deploy.yml, o versione reale da promote.yml). Chi lo chiama decide
+# tutto il resto (ambiente, immagine, cosa fare prima/dopo).
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment GitHub da usare (development, production, ...)'
+        required: true
+        type: string
+      image_tag:
+        description: 'Tag dell''immagine ghcr.io/.../clubmanager-backend da deployare (tag di data o versione reale X.Y.Z)'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Renderizza manifest k8s (backend)
+        env:
+          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
+          BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ inputs.image_tag }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT || 3000 }}
+          DB_HOST: ${{ vars.DB_HOST }}
+          DB_PORT: ${{ vars.DB_PORT || 5432 }}
+          DB_NAME: ${{ vars.DB_NAME || 'clubmanager' }}
+          DB_USER: ${{ vars.DB_USER || 'clubmanager' }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          KEYCLOAK_URL: https://${{ vars.KEYCLOAK_HOST }}
+          KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'clubmanager' }}
+          KEYCLOAK_ADMIN_CLIENT_ID: ${{ vars.KEYCLOAK_ADMIN_CLIENT_ID || 'clubmanager-backend' }}
+          KEYCLOAK_ADMIN_CLIENT_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          APP_VERSION: ${{ inputs.image_tag }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p k8s/rendered
+          VARS='$KUBE_NAMESPACE $BACKEND_IMAGE $BACKEND_PORT $DB_HOST $DB_PORT $DB_NAME $DB_USER $DB_PASSWORD $KEYCLOAK_URL $KEYCLOAK_REALM $KEYCLOAK_ADMIN_CLIENT_ID $KEYCLOAK_ADMIN_CLIENT_SECRET $APP_DOMAIN $APP_VERSION'
+          # Prefisso "backend-" nel nome renderizzato: frontend usa file con lo
+          # stesso nome (deployment.yaml, service.yaml, ...) nella propria
+          # cartella, ma sulla VPS finiscono nella STESSA directory di deploy
+          # (DEPLOY_PATH, condivisa) — senza prefisso si sovrascriverebbero.
+          for f in backend/k8s/*.yaml; do
+            envsubst "$VARS" < "$f" > "k8s/rendered/backend-$(basename "$f")"
+          done
+
+      - name: Copia manifest backend sulla VPS via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          source: "k8s/rendered/*"
+          target: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+          strip_components: 2
+
+      - name: Applica manifest backend e verifica rollout
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          NS: ${{ vars.KUBE_NAMESPACE }}
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          envs: NS,GHCR_USER,GHCR_PAT,DEPLOY_PATH
+          script: |
+            set -e
+            # Vedi commento gemello in infra.yml: kubectl (symlink a k3s) senza
+            # KUBECONFIG esplicito risolve su /etc/rancher/k3s/k3s.yaml
+            # (root:root), illeggibile dall'utente di deploy.
+            export KUBECONFIG="$HOME/.kube/config"
+
+            # I package ghcr.io sono privati di default: senza questo Secret
+            # (referenziato da imagePullSecrets nei Deployment) i pod restano
+            # in ImagePullBackOff. GHCR_PAT è un token dedicato (read:packages),
+            # non il GITHUB_TOKEN della run: quello è valido solo per la durata
+            # della pipeline, i pod invece devono poter fare pull in qualunque
+            # momento futuro (restart, rischedulazione, ecc.). Idempotente:
+            # ricreato anche da deploy-frontend, non fa danno.
+            kubectl create secret docker-registry ghcr-secret -n "$NS" \
+              --docker-server=ghcr.io \
+              --docker-username="$GHCR_USER" \
+              --docker-password="$GHCR_PAT" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl apply -f "$DEPLOY_PATH/backend-configmap.yaml"
+            kubectl apply -f "$DEPLOY_PATH/backend-secret.yaml"
+            kubectl apply -f "$DEPLOY_PATH/backend-deployment.yaml"
+            kubectl apply -f "$DEPLOY_PATH/backend-service.yaml"
+            kubectl apply -f "$DEPLOY_PATH/backend-ingress.yaml"
+            kubectl rollout status deployment/clubmanager-backend -n "$NS" --timeout=180s
