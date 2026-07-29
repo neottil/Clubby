@@ -63,14 +63,26 @@ KEYCLOAK_ADMIN_CLIENT_SECRET="${KEYCLOAK_ADMIN_CLIENT_SECRET:-clubmanager-backen
 # ------------------------------------------------------------
 # Helper: esegue una query e ritorna un solo valore scalare
 # ------------------------------------------------------------
+# NIENTE pipe verso "head": psql viene eseguito fino in fondo e la prima riga
+# è estratta con l'espansione di parametro. Con "| head -n1" e "set -o pipefail"
+# attivo (vedi sopra), head chiude la pipe appena letta la prima riga e psql può
+# ricevere SIGPIPE: la pipeline esce con 141 e lo script si interrompe in modo
+# NON deterministico, a seconda di quale dei due processi vince la corsa.
+#
+# ON_ERROR_STOP=1: un errore SQL fa uscire psql con stato diverso da zero invece
+# di lasciar proseguire (rilevante per psql_exec, che riceve più statement in un
+# solo -c) e, qui, invece di restituire un valore vuoto che si propagherebbe
+# silenziosamente nelle query successive come UUID non valido.
 psql_scalar() {
-  PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
-    -tAc "$1" | head -n1
+  local out
+  out=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
+    -v ON_ERROR_STOP=1 -tAc "$1")
+  printf '%s\n' "${out%%$'\n'*}"
 }
 
 psql_exec() {
   PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
-    -c "$1" > /dev/null
+    -v ON_ERROR_STOP=1 -c "$1" > /dev/null
 }
 
 echo "▶ Verifico connessione al DB ($DB_HOST:$DB_PORT/$DB_NAME)..."
