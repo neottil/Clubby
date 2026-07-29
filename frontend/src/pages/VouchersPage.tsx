@@ -14,7 +14,6 @@ interface Voucher {
   data_creazione: string;
   saldo_iniziale: number;
   saldo_residuo: number;
-  note: string | null;
 }
 
 interface Movimento {
@@ -70,7 +69,7 @@ export default function VouchersPage() {
 
   // Form nuovo voucher
   const [showVoucherForm, setShowVoucherForm]     = useState(false);
-  const [voucherForm, setVoucherForm]             = useState({ socio_id: '', saldo_iniziale: '', note: '' });
+  const [voucherForm, setVoucherForm]             = useState({ socio_id: '', saldo_iniziale: '' });
 
   // Form nuovo movimento
   const [movForm, setMovForm]                 = useState({ importo: '', descrizione: '' });
@@ -168,7 +167,7 @@ export default function VouchersPage() {
     <div style={styles.page}>
       <div style={styles.header}>
         <h2 style={styles.title}>Voucher prepagati</h2>
-        {user?.isAdmin && <button style={styles.btn} onClick={() => { setVoucherForm({ socio_id: '', saldo_iniziale: '', note: '' }); setShowVoucherForm(true); }}>+ Nuovo voucher</button>}
+        {user?.isAdmin && <button style={styles.btn} onClick={() => { setVoucherForm({ socio_id: '', saldo_iniziale: '' }); setShowVoucherForm(true); }}>+ Nuovo voucher</button>}
       </div>
       {error && <div style={styles.error}>{error}</div>}
 
@@ -187,10 +186,6 @@ export default function VouchersPage() {
           <div style={styles.field}>
             <label style={styles.label}>Saldo iniziale (€)</label>
             <input type='number' step='0.01' min='0' style={styles.input} value={voucherForm.saldo_iniziale} onChange={e => setVoucherForm({ ...voucherForm, saldo_iniziale: e.target.value })} />
-          </div>
-          <div style={styles.field}>
-            <label style={styles.label}>Note</label>
-            <textarea style={styles.textarea} value={voucherForm.note} onChange={e => setVoucherForm({ ...voucherForm, note: e.target.value })} />
           </div>
           <div style={styles.formActions}>
             <button style={styles.btnSecondary} onClick={() => setShowVoucherForm(false)}>Annulla</button>
@@ -363,7 +358,6 @@ const styles: Record<string, React.CSSProperties> = {
   field: { marginBottom: 14 },
   label: { display: 'block', fontSize: 13, color: '#555', marginBottom: 4, fontWeight: 500 },
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
-  textarea: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, minHeight: 80, boxSizing: 'border-box' },
   formActions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 },
   hint: { fontSize: 13, color: '#666', marginTop: 0, marginBottom: 16 },
   badgeIncontro: {

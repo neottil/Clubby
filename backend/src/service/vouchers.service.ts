@@ -8,7 +8,6 @@ export interface Voucher {
   data_creazione: string;
   saldo_iniziale: number;
   saldo_residuo: number;
-  note: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,7 +29,6 @@ export interface MovimentoVoucher {
 export interface CreateVoucherInput {
   socio_id: string;
   saldo_iniziale: number;
-  note?: string;
 }
 
 export interface CreateMovimentoInput {
@@ -119,13 +117,12 @@ export async function createVoucher(input: CreateVoucherInput): Promise<Voucher>
   }
 
   const result = await query(
-    `INSERT INTO voucher (socio_id, saldo_iniziale, note)
-     VALUES (:socio_id, :saldo_iniziale, :note)
+    `INSERT INTO voucher (socio_id, saldo_iniziale)
+     VALUES (:socio_id, :saldo_iniziale)
      RETURNING *, saldo_iniziale AS saldo_residuo`,
     {
       socio_id: input.socio_id,
       saldo_iniziale: input.saldo_iniziale,
-      note: input.note ?? null,
     }
   );
 

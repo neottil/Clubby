@@ -18,9 +18,7 @@ import {
   BlockTypeSelect,
   ListsToggle,
   InsertTable,
-  InsertCodeBlock,
   CreateLink,
-  InsertImage,
   DiffSourceToggleWrapper,
 } from '@mdxeditor/editor';
 import { contentPlugins } from './markdownPlugins';
@@ -63,9 +61,12 @@ export default function MarkdownEditorImpl({ markdown, onChange }: MarkdownEdito
               <ListsToggle options={['bullet', 'number']} />
               <Separator />
               <InsertTable />
-              <InsertCodeBlock />
               <CreateLink />
-              <InsertImage />
+              {/* Niente bottoni per immagini e blocchi di codice: non servono
+                  in una nota di incontro. I plugin corrispondenti restano
+                  però attivi (markdownPlugins.ts), altrimenti una nota che
+                  contiene già "```" o "![...](...)" — scritta in modalità
+                  editor o incollata — manderebbe in errore il rendering. */}
             </DiffSourceToggleWrapper>
           ),
         }),

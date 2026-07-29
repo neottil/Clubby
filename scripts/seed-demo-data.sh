@@ -209,20 +209,20 @@ echo "  Giulia Verdi  -> $GIULIA_ID"
 echo "▶ Creo i voucher..."
 
 MARIO_VOUCHER_ID=$(psql_scalar "
-  INSERT INTO voucher (socio_id, saldo_iniziale, note)
-  VALUES ('$MARIO_ID', 100.00, 'Voucher iniziale')
+  INSERT INTO voucher (socio_id, saldo_iniziale)
+  VALUES ('$MARIO_ID', 100.00)
   RETURNING id;
 ")
 
 LAURA_VOUCHER_ID=$(psql_scalar "
-  INSERT INTO voucher (socio_id, saldo_iniziale, note)
-  VALUES ('$LAURA_ID', 30.00, 'Voucher iniziale')
+  INSERT INTO voucher (socio_id, saldo_iniziale)
+  VALUES ('$LAURA_ID', 30.00)
   RETURNING id;
 ")
 
 GIULIA_VOUCHER_ID=$(psql_scalar "
-  INSERT INTO voucher (socio_id, saldo_iniziale, note)
-  VALUES ('$GIULIA_ID', 50.00, 'Voucher iniziale')
+  INSERT INTO voucher (socio_id, saldo_iniziale)
+  VALUES ('$GIULIA_ID', 50.00)
   RETURNING id;
 ")
 
@@ -241,12 +241,17 @@ days_ago() {
   date -u -d "@$((now - n * 86400))" +%F 2>/dev/null || date -u -v-"${n}"d +%F
 }
 
+# Il 7° parametro (note_markdown) è opzionale e vale false: le note demo sono
+# testo semplice, tranne le due passate esplicitamente come Markdown più sotto.
+# ATTENZIONE: le note vengono interpolate dentro un letterale SQL fra apici
+# singoli — non devono contenere apostrofi (in Markdown non servono, e usarli
+# richiederebbe di raddoppiarli).
 crea_incontro_con_addebito() {
-  local socio_id="$1" voucher_id="$2" data="$3" attivita="$4" costo="$5" note="$6"
+  local socio_id="$1" voucher_id="$2" data="$3" attivita="$4" costo="$5" note="$6" note_markdown="${7:-false}"
   local incontro_id
   incontro_id=$(psql_scalar "
-    INSERT INTO incontro (socio_id, data_incontro, attivita, costo, note)
-    VALUES ('$socio_id', '$data', '$attivita', $costo, '$note')
+    INSERT INTO incontro (socio_id, data_incontro, attivita, costo, note, note_markdown)
+    VALUES ('$socio_id', '$data', '$attivita', $costo, '$note', $note_markdown)
     RETURNING id;
   ")
   psql_exec "
@@ -255,9 +260,38 @@ crea_incontro_con_addebito() {
   "
 }
 
+# Due note in Markdown (le altre restano testo semplice, così la demo mostra
+# entrambi i formati fianco a fianco nella stessa tabella): coprono titoli,
+# grassetto, barrato, elenchi puntati e numerati, citazione, tabella e link —
+# cioè tutto ciò che la barra dei comandi dell'editor sa produrre.
+NOTA_MD_MANTRAILING="## Mantrailing - incontro individuale
+
+Obiettivi della sessione:
+
+* riconoscimento **odore di riferimento**
+* pista su asfalto con distrazioni leggere
+* ~~pista in bosco~~ rimandata alla prossima volta
+
+> Buona motivazione, partenza sicura.
+
+| Prova | Esito |
+| --- | --- |
+| Pista breve | OK |
+| Pista lunga | Da ripetere |"
+
+NOTA_MD_K9="### K9 Cross Training - stand a 3 stazioni
+
+1. riscaldamento
+2. passo laterale
+3. defaticamento
+
+Il **passo laterale** va ripreso: appoggio posteriore ancora incerto.
+
+Scheda degli esercizi: [K9 Cross](https://example.local/schede/k9-cross)"
+
 # Mario Rossi: due incontri, saldo finale 100 - 20 - 25 = 55
 crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 10)" "Dog Dance" 20.00 "Lezione di gruppo"
-crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 3)" "Mantrailing" 25.00 "Incontro individuale"
+crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 3)" "Mantrailing" 25.00 "$NOTA_MD_MANTRAILING" true
 
 # Giulia Verdi: due incontri, saldo finale 50 - 20 - 15 = 15
 crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_VOUCHER_ID" "$(days_ago 20)" "Educazione singolo" 20.00 "Primo incontro"
@@ -269,7 +303,7 @@ psql_exec "
   INSERT INTO movimento_voucher (voucher_id, incontro_id, data_movimento, importo, descrizione)
   VALUES ('$LAURA_VOUCHER_ID', NULL, NOW() - INTERVAL '15 days', 50.00, 'Ricarica voucher');
 "
-crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "Visto stand a 3 stazioni, passo laterale"
+crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "$NOTA_MD_K9" true
 crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 1)" "Piscina" 60.00 "Idroterapia"
 # Saldo Laura: 30 (iniziale) + 50 (ricarica) - 40 - 60 = -20 (negativo, come richiesto)
 
@@ -324,4 +358,8 @@ echo ""
 echo "Credenziali account viewer creati:"
 echo "  mario.rossi / MarioRossi"
 echo "  laura.bianchi / LauraBianchi"
+echo ""
+echo "Incontri con note MD:"
+echo "  Mario Rossi / Mantrailing "
+echo "  Laura Bianchi / K9 Cross Training "
 echo ""

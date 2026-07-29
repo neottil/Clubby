@@ -69,15 +69,9 @@ CREATE TABLE IF NOT EXISTS voucher (
   socio_id        UUID NOT NULL REFERENCES socio(id) ON DELETE CASCADE,
   data_creazione  TIMESTAMP NOT NULL DEFAULT NOW(),
   saldo_iniziale  DECIMAL(10,2) NOT NULL CHECK (saldo_iniziale >= 0),
-  note            TEXT,
   created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
-
--- Retrocompatibilità: rimuove la colonna se presente da installazioni
--- precedenti a questa versione dello schema (il concetto di voucher
--- attivo/chiuso è stato rimosso: un socio ha al più un voucher, punto).
-ALTER TABLE voucher DROP COLUMN IF EXISTS attivo;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_voucher_socio ON voucher(socio_id);
 -- listVouchers() senza filtro socio (vouchers.service.ts) ordina sempre per
@@ -96,10 +90,6 @@ CREATE TABLE IF NOT EXISTS movimento_voucher (
   descrizione     TEXT,
   created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
-
--- Retrocompatibilità: aggiunge la colonna se la tabella esisteva già senza
--- (installazioni precedenti a questo schema).
-ALTER TABLE movimento_voucher ADD COLUMN IF NOT EXISTS incontro_id UUID REFERENCES incontro(id) ON DELETE CASCADE;
 
 -- Sostituisce idx_movimento_voucher e idx_movimento_data (colonne singole):
 -- listMovimenti() (vouchers.service.ts) filtra sempre per voucher_id E ordina
