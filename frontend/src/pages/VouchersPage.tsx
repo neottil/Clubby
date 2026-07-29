@@ -56,17 +56,20 @@ export default function VouchersPage() {
 
   const [vouchers, setVouchers]             = useState<Voucher[]>([]);
   const [soci, setSoci]                 = useState<Socio[]>([]);
-  const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [movimenti, setMovimenti]       = useState<Movimento[]>([]);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState('');
+
+  // Pannello aperto sotto la tabella: movimenti OPPURE ricarica, mai entrambi.
+  // Un unico stato invece di due flag indipendenti: l'esclusività è così una
+  // proprietà del tipo, non un invariante da mantenere a mano ad ogni handler.
+  const [panel, setPanel] = useState<{ voucher: Voucher; mode: 'movimenti' | 'ricarica' } | null>(null);
 
   // Form nuovo voucher
   const [showVoucherForm, setShowVoucherForm]     = useState(false);
   const [voucherForm, setVoucherForm]             = useState({ socio_id: '', saldo_iniziale: '', note: '' });
 
   // Form nuovo movimento
-  const [showMovForm, setShowMovForm]         = useState(false);
   const [movForm, setMovForm]                 = useState({ importo: '', descrizione: '' });
   const [saving, setSaving]                   = useState(false);
 
@@ -88,8 +91,8 @@ export default function VouchersPage() {
 
   useEffect(() => { load(); }, []);
 
-  const loadMovimenti = async (voucher: Voucher) => {
-    setSelectedVoucher(voucher);
+  const openMovimenti = async (voucher: Voucher) => {
+    setPanel({ voucher, mode: 'movimenti' });
     try {
       setMovimenti(await api.getMovimenti(voucher.id));
     } catch (e: any) { setError(e.message); }
@@ -103,10 +106,11 @@ export default function VouchersPage() {
     finally { setLoadingIncontro(false); }
   };
 
-  const openRicarica = async (b: Voucher) => {
-    await loadMovimenti(b);
+  // Non carica i movimenti: il pannello di ricarica non li mostra, quindi la
+  // chiamata sarebbe sprecata (vengono caricati quando si apre "Movimenti").
+  const openRicarica = (voucher: Voucher) => {
     setMovForm({ importo: '', descrizione: '' });
-    setShowMovForm(true);
+    setPanel({ voucher, mode: 'ricarica' });
   };
 
   const socioLabel = (id: string) => {
@@ -141,17 +145,16 @@ export default function VouchersPage() {
   };
 
   const saveMovimento = async () => {
-    if (!selectedVoucher) return;
+    if (panel?.mode !== 'ricarica') return;
+    const voucher = panel.voucher;
     setSaving(true);
     try {
-      await api.createMovimento(selectedVoucher.id, { ...movForm, importo: parseFloat(movForm.importo) });
-      setShowMovForm(false);
-      await loadMovimenti(selectedVoucher);
-      // Aggiorna saldo nella lista
+      await api.createMovimento(voucher.id, { ...movForm, importo: parseFloat(movForm.importo) });
+      // Aggiorna il saldo nella lista e passa ai movimenti: il pannello resta
+      // uno solo, e la ricarica appena inserita è subito visibile.
       const updatedVouchers = await api.getVouchers();
-      const updated = updatedVouchers.find(b => b.id === selectedVoucher.id) ?? selectedVoucher;
       setVouchers(updatedVouchers);
-      setSelectedVoucher(updated);
+      await openMovimenti(updatedVouchers.find(b => b.id === voucher.id) ?? voucher);
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   };
@@ -224,7 +227,7 @@ export default function VouchersPage() {
               </thead>
               <tbody>
                 {sortedVouchers.map(b => (
-                  <tr key={b.id} style={{ ...styles.tr, ...(selectedVoucher?.id === b.id ? styles.trSelected : {}) }}>
+                  <tr key={b.id} style={{ ...styles.tr, ...(panel?.voucher.id === b.id ? styles.trSelected : {}) }}>
                     <td style={styles.td}>{b.socioNome}</td>
                     <td style={styles.td}>{b.data_creazione.split('T')[0]}</td>
                     <td style={styles.td}>€ {Number(b.saldo_iniziale).toFixed(2)}</td>
@@ -232,7 +235,7 @@ export default function VouchersPage() {
                       € {Number(b.saldo_residuo).toFixed(2)}
                     </td>
                     <td style={styles.td}>
-                      <button style={styles.btnSmall} onClick={() => loadMovimenti(b)}>Movimenti</button>
+                      <button style={styles.btnSmall} onClick={() => openMovimenti(b)}>Movimenti</button>
                       {user?.isAdmin && (
                         <button style={styles.btnSmall} onClick={() => openRicarica(b)}>+ Ricarica</button>
                       )}
@@ -247,36 +250,37 @@ export default function VouchersPage() {
           )}
         </div>
 
-        {/* Dettaglio movimenti */}
-        {selectedVoucher && (
+        {/* Ricarica — pannello a sé: nessuna tabella movimenti sotto */}
+        {panel?.mode === 'ricarica' && (
           <div style={styles.movPanel}>
             <div style={styles.movHeader}>
-              <h3 style={styles.movTitle}>Movimenti - {socioLabel(selectedVoucher.socio_id)}</h3>
-              {user?.isAdmin && (
-                <button style={styles.btn} onClick={() => { setMovForm({ importo: '', descrizione: '' }); setShowMovForm(true); }}>+ Ricarica</button>
-              )}
+              <h3 style={styles.movTitle}>Ricarica - {socioLabel(panel.voucher.socio_id)}</h3>
             </div>
+            <p style={styles.hint}>
+              Per ricariche o correzioni manuali del saldo. Gli addebiti per gli incontri vengono
+              creati automaticamente e non vanno inseriti qui.
+            </p>
+            <div style={styles.field}>
+              <label style={styles.label}>Importo (€) - positivo: ricarica, negativo: correzione in addebito</label>
+              <input type='number' step='0.01' style={styles.input} value={movForm.importo} onChange={e => setMovForm({ ...movForm, importo: e.target.value })} />
+            </div>
+            <div style={styles.field}>
+              <label style={styles.label}>Descrizione</label>
+              <input style={styles.input} value={movForm.descrizione} onChange={e => setMovForm({ ...movForm, descrizione: e.target.value })} />
+            </div>
+            <div style={styles.formActions}>
+              <button style={styles.btnSecondary} onClick={() => setPanel(null)}>Annulla</button>
+              <button style={styles.btn} onClick={saveMovimento} disabled={saving}>{saving ? '...' : 'Salva'}</button>
+            </div>
+          </div>
+        )}
 
-            {showMovForm && (
-              <div style={styles.formCard}>
-                <p style={styles.hint}>
-                  Per ricariche o correzioni manuali del saldo. Gli addebiti per gli incontri vengono
-                  creati automaticamente e non vanno inseriti qui.
-                </p>
-                <div style={styles.field}>
-                  <label style={styles.label}>Importo (€) - positivo: ricarica, negativo: correzione in addebito</label>
-                  <input type='number' step='0.01' style={styles.input} value={movForm.importo} onChange={e => setMovForm({ ...movForm, importo: e.target.value })} />
-                </div>
-                <div style={styles.field}>
-                  <label style={styles.label}>Descrizione</label>
-                  <input style={styles.input} value={movForm.descrizione} onChange={e => setMovForm({ ...movForm, descrizione: e.target.value })} />
-                </div>
-                <div style={styles.formActions}>
-                  <button style={styles.btnSecondary} onClick={() => setShowMovForm(false)}>Annulla</button>
-                  <button style={styles.btn} onClick={saveMovimento} disabled={saving}>{saving ? '...' : 'Salva'}</button>
-                </div>
-              </div>
-            )}
+        {/* Dettaglio movimenti — pannello a sé: nessun bottone "+ Ricarica" */}
+        {panel?.mode === 'movimenti' && (
+          <div style={styles.movPanel}>
+            <div style={styles.movHeader}>
+              <h3 style={styles.movTitle}>Movimenti - {socioLabel(panel.voucher.socio_id)}</h3>
+            </div>
 
             <TableScroll>
               <table style={styles.table}>
@@ -293,10 +297,11 @@ export default function VouchersPage() {
                         {m.importo >= 0 ? '+' : ''}€ {Number(m.importo).toFixed(2)}
                       </td>
                       <td style={styles.td}>{m.descrizione ?? '—'}</td>
+                      {/* Movimento manuale: nessuna origine da mostrare, cella vuota */}
                       <td style={styles.td}>
-                        {m.incontro_id
-                          ? <button style={styles.badgeIncontro} onClick={() => openIncontroDetail(m.incontro_id!)}>{incontroLabel(m)}</button>
-                          : <span style={styles.badgeManuale}>Manuale</span>}
+                        {m.incontro_id && (
+                          <button style={styles.badgeIncontro} onClick={() => openIncontroDetail(m.incontro_id!)}>{incontroLabel(m)}</button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -354,7 +359,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#eff6ff', color: theme.primary, borderRadius: 999, padding: '2px 10px', fontSize: 12,
     fontWeight: 600, border: '1px solid #bfdbfe', cursor: 'pointer',
   },
-  badgeManuale: { background: '#f1f5f9', color: '#666', borderRadius: 999, padding: '2px 10px', fontSize: 12, fontWeight: 600 },
   modalOverlay: {
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
