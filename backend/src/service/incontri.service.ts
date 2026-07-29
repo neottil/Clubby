@@ -15,6 +15,7 @@ export interface Incontro {
   attivita: string | null;
   costo: number;
   note: string | null;
+  note_markdown: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +26,7 @@ export interface CreateIncontroInput {
   attivita?: string;
   costo: number;
   note?: string;
+  note_markdown?: boolean;
 }
 
 // socio_id volutamente escluso: il socio di un incontro non è modificabile
@@ -34,6 +36,7 @@ export interface UpdateIncontroInput {
   attivita?: string;
   costo?: number;
   note?: string;
+  note_markdown?: boolean;
 }
 
 function toIncontro(row: unknown): Incontro {
@@ -86,8 +89,8 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
 
   return withTransaction(async (q) => {
     const result = await q(
-      `INSERT INTO incontro (socio_id, data_incontro, attivita, costo, note)
-       VALUES (:socio_id, :data_incontro, :attivita, :costo, :note)
+      `INSERT INTO incontro (socio_id, data_incontro, attivita, costo, note, note_markdown)
+       VALUES (:socio_id, :data_incontro, :attivita, :costo, :note, :note_markdown)
        RETURNING *`,
       {
         socio_id: input.socio_id,
@@ -95,6 +98,7 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
         attivita: input.attivita ?? null,
         costo: input.costo,
         note: input.note ?? null,
+        note_markdown: input.note_markdown ?? false,
       }
     );
     const incontro = toIncontro(result.rows[0]);
@@ -145,6 +149,10 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
     if (input.note !== undefined) {
       setClauses.push('note = :note');
       params.note = input.note;
+    }
+    if (input.note_markdown !== undefined) {
+      setClauses.push('note_markdown = :note_markdown');
+      params.note_markdown = input.note_markdown;
     }
 
     if (setClauses.length === 0) throw new BadRequestError('Nessun campo da aggiornare');

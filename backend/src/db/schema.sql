@@ -41,13 +41,15 @@ CREATE TABLE IF NOT EXISTS incontro (
   attivita        VARCHAR(100),
   costo           DECIMAL(10,2) NOT NULL CHECK (costo >= 0),
   note            TEXT,
+  -- Formato di "note": false = testo semplice, true = Markdown. Serve al
+  -- frontend per sapere come renderizzare la nota nella modale di lettura,
+  -- senza doverlo indovinare dal contenuto (un testo semplice che contiene
+  -- "*" o "#" verrebbe altrimenti interpretato come sintassi Markdown).
+  -- Default false: tutte le note già presenti restano testo semplice.
+  note_markdown   BOOLEAN NOT NULL DEFAULT FALSE,
   created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
-
--- Retrocompatibilità: aggiunge la colonna se la tabella esisteva già senza
--- (installazioni precedenti a questo schema).
-ALTER TABLE incontro ADD COLUMN IF NOT EXISTS attivita VARCHAR(100);
 
 -- idx_incontro_data resta: serve alla lista globale (listIncontri() senza
 -- filtro socio, incontri.service.ts) ordinata per data su tutti i soci.

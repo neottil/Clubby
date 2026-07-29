@@ -6,6 +6,8 @@ import SocioSelect from '../components/SocioSelect';
 import ActivitySelect from '../components/ActivitySelect';
 import { useTableSort } from '../hooks/useTableSort';
 import TableScroll from '../components/TableScroll';
+import Modal from '../components/Modal';
+import { MarkdownEditor, MarkdownView } from '../components/MarkdownEditor';
 import { theme } from '../theme';
 
 interface Incontro {
@@ -15,6 +17,10 @@ interface Incontro {
   attivita: string | null;
   costo: number;
   note: string | null;
+  // Formato di "note": false = testo semplice, true = Markdown. Deciso in fase
+  // di inserimento e salvato a db, così la modale sa come renderizzare senza
+  // doverlo dedurre dal contenuto.
+  note_markdown: boolean;
   nome?: string;
   cognome?: string;
 }
@@ -22,7 +28,7 @@ interface Incontro {
 interface Socio { id: string; nome: string; cognome: string; }
 interface Voucher { id: string; socio_id: string; saldo_residuo: number; }
 
-const emptyForm = { socio_id: '', data_incontro: '', attivita: '', costo: '', note: '' };
+const emptyForm = { socio_id: '', data_incontro: '', attivita: '', costo: '', note: '', note_markdown: false };
 const activityOptions = Object.keys(config.activityCostMapping);
 
 export default function IncontriPage() {
@@ -40,6 +46,8 @@ export default function IncontriPage() {
   const [saving, setSaving]     = useState(false);
   const [filter, setFilter]           = useState('');
   const [attivitaFilter, setAttivitaFilter] = useState('');
+  // Incontro di cui è aperta la modale di lettura della nota.
+  const [notaAperta, setNotaAperta]   = useState<Incontro | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -63,7 +71,7 @@ export default function IncontriPage() {
   };
 
   const openCreate = () => { setForm({ ...emptyForm, data_incontro: new Date().toISOString().split('T')[0] }); setEditId(null); setShowForm(true); };
-  const openEdit   = (i: Incontro) => { setForm({ socio_id: i.socio_id, data_incontro: String(i.data_incontro).split('T')[0], attivita: i.attivita ?? '', costo: String(i.costo), note: i.note ?? '' }); setEditId(i.id); setShowForm(true); };
+  const openEdit   = (i: Incontro) => { setForm({ socio_id: i.socio_id, data_incontro: String(i.data_incontro).split('T')[0], attivita: i.attivita ?? '', costo: String(i.costo), note: i.note ?? '', note_markdown: !!i.note_markdown }); setEditId(i.id); setShowForm(true); };
 
   // Selezionando un'attività propone il costo di default associato
   // (VITE_ACTIVITY_SELECT_VALUES_MAPPING); resta comunque modificabile a mano.
@@ -127,7 +135,10 @@ export default function IncontriPage() {
     return enriched.filter(i => {
       if (attivitaFilter && i.attivita !== attivitaFilter) return false;
       if (!q) return true;
-      return `${i.socioNome} ${i.attivita ?? ''} ${i.note ?? ''}`.toLowerCase().includes(q);
+      // Le note sono escluse dalla ricerca: da quando possono essere Markdown
+      // il testo cercato non coincide più con quello mostrato (la nota si
+      // legge nella modale, e la sintassi "**" o "#" sporcherebbe il match).
+      return `${i.socioNome} ${i.attivita ?? ''}`.toLowerCase().includes(q);
     });
   }, [enriched, filter, attivitaFilter]);
 
@@ -150,7 +161,7 @@ export default function IncontriPage() {
         {user?.isAdmin && (
           <input
             style={styles.filterInput}
-            placeholder='Cerca per socio, attività o note...'
+            placeholder='Cerca per socio o attività...'
             value={filter}
             onChange={e => setFilter(e.target.value)}
           />
@@ -192,8 +203,30 @@ export default function IncontriPage() {
             <input type='number' step='0.01' min='0' style={styles.input} value={form.costo} onChange={e => setForm({ ...form, costo: e.target.value })} />
           </div>
           <div style={styles.field}>
-            <label style={styles.label}>Note</label>
-            <textarea style={styles.textarea} value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
+            <div style={styles.labelRow}>
+              <label style={styles.label}>Note</label>
+              <label style={styles.checkboxLabel}>
+                <input
+                  type='checkbox'
+                  checked={form.note_markdown}
+                  onChange={e => setForm({ ...form, note_markdown: e.target.checked })}
+                />
+                Markdown
+              </label>
+            </div>
+            {form.note_markdown ? (
+              // key: MDXEditor legge "markdown" solo al montaggio e poi
+              // gestisce il testo internamente. Senza una key legata
+              // all'incontro aperto, passando da "Modifica A" a "Modifica B"
+              // resterebbe visualizzata la nota di A.
+              <MarkdownEditor
+                key={editId ?? 'nuovo'}
+                markdown={form.note}
+                onChange={note => setForm(f => ({ ...f, note }))}
+              />
+            ) : (
+              <textarea style={styles.textarea} value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
+            )}
           </div>
           <div style={styles.formActions}>
             <button style={styles.btnSecondary} onClick={() => setShowForm(false)}>Annulla</button>
@@ -224,7 +257,11 @@ export default function IncontriPage() {
                 <td style={styles.td}>{String(i.data_incontro).split('T')[0]}</td>
                 <td style={styles.td}>{i.attivita ?? '—'}</td>
                 <td style={styles.td}>€ {Number(i.costo).toFixed(2)}</td>
-                <td style={styles.td}>{i.note ?? '—'}</td>
+                <td style={styles.td}>
+                  {i.note?.trim()
+                    ? <button style={styles.btnSmall} onClick={() => setNotaAperta(i)}>Visualizza</button>
+                    : '—'}
+                </td>
                 {user?.isAdmin && (
                   <td style={styles.td}>
                     <button style={styles.btnSmall} onClick={() => openEdit(i)}>Modifica</button>
@@ -238,6 +275,22 @@ export default function IncontriPage() {
       </TableScroll>
       {sorted.length === 0 && !loading && (
         <p style={styles.empty}>{filter || attivitaFilter ? 'Nessun incontro corrisponde ai filtri.' : 'Nessun incontro registrato.'}</p>
+      )}
+
+      {notaAperta && (
+        <Modal
+          title={`Note - ${socioLabel(notaAperta.socio_id)} del ${String(notaAperta.data_incontro).split('T')[0]}`}
+          width={640}
+          onClose={() => setNotaAperta(null)}
+          footer={<button style={styles.btnSecondary} onClick={() => setNotaAperta(null)}>Chiudi</button>}
+        >
+          {notaAperta.note_markdown
+            ? <MarkdownView markdown={notaAperta.note ?? ''} />
+            // Nota in testo semplice: va resa così com'è, senza interpretare
+            // la sintassi Markdown. whiteSpace pre-wrap per non perdere gli
+            // a capo, che in HTML collasserebbero.
+            : <div style={styles.notaTesto}>{notaAperta.note}</div>}
+        </Modal>
       )}
     </div>
   );
@@ -257,6 +310,9 @@ const styles: Record<string, React.CSSProperties> = {
   formTitle: { margin: '0 0 16px', fontSize: 16, fontWeight: 700 },
   field: { marginBottom: 14 },
   label: { display: 'block', fontSize: 13, color: '#555', marginBottom: 4, fontWeight: 500 },
+  labelRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  checkboxLabel: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#555', cursor: 'pointer', marginBottom: 4 },
+  notaTesto: { whiteSpace: 'pre-wrap', fontSize: 14, color: '#333', lineHeight: 1.5 },
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
   textarea: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, minHeight: 80, boxSizing: 'border-box' },
   readOnlyField: { width: '100%', padding: '8px 12px', borderRadius: 6, background: '#f1f5f9', color: '#555', fontSize: 14, boxSizing: 'border-box' },

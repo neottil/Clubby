@@ -4,6 +4,8 @@ import { createApiClient } from '../api/client';
 import SocioSelect from '../components/SocioSelect';
 import { useTableSort } from '../hooks/useTableSort';
 import TableScroll from '../components/TableScroll';
+import Modal from '../components/Modal';
+import { MarkdownView } from '../components/MarkdownEditor';
 import { theme } from '../theme';
 
 interface Voucher {
@@ -33,6 +35,7 @@ interface IncontroDetail {
   attivita: string | null;
   costo: number;
   note: string | null;
+  note_markdown: boolean;
 }
 
 interface Socio { id: string; nome: string; cognome: string; }
@@ -314,25 +317,33 @@ export default function VouchersPage() {
       </div>
 
       {(loadingIncontro || incontroDetail) && (
-        <div style={styles.modalOverlay} onClick={() => setIncontroDetail(null)}>
-          <div style={styles.modalCard} onClick={e => e.stopPropagation()}>
-            {loadingIncontro ? (
-              <p>Caricamento...</p>
-            ) : incontroDetail && (
-              <>
-                <h3 style={styles.formTitle}>Dettaglio incontro</h3>
-                <div style={styles.detailRow}><span style={styles.detailLabel}>Socio</span><span>{socioLabel(incontroDetail.socio_id)}</span></div>
-                <div style={styles.detailRow}><span style={styles.detailLabel}>Data</span><span>{formatDateIt(incontroDetail.data_incontro)}</span></div>
-                <div style={styles.detailRow}><span style={styles.detailLabel}>Attività</span><span>{incontroDetail.attivita ?? '—'}</span></div>
-                <div style={styles.detailRow}><span style={styles.detailLabel}>Costo</span><span>€ {Number(incontroDetail.costo).toFixed(2)}</span></div>
-                <div style={styles.detailRow}><span style={styles.detailLabel}>Note</span><span>{incontroDetail.note ?? '—'}</span></div>
-                <div style={styles.formActions}>
-                  <button style={styles.btnSecondary} onClick={() => setIncontroDetail(null)}>Chiudi</button>
+        <Modal
+          title={loadingIncontro ? undefined : 'Dettaglio incontro'}
+          onClose={() => setIncontroDetail(null)}
+          footer={<button style={styles.btnSecondary} onClick={() => setIncontroDetail(null)}>Chiudi</button>}
+        >
+          {loadingIncontro ? (
+            <p>Caricamento...</p>
+          ) : incontroDetail && (
+            <>
+              <div style={styles.detailRow}><span style={styles.detailLabel}>Socio</span><span>{socioLabel(incontroDetail.socio_id)}</span></div>
+              <div style={styles.detailRow}><span style={styles.detailLabel}>Data</span><span>{formatDateIt(incontroDetail.data_incontro)}</span></div>
+              <div style={styles.detailRow}><span style={styles.detailLabel}>Attività</span><span>{incontroDetail.attivita ?? '—'}</span></div>
+              <div style={styles.detailRow}><span style={styles.detailLabel}>Costo</span><span>€ {Number(incontroDetail.costo).toFixed(2)}</span></div>
+              {/* Una nota Markdown non sta sulla stessa riga dell'etichetta:
+                  va impaginata sotto, altrimenti in questa modale si vedrebbe
+                  la sintassi grezza schiacciata a destra. */}
+              {incontroDetail.note_markdown && incontroDetail.note?.trim() ? (
+                <div style={styles.detailBlock}>
+                  <span style={styles.detailLabel}>Note</span>
+                  <MarkdownView markdown={incontroDetail.note} />
                 </div>
-              </>
-            )}
-          </div>
-        </div>
+              ) : (
+                <div style={styles.detailRow}><span style={styles.detailLabel}>Note</span><span>{incontroDetail.note ?? '—'}</span></div>
+              )}
+            </>
+          )}
+        </Modal>
       )}
     </div>
   );
@@ -359,12 +370,8 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#eff6ff', color: theme.primary, borderRadius: 999, padding: '2px 10px', fontSize: 12,
     fontWeight: 600, border: '1px solid #bfdbfe', cursor: 'pointer',
   },
-  modalOverlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-  },
-  modalCard: { background: '#fff', borderRadius: 12, padding: 24, width: 360, boxShadow: '0 8px 32px rgba(0,0,0,0.2)' },
   detailRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f1f5f9', fontSize: 14 },
+  detailBlock: { display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 0', fontSize: 14 },
   detailLabel: { color: '#666', fontWeight: 500 },
   filterRow: { display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' },
   filterInput: { flex: 1, minWidth: 240, padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },

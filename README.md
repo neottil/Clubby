@@ -5,7 +5,7 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 ## Funzionalità
 
 - Gestione soci
-- Gestione incontri
+- Gestione incontri, con note in testo semplice o in Markdown
 - Voucher prepagati
 
 ## Architettura
@@ -194,7 +194,7 @@ ClubManager/
 │   │   ├── auth/           # AuthContext (Keycloak OIDC + PKCE)
 │   │   ├── api/            # API client factory
 │   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, AdminPage, InfoPage, LoginPage
-│   │   ├── components/     # Layout (navbar a hamburger), TableScroll, SearchSelect
+│   │   ├── components/     # Layout (navbar a hamburger), TableScroll, SearchSelect, Modal, MarkdownEditor
 │   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID) + fetch /version.json
 │   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-frontend.yml
 │   ├── Dockerfile
