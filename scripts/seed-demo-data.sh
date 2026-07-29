@@ -266,7 +266,7 @@ crea_incontro_con_addebito() {
   ")
   psql_exec "
     INSERT INTO movimento_voucher (voucher_id, incontro_id, data_movimento, importo, descrizione)
-    VALUES ('$voucher_id', '$incontro_id', '$data', -$costo, 'Addebito incontro: $attivita');
+    VALUES ('$voucher_id', '$incontro_id', '$data', -$costo, 'Incontro: $attivita');
   "
 }
 

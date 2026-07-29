@@ -14,6 +14,17 @@ import pg from 'pg';
 // "YYYY-MM-DD" esatta memorizzata in Postgres, senza alcuna conversione.
 pg.types.setTypeParser(1082, (val: string) => val);
 
+// Stesso problema, e più insidioso, per TIMESTAMP WITHOUT TIME ZONE (OID 1114):
+// il valore memorizzato non ha fuso orario, ma pg costruisce comunque un Date
+// interpretandolo nel fuso del processo Node. "2026-07-28 00:00:00" diventa
+// così "2026-07-27T22:00:00.000Z" in JSON con TZ=Europe/Rome — un giorno
+// indietro. Colpiva esattamente i movimenti generati da un incontro, che sono
+// gli unici salvati a mezzanotte esatta (prendono la data dell'incontro): la
+// lista movimenti mostrava l'addebito il giorno prima dell'incontro.
+// Si restituisce la stringa così com'è, con la sola "T" al posto dello spazio
+// per renderla una data ISO locale (il frontend fa split('T')).
+pg.types.setTypeParser(1114, (val: string) => val.replace(' ', 'T'));
+
 const pool = new pg.Pool({
   host:     process.env.DB_HOST ?? 'localhost',
   port:     parseInt(process.env.DB_PORT ?? '5432'),

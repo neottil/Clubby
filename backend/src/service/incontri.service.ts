@@ -6,14 +6,14 @@ import {
   createMovimento,
   getMovimentoByIncontroId,
   updateMovimentoImporto,
-  updateMovimentoData,
+  updateMovimentoDaIncontro,
 } from './vouchers.service.js';
 
 export interface Incontro {
   id: string;
   socio_id: string;
   data_incontro: string;
-  attivita: string | null;
+  attivita: string;
   costo: number;
   note: string | null;
   note_markdown: boolean;
@@ -24,7 +24,7 @@ export interface Incontro {
 export interface CreateIncontroInput {
   socio_id: string;
   data_incontro: string;
-  attivita?: string;
+  attivita: string;
   costo: number;
   note?: string;
   note_markdown?: boolean;
@@ -42,6 +42,17 @@ export interface UpdateIncontroInput {
 
 function toIncontro(row: unknown): Incontro {
   return row as Incontro;
+}
+
+/**
+ * Descrizione del movimento di addebito generato da un incontro.
+ *
+ * Unico punto in cui viene composta: la usano sia la creazione sia la modifica
+ * dell'incontro, che devono produrre la stessa stringa (altrimenti rinominare
+ * l'attività lascerebbe descrizioni di formato diverso nella stessa lista).
+ */
+function descrizioneAddebito(attivita: string): string {
+  return `Incontro: ${attivita}`;
 }
 
 export async function listIncontri(socioId?: string): Promise<Incontro[]> {
@@ -82,6 +93,10 @@ export async function getIncontroById(id: string, q: QueryFn = query): Promise<I
 export async function createIncontro(input: CreateIncontroInput): Promise<Incontro> {
   if (!input.socio_id) throw new BadRequestError('socio_id è obbligatorio');
   if (!input.data_incontro) throw new BadRequestError('data_incontro è obbligatoria');
+  // Controllo esplicito e non lasciato al vincolo NOT NULL della colonna: una
+  // stringa vuota lo soddisfarebbe comunque, e l'errore di Postgres tornerebbe
+  // al client come 500 anziché come 400 con un messaggio leggibile.
+  if (!input.attivita?.trim()) throw new BadRequestError('attivita è obbligatoria');
   if (input.costo === undefined || input.costo < 0) {
     throw new BadRequestError('costo deve essere >= 0');
   }
@@ -96,7 +111,7 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
       {
         socio_id: input.socio_id,
         data_incontro: input.data_incontro,
-        attivita: input.attivita ?? null,
+        attivita: input.attivita.trim(),
         costo: input.costo,
         note: input.note ?? null,
         note_markdown: input.note_markdown ?? false,
@@ -110,7 +125,7 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
         voucher.id,
         {
           importo: -Number(input.costo),
-          descrizione: `Incontro del ${input.data_incontro}`,
+          descrizione: descrizioneAddebito(input.attivita),
           incontro_id: incontro.id,
           data_movimento: input.data_incontro,
         },
@@ -140,8 +155,9 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
       params.data_incontro = input.data_incontro;
     }
     if (input.attivita !== undefined) {
+      if (!input.attivita.trim()) throw new BadRequestError('attivita è obbligatoria');
       setClauses.push('attivita = :attivita');
-      params.attivita = input.attivita;
+      params.attivita = input.attivita.trim();
     }
     if (input.costo !== undefined) {
       if (input.costo < 0) throw new BadRequestError('costo deve essere >= 0');
@@ -165,16 +181,27 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
     );
     const incontro = toIncontro(result.rows[0]);
 
-    // Il movimento collegato segue l'incontro sia nell'importo sia nella data:
-    // una sola lettura, poi solo i campi effettivamente cambiati.
-    if (input.costo !== undefined || input.data_incontro !== undefined) {
+    // Il movimento collegato segue l'incontro in importo, data e descrizione:
+    // una sola lettura, poi solo i campi effettivamente cambiati. Data e
+    // descrizione sono presi dalla riga appena aggiornata e non da "input",
+    // che è parziale: se cambia solo l'attività, la data da riscrivere è
+    // comunque quella già memorizzata sull'incontro.
+    const derivatiCambiati = input.data_incontro !== undefined || input.attivita !== undefined;
+    if (input.costo !== undefined || derivatiCambiati) {
       const movimento = await getMovimentoByIncontroId(id, q);
       if (movimento) {
         if (input.costo !== undefined) {
           await updateMovimentoImporto(movimento.id, -Number(input.costo), q);
         }
-        if (input.data_incontro !== undefined) {
-          await updateMovimentoData(movimento.id, input.data_incontro, q);
+        if (derivatiCambiati) {
+          await updateMovimentoDaIncontro(
+            movimento.id,
+            {
+              data_movimento: incontro.data_incontro,
+              descrizione: descrizioneAddebito(incontro.attivita),
+            },
+            q
+          );
         }
       }
     }

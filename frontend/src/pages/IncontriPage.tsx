@@ -14,7 +14,7 @@ interface Incontro {
   id: string;
   socio_id: string;
   data_incontro: string;
-  attivita: string | null;
+  attivita: string;
   costo: number;
   note: string | null;
   // Formato di "note": false = testo semplice, true = Markdown. Deciso in fase
@@ -71,7 +71,7 @@ export default function IncontriPage() {
   };
 
   const openCreate = () => { setForm({ ...emptyForm, data_incontro: new Date().toISOString().split('T')[0] }); setEditId(null); setShowForm(true); };
-  const openEdit   = (i: Incontro) => { setForm({ socio_id: i.socio_id, data_incontro: String(i.data_incontro).split('T')[0], attivita: i.attivita ?? '', costo: String(i.costo), note: i.note ?? '', note_markdown: !!i.note_markdown }); setEditId(i.id); setShowForm(true); };
+  const openEdit   = (i: Incontro) => { setForm({ socio_id: i.socio_id, data_incontro: String(i.data_incontro).split('T')[0], attivita: i.attivita, costo: String(i.costo), note: i.note ?? '', note_markdown: !!i.note_markdown }); setEditId(i.id); setShowForm(true); };
 
   // Selezionando un'attività propone il costo di default associato
   // (VITE_ACTIVITY_SELECT_VALUES_MAPPING); resta comunque modificabile a mano.
@@ -126,7 +126,7 @@ export default function IncontriPage() {
   })), [incontri, soci]);
 
   const attivitaPresenti = useMemo(
-    () => Array.from(new Set(enriched.map(i => i.attivita).filter((a): a is string => !!a))).sort(),
+    () => Array.from(new Set(enriched.map(i => i.attivita))).sort(),
     [enriched]
   );
 
@@ -138,7 +138,7 @@ export default function IncontriPage() {
       // Le note sono escluse dalla ricerca: da quando possono essere Markdown
       // il testo cercato non coincide più con quello mostrato (la nota si
       // legge nella modale, e la sintassi "**" o "#" sporcherebbe il match).
-      return `${i.socioNome} ${i.attivita ?? ''}`.toLowerCase().includes(q);
+      return `${i.socioNome} ${i.attivita}`.toLowerCase().includes(q);
     });
   }, [enriched, filter, attivitaFilter]);
 
@@ -195,7 +195,7 @@ export default function IncontriPage() {
             <input type='date' style={styles.input} value={form.data_incontro} onChange={e => setForm({ ...form, data_incontro: e.target.value })} />
           </div>
           <div style={styles.field}>
-            <label style={styles.label}>Attività</label>
+            <label style={styles.label}>Attività *</label>
             <ActivitySelect options={activityOptions} value={form.attivita} onChange={onActivityChange} />
           </div>
           <div style={styles.field}>
@@ -230,7 +230,11 @@ export default function IncontriPage() {
           </div>
           <div style={styles.formActions}>
             <button style={styles.btnSecondary} onClick={() => setShowForm(false)}>Annulla</button>
-            <button style={styles.btn} onClick={save} disabled={saving}>{saving ? 'Salvataggio...' : 'Salva'}</button>
+            {/* L'attività è obbligatoria (NOT NULL a db, validata anche dal
+                backend): il bottone resta disabilitato finché non è scelta,
+                così l'utente lo vede prima di provare a salvare invece di
+                ricevere un errore dopo. */}
+            <button style={styles.btn} onClick={save} disabled={saving || !form.attivita}>{saving ? 'Salvataggio...' : 'Salva'}</button>
           </div>
         </div>
       )}
@@ -255,7 +259,7 @@ export default function IncontriPage() {
               <tr key={i.id} style={styles.tr}>
                 <td style={styles.td}>{i.socioNome}</td>
                 <td style={styles.td}>{String(i.data_incontro).split('T')[0]}</td>
-                <td style={styles.td}>{i.attivita ?? '—'}</td>
+                <td style={styles.td}>{i.attivita}</td>
                 <td style={styles.td}>€ {Number(i.costo).toFixed(2)}</td>
                 <td style={styles.td}>
                   {i.note?.trim()

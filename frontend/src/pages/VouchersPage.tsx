@@ -24,15 +24,13 @@ interface Movimento {
   data_movimento: string;
   importo: number;
   descrizione: string | null;
-  incontro_attivita?: string | null;
-  incontro_data?: string | null;
 }
 
 interface IncontroDetail {
   id: string;
   socio_id: string;
   data_incontro: string;
-  attivita: string | null;
+  attivita: string;
   costo: number;
   note: string | null;
   note_markdown: boolean;
@@ -46,12 +44,20 @@ const formatDateIt = (iso: string) => {
   return `${d}-${m}-${y}`;
 };
 
-// Solo l'attività: la colonna si chiama già "Origine" e l'unica origine
-// possibile è un incontro, mentre la data del movimento coincide ormai con
-// quella dell'incontro (vedi incontri.service.ts) ed è già nella prima
-// colonna. Un'etichetta "Incontro-Mantrailing-20-07-2026" andava a capo su tre
-// righe dentro il chip su schermo stretto, senza aggiungere nulla.
-const incontroLabel = (m: Movimento) => m.incontro_attivita || 'Incontro';
+// Lente d'ingrandimento: la colonna non mostra più un testo ma l'azione che
+// apre il dettaglio dell'incontro. L'attività, unico dato che il vecchio chip
+// riportava, è ormai già scritta nella descrizione del movimento
+// ("Incontro: {attivita}", vedi incontri.service.ts) e ripeterla accanto
+// costava larghezza — critica su schermo stretto — senza aggiungere nulla.
+// SVG inline e non un file: è l'unica icona del progetto, e "currentColor" le
+// fa seguire il colore del bottone senza altra configurazione.
+const IconLente = () => (
+  <svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor'
+       strokeWidth='2' strokeLinecap='round' aria-hidden='true'>
+    <circle cx='11' cy='11' r='7' />
+    <line x1='16.5' y1='16.5' x2='21' y2='21' />
+  </svg>
+);
 
 export default function VouchersPage() {
   const { token, user } = useAuth();
@@ -294,7 +300,7 @@ export default function VouchersPage() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    {['Data', 'Importo', 'Descrizione', 'Origine'].map(h => <th key={h} style={{ ...styles.th, ...cellPad.th }}>{h}</th>)}
+                    {['Data', 'Importo', 'Descrizione', 'Dettagli'].map(h => <th key={h} style={{ ...styles.th, ...cellPad.th }}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -305,20 +311,16 @@ export default function VouchersPage() {
                         {m.importo >= 0 ? '+' : ''}€ {Number(m.importo).toFixed(2)}
                       </td>
                       <td style={{ ...styles.td, ...cellPad.td }}>{m.descrizione ?? '—'}</td>
-                      {/* Movimento manuale: nessuna origine da mostrare, cella vuota */}
+                      {/* Movimento manuale: nessun incontro da aprire, cella vuota */}
                       <td style={{ ...styles.td, ...cellPad.td }}>
                         {m.incontro_id && (
                           <button
-                            // Su schermo stretto un nome di attività lungo
-                            // allargherebbe la colonna (il testo non va a
-                            // capo) mandando la tabella in scroll: qui viene
-                            // troncato, il nome per esteso resta nella modale
-                            // che si apre al tocco.
-                            style={{ ...styles.badgeIncontro, ...(isMobile ? { maxWidth: 110 } : {}) }}
-                            title={incontroLabel(m)}
+                            style={styles.btnDettaglio}
+                            title='Dettaglio incontro'
+                            aria-label='Dettaglio incontro'
                             onClick={() => openIncontroDetail(m.incontro_id!)}
                           >
-                            {incontroLabel(m)}
+                            <IconLente />
                           </button>
                         )}
                       </td>
@@ -344,7 +346,7 @@ export default function VouchersPage() {
             <>
               <div style={styles.detailRow}><span style={styles.detailLabel}>Socio</span><span>{socioLabel(incontroDetail.socio_id)}</span></div>
               <div style={styles.detailRow}><span style={styles.detailLabel}>Data</span><span>{formatDateIt(incontroDetail.data_incontro)}</span></div>
-              <div style={styles.detailRow}><span style={styles.detailLabel}>Attività</span><span>{incontroDetail.attivita ?? '—'}</span></div>
+              <div style={styles.detailRow}><span style={styles.detailLabel}>Attività</span><span>{incontroDetail.attivita}</span></div>
               <div style={styles.detailRow}><span style={styles.detailLabel}>Costo</span><span>€ {Number(incontroDetail.costo).toFixed(2)}</span></div>
               {/* Una nota Markdown non sta sulla stessa riga dell'etichetta:
                   va impaginata sotto, altrimenti in questa modale si vedrebbe
@@ -381,13 +383,14 @@ const styles: Record<string, React.CSSProperties> = {
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
   formActions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 },
   hint: { fontSize: 13, color: '#666', marginTop: 0, marginBottom: 16 },
-  badgeIncontro: {
-    background: '#eff6ff', color: theme.primary, borderRadius: 999, padding: '6px 12px', fontSize: 12,
-    fontWeight: 600, border: '1px solid #bfdbfe', cursor: 'pointer',
-    // Una "pillola" ha senso solo su una riga: andando a capo, il raggio 999
-    // la deforma. Il testo è ora corto, ma un nome di attività lungo non deve
-    // comunque spezzarsi — al massimo allarga la colonna.
-    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  // Bottone a icona: larghezza fissa e indipendente dal contenuto della riga,
+  // così la colonna non si allarga mai. 32px di lato è la dimensione minima
+  // consigliata per un bersaglio tattile su questa densità di tabella.
+  btnDettaglio: {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: 32, height: 32, padding: 0,
+    background: '#eff6ff', color: theme.primary, border: '1px solid #bfdbfe',
+    borderRadius: 6, cursor: 'pointer',
   },
   detailRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f1f5f9', fontSize: 14 },
   detailBlock: { display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 0', fontSize: 14 },

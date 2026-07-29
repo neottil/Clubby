@@ -38,7 +38,11 @@ CREATE TABLE IF NOT EXISTS incontro (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   socio_id        UUID NOT NULL REFERENCES socio(id) ON DELETE CASCADE,
   data_incontro   DATE NOT NULL,
-  attivita        VARCHAR(100),
+  -- Obbligatoria: identifica l'incontro nelle liste e finisce nella
+  -- descrizione del movimento di addebito che ne deriva
+  -- ("Incontro: {attivita}", vedi incontri.service.ts). Un incontro senza
+  -- attività produceva una riga di movimento indistinguibile dalle altre.
+  attivita        VARCHAR(100) NOT NULL,
   costo           DECIMAL(10,2) NOT NULL CHECK (costo >= 0),
   note            TEXT,
   -- Formato di "note": false = testo semplice, true = Markdown. Serve al

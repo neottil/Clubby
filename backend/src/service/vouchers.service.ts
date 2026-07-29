@@ -20,10 +20,6 @@ export interface MovimentoVoucher {
   importo: number;
   descrizione: string | null;
   created_at: string;
-  // Presenti solo nella risposta di listMovimenti (JOIN con incontro),
-  // per costruire l'etichetta "Incontro-{attività}-{data}" in UI.
-  incontro_attivita?: string | null;
-  incontro_data?: string | null;
 }
 
 export interface CreateVoucherInput {
@@ -144,11 +140,12 @@ export async function listMovimenti(voucherId: string): Promise<MovimentoVoucher
   await getVoucherById(voucherId);
 
   const result = await query(
-    `SELECT m.*, i.attivita AS incontro_attivita, i.data_incontro AS incontro_data
-     FROM movimento_voucher m
-     LEFT JOIN incontro i ON i.id = m.incontro_id
-     WHERE m.voucher_id = :voucherId
-     ORDER BY m.data_movimento DESC`,
+    // Nessuna JOIN con incontro: l'attività è già dentro descrizione
+    // ("Incontro: {attivita}", scritta da incontri.service.ts) e il dettaglio
+    // completo si carica a parte quando l'utente apre la riga (GET /incontri/:id).
+    `SELECT * FROM movimento_voucher
+     WHERE voucher_id = :voucherId
+     ORDER BY data_movimento DESC`,
     { voucherId }
   );
   return result.rows.map(toMovimento);
@@ -242,18 +239,22 @@ export async function updateMovimentoImporto(
 }
 
 /**
- * Riallinea la data di un movimento a quella dell'incontro che lo ha generato,
- * quando l'incontro viene spostato di data. Senza questo, modificare la data di
- * un incontro lascerebbe l'addebito alla data originale e la lista movimenti
- * tornerebbe incoerente con la lista incontri.
+ * Riallinea data e descrizione di un movimento all'incontro che lo ha
+ * generato, dopo che l'incontro è stato modificato. Sono i due campi che
+ * derivano dall'incontro invece di essere inseriti dall'admin: senza questo,
+ * spostare di data o rinominare l'attività lascerebbe il movimento fermo ai
+ * valori precedenti, e la lista movimenti racconterebbe una storia diversa da
+ * quella degli incontri.
  */
-export async function updateMovimentoData(
+export async function updateMovimentoDaIncontro(
   id: string,
-  nuovaData: string,
+  input: { data_movimento: string; descrizione: string },
   q: QueryFn = query
 ): Promise<void> {
   await q(
-    `UPDATE movimento_voucher SET data_movimento = CAST(:nuovaData AS TIMESTAMP) WHERE id = :id`,
-    { id, nuovaData }
+    `UPDATE movimento_voucher
+     SET data_movimento = CAST(:dataMovimento AS TIMESTAMP), descrizione = :descrizione
+     WHERE id = :id`,
+    { id, dataMovimento: input.data_movimento, descrizione: input.descrizione }
   );
 }
