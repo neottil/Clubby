@@ -1,11 +1,11 @@
 meta {
-  name: Crea buono (admin)
+  name: Crea voucher (admin)
   type: http
   seq: 3
 }
 
 post {
-  url: {{base_url}}/api/buoni
+  url: {{base_url}}/api/voucher
   body: json
   auth: bearer
 }
@@ -18,19 +18,19 @@ body:json {
   {
     "socio_id": "{{socio_id}}",
     "saldo_iniziale": 100.00,
-    "note": "Buono prepagato 10 sedute"
+    "note": "Voucher prepagato 10 sedute"
   }
 }
 
 script:post-response {
   const data = res.getBody();
   if (data.id) {
-    bru.setVar("buono_id", data.id);
+    bru.setVar("voucher_id", data.id);
   }
 }
 
 docs {
-  Solo admin. Crea un buono prepagato per il socio.
+  Solo admin. Crea un voucher prepagato per il socio.
   saldo_iniziale deve essere >= 0.
-  Salva automaticamente buono_id per le richieste successive.
+  Salva automaticamente voucher_id per le richieste successive.
 }

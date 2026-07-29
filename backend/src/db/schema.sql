@@ -60,9 +60,9 @@ DROP INDEX IF EXISTS idx_incontro_socio;
 CREATE INDEX IF NOT EXISTS idx_incontro_socio_data ON incontro(socio_id, data_incontro DESC);
 
 -- ============================================================
--- Tabella: buono
+-- Tabella: voucher
 -- ============================================================
-CREATE TABLE IF NOT EXISTS buono (
+CREATE TABLE IF NOT EXISTS voucher (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   socio_id        UUID NOT NULL REFERENCES socio(id) ON DELETE CASCADE,
   data_creazione  TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -75,19 +75,19 @@ CREATE TABLE IF NOT EXISTS buono (
 -- Retrocompatibilità: rimuove la colonna se presente da installazioni
 -- precedenti a questa versione dello schema (il concetto di voucher
 -- attivo/chiuso è stato rimosso: un socio ha al più un voucher, punto).
-ALTER TABLE buono DROP COLUMN IF EXISTS attivo;
+ALTER TABLE voucher DROP COLUMN IF EXISTS attivo;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_buono_socio ON buono(socio_id);
--- listBuoni() senza filtro socio (buoni.service.ts) ordina sempre per
--- data_creazione DESC su tutti i buoni.
-CREATE INDEX IF NOT EXISTS idx_buono_data ON buono(data_creazione DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_voucher_socio ON voucher(socio_id);
+-- listVouchers() senza filtro socio (vouchers.service.ts) ordina sempre per
+-- data_creazione DESC su tutti i vouchers.
+CREATE INDEX IF NOT EXISTS idx_voucher_data ON voucher(data_creazione DESC);
 
 -- ============================================================
--- Tabella: movimento_buono
+-- Tabella: movimento_voucher
 -- ============================================================
-CREATE TABLE IF NOT EXISTS movimento_buono (
+CREATE TABLE IF NOT EXISTS movimento_voucher (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  buono_id        UUID NOT NULL REFERENCES buono(id) ON DELETE CASCADE,
+  voucher_id      UUID NOT NULL REFERENCES voucher(id) ON DELETE CASCADE,
   incontro_id     UUID REFERENCES incontro(id) ON DELETE CASCADE,
   data_movimento  TIMESTAMP NOT NULL DEFAULT NOW(),
   importo         DECIMAL(10,2) NOT NULL,  -- positivo = ricarica, negativo = addebito
@@ -97,18 +97,18 @@ CREATE TABLE IF NOT EXISTS movimento_buono (
 
 -- Retrocompatibilità: aggiunge la colonna se la tabella esisteva già senza
 -- (installazioni precedenti a questo schema).
-ALTER TABLE movimento_buono ADD COLUMN IF NOT EXISTS incontro_id UUID REFERENCES incontro(id) ON DELETE CASCADE;
+ALTER TABLE movimento_voucher ADD COLUMN IF NOT EXISTS incontro_id UUID REFERENCES incontro(id) ON DELETE CASCADE;
 
--- Sostituisce idx_movimento_buono e idx_movimento_data (colonne singole):
--- listMovimenti() (buoni.service.ts) filtra sempre per buono_id E ordina per
--- data_movimento DESC nella stessa query — idx_movimento_data da solo non
--- veniva mai usato (nessuna query ordina per data senza filtrare per buono),
--- e idx_movimento_buono è ridondante col prefisso di questo indice composito.
-DROP INDEX IF EXISTS idx_movimento_buono;
+-- Sostituisce idx_movimento_voucher e idx_movimento_data (colonne singole):
+-- listMovimenti() (vouchers.service.ts) filtra sempre per voucher_id E ordina
+-- per data_movimento DESC nella stessa query — idx_movimento_data da solo non
+-- veniva mai usato (nessuna query ordina per data senza filtrare per voucher),
+-- e idx_movimento_voucher è ridondante col prefisso di questo indice composito.
+DROP INDEX IF EXISTS idx_movimento_voucher;
 DROP INDEX IF EXISTS idx_movimento_data;
-CREATE INDEX IF NOT EXISTS idx_movimento_buono_data ON movimento_buono(buono_id, data_movimento DESC);
+CREATE INDEX IF NOT EXISTS idx_movimento_voucher_data ON movimento_voucher(voucher_id, data_movimento DESC);
 -- Un incontro genera al più un movimento (creato/aggiornato/rimosso in modo atomico insieme all'incontro)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_movimento_incontro_unique ON movimento_buono(incontro_id) WHERE incontro_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movimento_incontro_unique ON movimento_voucher(incontro_id) WHERE incontro_id IS NOT NULL;
 
 -- ============================================================
 -- Trigger: aggiorna updated_at automaticamente
@@ -135,9 +135,9 @@ BEGIN
       FOR EACH ROW EXECUTE FUNCTION update_updated_at();
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_buono_updated_at') THEN
-    CREATE TRIGGER trg_buono_updated_at
-      BEFORE UPDATE ON buono
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_voucher_updated_at') THEN
+    CREATE TRIGGER trg_voucher_updated_at
+      BEFORE UPDATE ON voucher
       FOR EACH ROW EXECUTE FUNCTION update_updated_at();
   END IF;
 END;

@@ -77,13 +77,13 @@ export function createApiClient(token: string | null) {
     updateIncontro: (id: string, body: any) => request<any>(`/api/incontri/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
     deleteIncontro: (id: string)          => request<void>(`/api/incontri/${id}`, { method: 'DELETE' }, token),
 
-    // Buoni
-    getBuoni:       (socioId?: string)    => request<any[]>(`/api/buoni${socioId ? `?socio_id=${socioId}` : ''}`, {}, token),
-    createBuono:    (body: any)           => request<any>('/api/buoni', { method: 'POST', body: JSON.stringify(body) }, token),
+    // Vouchers
+    getVouchers:       (socioId?: string)    => request<any[]>(`/api/voucher${socioId ? `?socio_id=${socioId}` : ''}`, {}, token),
+    createVoucher:    (body: any)           => request<any>('/api/voucher', { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Movimenti
-    getMovimenti:   (buonoId: string)     => request<any[]>(`/api/buoni/${buonoId}/movimenti`, {}, token),
-    createMovimento:(buonoId: string, body: any) => request<any>(`/api/buoni/${buonoId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
+    getMovimenti:   (voucherId: string)     => request<any[]>(`/api/voucher/${voucherId}/movimenti`, {}, token),
+    createMovimento:(voucherId: string, body: any) => request<any>(`/api/voucher/${voucherId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Admin
     getAdminUsers:  ()                    => request<any[]>('/api/admin/users', {}, token),

@@ -5,7 +5,7 @@ import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import SociPage from './pages/SociPage';
 import IncontriPage from './pages/IncontriPage';
-import BuoniPage from './pages/BuoniPage';
+import VouchersPage from './pages/VouchersPage';
 import AdminPage from './pages/AdminPage';
 import InfoPage from './pages/InfoPage';
 
@@ -29,7 +29,7 @@ function ProtectedRoutes() {
   if (!user)     return <Navigate to='/login' replace />;
 
   // Voucher è la home per tutti: sia admin che viewer atterrano lì dopo il login.
-  const defaultRoute = '/buoni';
+  const defaultRoute = '/voucher';
 
   return (
     <Layout>
@@ -37,7 +37,7 @@ function ProtectedRoutes() {
         <Route path='/'         element={<Navigate to={defaultRoute} replace />} />
         <Route path='/soci'     element={<SociPage />} />
         <Route path='/incontri' element={<IncontriPage />} />
-        <Route path='/buoni'    element={<BuoniPage />} />
+        <Route path='/voucher'  element={<VouchersPage />} />
         <Route path='/admin'    element={<AdminPage />} />
         <Route path='/info'     element={<InfoPage />} />
         <Route path='*'         element={<Navigate to={defaultRoute} replace />} />

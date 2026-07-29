@@ -6,7 +6,7 @@ import { useTableSort } from '../hooks/useTableSort';
 import TableScroll from '../components/TableScroll';
 import { theme } from '../theme';
 
-interface Buono {
+interface Voucher {
   id: string;
   socio_id: string;
   data_creazione: string;
@@ -17,7 +17,7 @@ interface Buono {
 
 interface Movimento {
   id: string;
-  buono_id: string;
+  voucher_id: string;
   incontro_id: string | null;
   data_movimento: string;
   importo: number;
@@ -50,20 +50,20 @@ const incontroLabel = (m: Movimento) => {
   return parts.join('-');
 };
 
-export default function BuoniPage() {
+export default function VouchersPage() {
   const { token, user } = useAuth();
   const api = createApiClient(token);
 
-  const [buoni, setBuoni]               = useState<Buono[]>([]);
+  const [vouchers, setVouchers]             = useState<Voucher[]>([]);
   const [soci, setSoci]                 = useState<Socio[]>([]);
-  const [selectedBuono, setSelectedBuono] = useState<Buono | null>(null);
+  const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [movimenti, setMovimenti]       = useState<Movimento[]>([]);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState('');
 
-  // Form nuovo buono
-  const [showBuonoForm, setShowBuonoForm]     = useState(false);
-  const [buonoForm, setBuonoForm]             = useState({ socio_id: '', saldo_iniziale: '', note: '' });
+  // Form nuovo voucher
+  const [showVoucherForm, setShowVoucherForm]     = useState(false);
+  const [voucherForm, setVoucherForm]             = useState({ socio_id: '', saldo_iniziale: '', note: '' });
 
   // Form nuovo movimento
   const [showMovForm, setShowMovForm]         = useState(false);
@@ -79,8 +79,8 @@ export default function BuoniPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [b, s] = await Promise.all([api.getBuoni(), api.getSoci()]);
-      setBuoni(b);
+      const [b, s] = await Promise.all([api.getVouchers(), api.getSoci()]);
+      setVouchers(b);
       setSoci(s);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
@@ -88,10 +88,10 @@ export default function BuoniPage() {
 
   useEffect(() => { load(); }, []);
 
-  const loadMovimenti = async (buono: Buono) => {
-    setSelectedBuono(buono);
+  const loadMovimenti = async (voucher: Voucher) => {
+    setSelectedVoucher(voucher);
     try {
-      setMovimenti(await api.getMovimenti(buono.id));
+      setMovimenti(await api.getMovimenti(voucher.id));
     } catch (e: any) { setError(e.message); }
   };
 
@@ -103,7 +103,7 @@ export default function BuoniPage() {
     finally { setLoadingIncontro(false); }
   };
 
-  const openRicarica = async (b: Buono) => {
+  const openRicarica = async (b: Voucher) => {
     await loadMovimenti(b);
     setMovForm({ importo: '', descrizione: '' });
     setShowMovForm(true);
@@ -114,44 +114,44 @@ export default function BuoniPage() {
     return s ? `${s.cognome} ${s.nome}` : id;
   };
 
-  const enrichedBuoni = useMemo(
-    () => buoni.map(b => ({ ...b, socioNome: socioLabel(b.socio_id) })),
-    [buoni, soci]
+  const enrichedVouchers = useMemo(
+    () => vouchers.map(b => ({ ...b, socioNome: socioLabel(b.socio_id) })),
+    [vouchers, soci]
   );
 
-  const filteredBuoni = useMemo(() => {
+  const filteredVouchers = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return enrichedBuoni;
-    return enrichedBuoni.filter(b => b.socioNome.toLowerCase().includes(q));
-  }, [enrichedBuoni, filter]);
+    if (!q) return enrichedVouchers;
+    return enrichedVouchers.filter(b => b.socioNome.toLowerCase().includes(q));
+  }, [enrichedVouchers, filter]);
 
-  const { sorted: sortedBuoni, toggleSort, sortIndicator } = useTableSort(filteredBuoni, {
+  const { sorted: sortedVouchers, toggleSort, sortIndicator } = useTableSort(filteredVouchers, {
     initialKey: 'socioNome',
     numericKeys: ['saldo_iniziale', 'saldo_residuo'],
   });
 
-  const saveBuono = async () => {
+  const saveVoucher = async () => {
     setSaving(true);
     try {
-      await api.createBuono({ ...buonoForm, saldo_iniziale: parseFloat(buonoForm.saldo_iniziale) });
-      setShowBuonoForm(false);
+      await api.createVoucher({ ...voucherForm, saldo_iniziale: parseFloat(voucherForm.saldo_iniziale) });
+      setShowVoucherForm(false);
       load();
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   };
 
   const saveMovimento = async () => {
-    if (!selectedBuono) return;
+    if (!selectedVoucher) return;
     setSaving(true);
     try {
-      await api.createMovimento(selectedBuono.id, { ...movForm, importo: parseFloat(movForm.importo) });
+      await api.createMovimento(selectedVoucher.id, { ...movForm, importo: parseFloat(movForm.importo) });
       setShowMovForm(false);
-      await loadMovimenti(selectedBuono);
+      await loadMovimenti(selectedVoucher);
       // Aggiorna saldo nella lista
-      const updatedBuoni = await api.getBuoni();
-      const updated = updatedBuoni.find(b => b.id === selectedBuono.id) ?? selectedBuono;
-      setBuoni(updatedBuoni);
-      setSelectedBuono(updated);
+      const updatedVouchers = await api.getVouchers();
+      const updated = updatedVouchers.find(b => b.id === selectedVoucher.id) ?? selectedVoucher;
+      setVouchers(updatedVouchers);
+      setSelectedVoucher(updated);
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   };
@@ -162,33 +162,33 @@ export default function BuoniPage() {
     <div style={styles.page}>
       <div style={styles.header}>
         <h2 style={styles.title}>Voucher prepagati</h2>
-        {user?.isAdmin && <button style={styles.btn} onClick={() => { setBuonoForm({ socio_id: '', saldo_iniziale: '', note: '' }); setShowBuonoForm(true); }}>+ Nuovo voucher</button>}
+        {user?.isAdmin && <button style={styles.btn} onClick={() => { setVoucherForm({ socio_id: '', saldo_iniziale: '', note: '' }); setShowVoucherForm(true); }}>+ Nuovo voucher</button>}
       </div>
       {error && <div style={styles.error}>{error}</div>}
 
-      {showBuonoForm && (
+      {showVoucherForm && (
         <div style={styles.formCard}>
           <h3 style={styles.formTitle}>Nuovo voucher</h3>
           <div style={styles.field}>
             <label style={styles.label}>Socio</label>
             <SocioSelect
-              soci={soci.filter(s => !buoni.some(b => b.socio_id === s.id))}
-              value={buonoForm.socio_id}
-              onChange={id => setBuonoForm({ ...buonoForm, socio_id: id })}
+              soci={soci.filter(s => !vouchers.some(b => b.socio_id === s.id))}
+              value={voucherForm.socio_id}
+              onChange={id => setVoucherForm({ ...voucherForm, socio_id: id })}
               placeholder='Cerca socio senza voucher...'
             />
           </div>
           <div style={styles.field}>
             <label style={styles.label}>Saldo iniziale (€)</label>
-            <input type='number' step='0.01' min='0' style={styles.input} value={buonoForm.saldo_iniziale} onChange={e => setBuonoForm({ ...buonoForm, saldo_iniziale: e.target.value })} />
+            <input type='number' step='0.01' min='0' style={styles.input} value={voucherForm.saldo_iniziale} onChange={e => setVoucherForm({ ...voucherForm, saldo_iniziale: e.target.value })} />
           </div>
           <div style={styles.field}>
             <label style={styles.label}>Note</label>
-            <textarea style={styles.textarea} value={buonoForm.note} onChange={e => setBuonoForm({ ...buonoForm, note: e.target.value })} />
+            <textarea style={styles.textarea} value={voucherForm.note} onChange={e => setVoucherForm({ ...voucherForm, note: e.target.value })} />
           </div>
           <div style={styles.formActions}>
-            <button style={styles.btnSecondary} onClick={() => setShowBuonoForm(false)}>Annulla</button>
-            <button style={styles.btn} onClick={saveBuono} disabled={saving}>{saving ? 'Salvataggio...' : 'Salva'}</button>
+            <button style={styles.btnSecondary} onClick={() => setShowVoucherForm(false)}>Annulla</button>
+            <button style={styles.btn} onClick={saveVoucher} disabled={saving}>{saving ? 'Salvataggio...' : 'Salva'}</button>
           </div>
         </div>
       )}
@@ -205,7 +205,7 @@ export default function BuoniPage() {
       )}
 
       <div style={styles.grid}>
-        {/* Lista buoni */}
+        {/* Lista vouchers */}
         <div>
           <TableScroll>
             <table style={styles.table}>
@@ -223,8 +223,8 @@ export default function BuoniPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedBuoni.map(b => (
-                  <tr key={b.id} style={{ ...styles.tr, ...(selectedBuono?.id === b.id ? styles.trSelected : {}) }}>
+                {sortedVouchers.map(b => (
+                  <tr key={b.id} style={{ ...styles.tr, ...(selectedVoucher?.id === b.id ? styles.trSelected : {}) }}>
                     <td style={styles.td}>{b.socioNome}</td>
                     <td style={styles.td}>{b.data_creazione.split('T')[0]}</td>
                     <td style={styles.td}>€ {Number(b.saldo_iniziale).toFixed(2)}</td>
@@ -242,16 +242,16 @@ export default function BuoniPage() {
               </tbody>
             </table>
           </TableScroll>
-          {sortedBuoni.length === 0 && (
+          {sortedVouchers.length === 0 && (
             <p style={styles.empty}>{filter ? 'Nessun voucher corrisponde alla ricerca.' : 'Nessun voucher presente.'}</p>
           )}
         </div>
 
         {/* Dettaglio movimenti */}
-        {selectedBuono && (
+        {selectedVoucher && (
           <div style={styles.movPanel}>
             <div style={styles.movHeader}>
-              <h3 style={styles.movTitle}>Movimenti - {socioLabel(selectedBuono.socio_id)}</h3>
+              <h3 style={styles.movTitle}>Movimenti - {socioLabel(selectedVoucher.socio_id)}</h3>
               {user?.isAdmin && (
                 <button style={styles.btn} onClick={() => { setMovForm({ importo: '', descrizione: '' }); setShowMovForm(true); }}>+ Ricarica</button>
               )}

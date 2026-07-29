@@ -20,7 +20,7 @@ import http from 'http';
 import { verifyToken, type RequestEvent } from './middleware/auth.js';
 import { handler as sociHandler } from './handlers/soci.js';
 import { handler as incontriHandler } from './handlers/incontri.js';
-import { handler as buoniHandler } from './handlers/buoni.js';
+import { handler as vouchersHandler } from './handlers/vouchers.js';
 import { handler as adminHandler } from './handlers/admin.js';
 import { handler as authHandler } from './handlers/auth.js';
 import { handler as versionHandler } from './handlers/version.js';
@@ -47,9 +47,9 @@ const ROUTES: Array<{
   { pattern: /^\/api\/soci$/,                        handler: sociHandler,      param: null },
   { pattern: /^\/api\/incontri\/([^/]+)$/,           handler: incontriHandler,  param: 'id' },
   { pattern: /^\/api\/incontri$/,                    handler: incontriHandler,  param: null },
-  { pattern: /^\/api\/buoni\/([^/]+)\/movimenti$/,   handler: buoniHandler,     param: 'id' },
-  { pattern: /^\/api\/buoni\/([^/]+)$/,              handler: buoniHandler,     param: 'id' },
-  { pattern: /^\/api\/buoni$/,                       handler: buoniHandler,     param: null },
+  { pattern: /^\/api\/voucher\/([^/]+)\/movimenti$/, handler: vouchersHandler,  param: 'id' },
+  { pattern: /^\/api\/voucher\/([^/]+)$/,            handler: vouchersHandler,  param: 'id' },
+  { pattern: /^\/api\/voucher$/,                     handler: vouchersHandler,  param: null },
   { pattern: /^\/api\/admin\/associa-viewer\/([^/]+)$/, handler: adminHandler,   param: 'socioId' },
   { pattern: /^\/api\/admin/,                          handler: adminHandler,   param: null },
 ];

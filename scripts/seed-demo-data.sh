@@ -153,7 +153,7 @@ elimina_utente_keycloak_se_esiste() {
 elimina_utente_keycloak_se_esiste "mario.rossi"
 elimina_utente_keycloak_se_esiste "laura.bianchi"
 
-# A cascata (ON DELETE CASCADE) elimina anche buono/incontro/movimento_buono
+# A cascata (ON DELETE CASCADE) elimina anche voucher/incontro/movimento_voucher
 # collegati a questi soci — vedi backend/src/db/schema.sql.
 psql_exec "
   DELETE FROM socio WHERE email IN (
@@ -192,24 +192,24 @@ echo "  Laura Bianchi -> $LAURA_ID"
 echo "  Giulia Verdi  -> $GIULIA_ID"
 
 # ------------------------------------------------------------
-# 3. Voucher (buono) — uno per socio
+# 3. Voucher — uno per socio
 # ------------------------------------------------------------
 echo "▶ Creo i voucher..."
 
-MARIO_BUONO_ID=$(psql_scalar "
-  INSERT INTO buono (socio_id, saldo_iniziale, note)
+MARIO_VOUCHER_ID=$(psql_scalar "
+  INSERT INTO voucher (socio_id, saldo_iniziale, note)
   VALUES ('$MARIO_ID', 100.00, 'Voucher iniziale')
   RETURNING id;
 ")
 
-LAURA_BUONO_ID=$(psql_scalar "
-  INSERT INTO buono (socio_id, saldo_iniziale, note)
+LAURA_VOUCHER_ID=$(psql_scalar "
+  INSERT INTO voucher (socio_id, saldo_iniziale, note)
   VALUES ('$LAURA_ID', 30.00, 'Voucher iniziale')
   RETURNING id;
 ")
 
-GIULIA_BUONO_ID=$(psql_scalar "
-  INSERT INTO buono (socio_id, saldo_iniziale, note)
+GIULIA_VOUCHER_ID=$(psql_scalar "
+  INSERT INTO voucher (socio_id, saldo_iniziale, note)
   VALUES ('$GIULIA_ID', 50.00, 'Voucher iniziale')
   RETURNING id;
 ")
@@ -230,7 +230,7 @@ days_ago() {
 }
 
 crea_incontro_con_addebito() {
-  local socio_id="$1" buono_id="$2" data="$3" attivita="$4" costo="$5" note="$6"
+  local socio_id="$1" voucher_id="$2" data="$3" attivita="$4" costo="$5" note="$6"
   local incontro_id
   incontro_id=$(psql_scalar "
     INSERT INTO incontro (socio_id, data_incontro, attivita, costo, note)
@@ -238,27 +238,27 @@ crea_incontro_con_addebito() {
     RETURNING id;
   ")
   psql_exec "
-    INSERT INTO movimento_buono (buono_id, incontro_id, data_movimento, importo, descrizione)
-    VALUES ('$buono_id', '$incontro_id', '$data', -$costo, 'Addebito incontro: $attivita');
+    INSERT INTO movimento_voucher (voucher_id, incontro_id, data_movimento, importo, descrizione)
+    VALUES ('$voucher_id', '$incontro_id', '$data', -$costo, 'Addebito incontro: $attivita');
   "
 }
 
 # Mario Rossi: due incontri, saldo finale 100 - 20 - 25 = 55
-crea_incontro_con_addebito "$MARIO_ID" "$MARIO_BUONO_ID" "$(days_ago 10)" "Dog Dance" 20.00 "Lezione di gruppo"
-crea_incontro_con_addebito "$MARIO_ID" "$MARIO_BUONO_ID" "$(days_ago 3)" "Mantrailing" 25.00 "Incontro individuale"
+crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 10)" "Dog Dance" 20.00 "Lezione di gruppo"
+crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 3)" "Mantrailing" 25.00 "Incontro individuale"
 
 # Giulia Verdi: due incontri, saldo finale 50 - 20 - 15 = 15
-crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_BUONO_ID" "$(days_ago 20)" "Educazione singolo" 20.00 "Primo incontro"
-crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_BUONO_ID" "$(days_ago 5)" "Passeggiata" 15.00 "Passeggiata di gruppo"
+crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_VOUCHER_ID" "$(days_ago 20)" "Educazione singolo" 20.00 "Primo incontro"
+crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_VOUCHER_ID" "$(days_ago 5)" "Passeggiata" 15.00 "Passeggiata di gruppo"
 
 # Laura Bianchi: ricarica + due incontri più costosi -> saldo finale negativo
 # Ricarica (movimento senza incontro collegato), precedente ai due incontri
 psql_exec "
-  INSERT INTO movimento_buono (buono_id, incontro_id, data_movimento, importo, descrizione)
-  VALUES ('$LAURA_BUONO_ID', NULL, NOW() - INTERVAL '15 days', 50.00, 'Ricarica voucher');
+  INSERT INTO movimento_voucher (voucher_id, incontro_id, data_movimento, importo, descrizione)
+  VALUES ('$LAURA_VOUCHER_ID', NULL, NOW() - INTERVAL '15 days', 50.00, 'Ricarica voucher');
 "
-crea_incontro_con_addebito "$LAURA_ID" "$LAURA_BUONO_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "Visto stand a 3 stazioni, passo laterale"
-crea_incontro_con_addebito "$LAURA_ID" "$LAURA_BUONO_ID" "$(days_ago 1)" "Piscina" 60.00 "Idroterapia"
+crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "Visto stand a 3 stazioni, passo laterale"
+crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 1)" "Piscina" 60.00 "Idroterapia"
 # Saldo Laura: 30 (iniziale) + 50 (ricarica) - 40 - 60 = -20 (negativo, come richiesto)
 
 # ------------------------------------------------------------

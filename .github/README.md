@@ -352,6 +352,17 @@ Problemi reali incontrati costruendo questi workflow, non ovvi in anticipo:
   versione mai taggata, che farebbe fallire il deploy a metà (o peggio, deployare un'immagine
   inesistente/sbagliata). Un job `validate` separato, eseguito **prima** dei job di deploy, verifica che il
   tag di versione esista davvero.
+- **La versione da mostrare non va compilata dentro l'artefatto al build**: è forte la tentazione di
+  iniettare le versioni come variabili di build (es. `VITE_*` compilate da Vite nel bundle). Sbagliato in
+  due modi: (a) la versione di un componente compilata dentro un **altro** componente si congela all'ultima
+  build di quest'ultimo, e un deploy del solo primo non la aggiorna; (b) anche la versione **propria** è
+  sbagliata se esiste un flusso di promozione che **ri-tagga l'immagine senza ribuildarla** (`X.Y.Z` da
+  `promote.yml`) — il bundle continuerebbe a dichiarare il tag di build. Regola: ogni componente espone la
+  propria versione **a runtime**, alimentata al deploy dal tag dell'immagine che sta effettivamente mettendo
+  in esecuzione (qui: `APP_VERSION` nel ConfigMap di ciascuno scope → il backend la serve su
+  `GET /api/version`, il frontend — che è solo nginx + file statici — come file `/version.json` montato dal
+  ConfigMap). Corollario k8s: quel file va montato come **directory**, non con `subPath`, altrimenti kubelet
+  non lo aggiorna più quando il ConfigMap cambia.
 
 ## Workflow, uno per uno
 

@@ -20,7 +20,7 @@ interface Incontro {
 }
 
 interface Socio { id: string; nome: string; cognome: string; }
-interface Buono { id: string; socio_id: string; saldo_residuo: number; }
+interface Voucher { id: string; socio_id: string; saldo_residuo: number; }
 
 const emptyForm = { socio_id: '', data_incontro: '', attivita: '', costo: '', note: '' };
 const activityOptions = Object.keys(config.activityCostMapping);
@@ -31,7 +31,7 @@ export default function IncontriPage() {
 
   const [incontri, setIncontri] = useState<Incontro[]>([]);
   const [soci, setSoci]         = useState<Socio[]>([]);
-  const [buoni, setBuoni]       = useState<Buono[]>([]);
+  const [vouchers, setVouchers]     = useState<Voucher[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -44,10 +44,10 @@ export default function IncontriPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [i, s, b] = await Promise.all([api.getIncontri(), api.getSoci(), api.getBuoni()]);
+      const [i, s, b] = await Promise.all([api.getIncontri(), api.getSoci(), api.getVouchers()]);
       setIncontri(i);
       setSoci(s);
-      setBuoni(b);
+      setVouchers(b);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -75,16 +75,16 @@ export default function IncontriPage() {
   const save = async () => {
     const costo = parseFloat(form.costo);
 
-    // Se il socio ha un buono, avvisa (con conferma) quando questo incontro
+    // Se il socio ha un voucher, avvisa (con conferma) quando questo incontro
     // porterebbe il saldo sotto zero — non blocca l'operazione, solo se il
     // saldo è già negativo lo farà il backend.
-    const buono = buoni.find(b => b.socio_id === form.socio_id);
-    if (buono) {
+    const voucherSocio = vouchers.find(v => v.socio_id === form.socio_id);
+    if (voucherSocio) {
       const vecchioCosto = editId ? Number(incontri.find(i => i.id === editId)?.costo ?? 0) : 0;
-      const nuovoSaldo = Number(buono.saldo_residuo) + vecchioCosto - costo;
+      const nuovoSaldo = Number(voucherSocio.saldo_residuo) + vecchioCosto - costo;
       if (nuovoSaldo < 0) {
         const confermato = confirm(
-          `Il socio ha un buono con saldo residuo di € ${Number(buono.saldo_residuo).toFixed(2)}.\n` +
+          `Il socio ha un voucher con saldo residuo di € ${Number(voucherSocio.saldo_residuo).toFixed(2)}.\n` +
           `Questo incontro (€ ${costo.toFixed(2)}) porterà il saldo a € ${nuovoSaldo.toFixed(2)} (negativo).\n\n` +
           `Vuoi procedere comunque?`
         );

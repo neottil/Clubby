@@ -1,11 +1,11 @@
 meta {
-  name: Lista movimenti buono
+  name: Lista movimenti voucher
   type: http
   seq: 5
 }
 
 get {
-  url: {{base_url}}/api/buoni/{{buono_id}}/movimenti
+  url: {{base_url}}/api/voucher/{{voucher_id}}/movimenti
   body: none
   auth: bearer
 }
@@ -15,6 +15,6 @@ auth:bearer {
 }
 
 docs {
-  Admin: movimenti di qualsiasi buono.
+  Admin: movimenti di qualsiasi voucher.
   Viewer: solo i propri (403 altrimenti).
 }

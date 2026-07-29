@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{base_url}}/api/buoni/{{buono_id}}/movimenti
+  url: {{base_url}}/api/voucher/{{voucher_id}}/movimenti
   body: json
   auth: bearer
 }
@@ -22,7 +22,7 @@ body:json {
 }
 
 docs {
-  Solo admin. Aggiunge un movimento al buono.
+  Solo admin. Aggiunge un movimento al voucher.
   importo: positivo = ricarica, negativo = addebito (scalare dal saldo).
   Il saldo corrente è calcolato come saldo_iniziale + somma movimenti.
 }

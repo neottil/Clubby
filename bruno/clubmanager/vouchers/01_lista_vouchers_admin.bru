@@ -1,11 +1,11 @@
-meta {
-  name: Lista buoni (admin — tutti)
+﻿meta {
+  name: Lista vouchers (admin — tutti)
   type: http
   seq: 1
 }
 
 get {
-  url: {{base_url}}/api/buoni
+  url: {{base_url}}/api/voucher
   body: none
   auth: bearer
 }
@@ -15,6 +15,6 @@ auth:bearer {
 }
 
 docs {
-  Admin: ritorna tutti i buoni.
+  Admin: ritorna tutti i vouchers.
   Filtro opzionale: ?socio_id={{socio_id}}
 }

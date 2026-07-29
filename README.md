@@ -6,7 +6,7 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 
 - Gestione soci
 - Gestione incontri
-- Buoni prepagati
+- Voucher prepagati
 
 ## Architettura
 
@@ -21,7 +21,7 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 ### Ruoli Keycloak
 
 - **admin**: vede e gestisce i dati di tutti i soci. Può promuovere altri utenti ad admin. Viene creato tramite script init.
-- **viewer**: vede solo i propri dati (soci, incontri, buoni, movimenti). Viene assegnato automaticamente alla registrazione.
+- **viewer**: vede solo i propri dati (soci, incontri, voucher, movimenti). Viene assegnato automaticamente alla registrazione.
 
 ### Registrazione
 
@@ -55,10 +55,10 @@ Tutte le API richiedono un JWT Keycloak valido (Bearer token).
 | GET | `/api/incontri/:id` | Dettaglio incontro | admin / viewer (solo il proprio) |
 | PUT | `/api/incontri/:id` | Modifica incontro | admin |
 | DELETE | `/api/incontri/:id` | Elimina incontro | admin |
-| GET | `/api/buoni` | Lista buoni (admin: tutti, viewer: solo i propri) | admin / viewer |
-| POST | `/api/buoni` | Crea buono (un solo buono per socio) | admin |
-| GET | `/api/buoni/:id/movimenti` | Movimenti buono | admin / viewer (solo il proprio) |
-| POST | `/api/buoni/:id/movimenti` | Aggiungi movimento | admin |
+| GET | `/api/voucher` | Lista voucher (admin: tutti, viewer: solo i propri) | admin / viewer |
+| POST | `/api/voucher` | Crea voucher (un solo voucher per socio) | admin |
+| GET | `/api/voucher/:id/movimenti` | Movimenti voucher | admin / viewer (solo il proprio) |
+| POST | `/api/voucher/:id/movimenti` | Aggiungi movimento | admin |
 | GET | `/api/admin/users` | Lista utenti Registrati | admin |
 | POST | `/api/admin/associa-viewer` | Associa utente a socio (body: socio_id, keycloak_user_id) | admin |
 | DELETE | `/api/admin/associa-viewer/:socioId` | Disassocia viewer da socio | admin |
@@ -178,7 +178,7 @@ ClubManager/
 │       └── cleanup-build-tags.yml  # Ripulisce i tag <scope>-<branch>-* superati (manuale)
 ├── backend/
 │   ├── src/
-│   │   ├── handlers/       # Handler HTTP (soci, incontri, buoni, admin, auth, version)
+│   │   ├── handlers/       # Handler HTTP (soci, incontri, voucher, admin, auth, version)
 │   │   ├── service/        # Business logic
 │   │   ├── middleware/      # Auth (Keycloak JWT), response helpers, error classes
 │   │   ├── db/             # Database client (pg Pool) + schema SQL
@@ -191,7 +191,7 @@ ClubManager/
 │   ├── src/
 │   │   ├── auth/           # AuthContext (Keycloak OIDC + PKCE)
 │   │   ├── api/            # API client factory
-│   │   ├── pages/          # SociPage, IncontriPage, BuoniPage, AdminPage, InfoPage, LoginPage
+│   │   ├── pages/          # SociPage, IncontriPage, VoucherPage, AdminPage, InfoPage, LoginPage
 │   │   ├── components/     # Layout (navbar a hamburger), TableScroll
 │   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID, versione app)
 │   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-frontend.yml

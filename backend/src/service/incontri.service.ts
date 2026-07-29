@@ -2,11 +2,11 @@ import { query, withTransaction, type QueryFn } from '../db/client.js';
 import { NotFoundError, BadRequestError } from '../middleware/auth.js';
 import { getSocioById } from './soci.service.js';
 import {
-  getBuonoBySocioId,
+  getVoucherBySocioId,
   createMovimento,
   getMovimentoByIncontroId,
   updateMovimentoImporto,
-} from './buoni.service.js';
+} from './vouchers.service.js';
 
 export interface Incontro {
   id: string;
@@ -70,9 +70,9 @@ export async function getIncontroById(id: string, q: QueryFn = query): Promise<I
 }
 
 /**
- * Crea un incontro e, se il socio ha un buono, genera atomicamente (stessa
+ * Crea un incontro e, se il socio ha un voucher, genera atomicamente (stessa
  * transazione) un movimento di addebito collegato con lo stesso importo del
- * costo. Se il buono non ha saldo sufficiente, l'intera operazione viene
+ * costo. Se il voucher non ha saldo sufficiente, l'intera operazione viene
  * annullata: né l'incontro né il movimento vengono creati.
  */
 export async function createIncontro(input: CreateIncontroInput): Promise<Incontro> {
@@ -99,10 +99,10 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
     );
     const incontro = toIncontro(result.rows[0]);
 
-    const buono = await getBuonoBySocioId(input.socio_id, q);
-    if (buono) {
+    const voucher = await getVoucherBySocioId(input.socio_id, q);
+    if (voucher) {
       await createMovimento(
-        buono.id,
+        voucher.id,
         {
           importo: -Number(input.costo),
           descrizione: `Incontro del ${input.data_incontro}`,
@@ -120,7 +120,7 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
  * Modifica un incontro. Se il costo cambia e l'incontro ha un movimento
  * collegato (generato automaticamente alla creazione), l'importo del
  * movimento viene aggiornato nella stessa transazione — se il nuovo importo
- * porterebbe il buono in negativo, l'intera modifica viene annullata.
+ * porterebbe il voucher in negativo, l'intera modifica viene annullata.
  */
 export async function updateIncontro(id: string, input: UpdateIncontroInput): Promise<Incontro> {
   return withTransaction(async (q) => {
@@ -169,7 +169,7 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
 /**
  * Elimina un incontro. Il movimento collegato (se presente) viene rimosso
  * automaticamente insieme, in modo atomico: il vincolo ON DELETE CASCADE su
- * movimento_buono.incontro_id lo garantisce nell'ambito della stessa DELETE.
+ * movimento_voucher.incontro_id lo garantisce nell'ambito della stessa DELETE.
  */
 export async function deleteIncontro(id: string): Promise<void> {
   await getIncontroById(id);

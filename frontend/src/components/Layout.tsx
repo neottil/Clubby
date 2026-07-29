@@ -17,7 +17,7 @@ export default function Layout({ children }: LayoutProps) {
 
   // Voucher è la home (vedi App.tsx): primo nel menu.
   const navLinks = [
-    { to: '/buoni',   label: 'Voucher' },
+    { to: '/voucher', label: 'Voucher' },
     ...(user?.isAdmin ? [{ to: '/soci', label: 'Soci' }] : []),
     { to: '/incontri', label: 'Incontri' },
     { to: '/info',    label: 'Info' },
@@ -49,7 +49,7 @@ export default function Layout({ children }: LayoutProps) {
         }
       `}</style>
       <nav style={styles.nav}>
-        <Link to="/buoni" style={styles.brandLink}>
+        <Link to="/voucher" style={styles.brandLink}>
           <img src="/logo.svg" alt="" style={styles.brandLogo} />
           <span style={styles.brand}>{config.tenantName}</span>
         </Link>

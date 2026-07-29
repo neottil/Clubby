@@ -1,6 +1,6 @@
 /**
- * Handler: /api/buoni, /api/buoni/{id}/movimenti
- * Ruoli: admin (tutti), viewer (solo i propri buoni)
+ * Handler: /api/voucher, /api/voucher/{id}/movimenti
+ * Ruoli: admin (tutti), viewer (solo i propri vouchers)
  */
 
 import {
@@ -12,12 +12,12 @@ import {
 } from '../middleware/auth.js';
 import { ok, created, errorResponse } from '../middleware/response.js';
 import {
-  listBuoni,
-  getBuonoById,
-  createBuono,
+  listVouchers,
+  getVoucherById,
+  createVoucher,
   listMovimenti,
   createMovimento,
-} from '../service/buoni.service.js';
+} from '../service/vouchers.service.js';
 import { getSocioByViewerId } from '../service/soci.service.js';
 
 export const handler = async (
@@ -27,7 +27,7 @@ export const handler = async (
     const auth    = getAuthContext(event);
     const method  = event.requestContext.http.method;
     const path    = event.requestContext.http.path;
-    const buonoId = event.pathParameters?.id;
+    const voucherId = event.pathParameters?.id;
 
     // Viewer: recupera il proprio socio
     let viewerSocioId: string | null = null;
@@ -40,49 +40,49 @@ export const handler = async (
     const isMovimentiRoute = path.endsWith('/movimenti');
 
     // -----------------------------------------------------------
-    // GET /api/buoni[?socio_id=...]
+    // GET /api/voucher[?socio_id=...]
     // -----------------------------------------------------------
-    if (method === 'GET' && !buonoId) {
+    if (method === 'GET' && !voucherId) {
       if (auth.role === 'admin') {
         const socioId = event.queryStringParameters?.socio_id;
-        return ok(await listBuoni(socioId));
+        return ok(await listVouchers(socioId));
       } else {
-        // Nessun socio associato al viewer → nessun dato (mai "tutti i buoni")
+        // Nessun socio associato al viewer → nessun dato (mai "tutti i vouchers")
         if (!viewerSocioId) return ok([]);
-        return ok(await listBuoni(viewerSocioId));
+        return ok(await listVouchers(viewerSocioId));
       }
     }
 
     // -----------------------------------------------------------
-    // POST /api/buoni
+    // POST /api/voucher
     // -----------------------------------------------------------
-    if (method === 'POST' && !buonoId) {
+    if (method === 'POST' && !voucherId) {
       requireAdmin(auth);
       const body = JSON.parse(event.body ?? '{}');
-      return created(await createBuono(body));
+      return created(await createVoucher(body));
     }
 
     // -----------------------------------------------------------
-    // GET /api/buoni/{id}/movimenti
+    // GET /api/voucher/{id}/movimenti
     // -----------------------------------------------------------
-    if (method === 'GET' && buonoId && isMovimentiRoute) {
-      const buono = await getBuonoById(buonoId);
-      if (auth.role === 'viewer' && buono.socio_id !== viewerSocioId) {
+    if (method === 'GET' && voucherId && isMovimentiRoute) {
+      const voucher = await getVoucherById(voucherId);
+      if (auth.role === 'viewer' && voucher.socio_id !== viewerSocioId) {
         throw new ForbiddenError();
       }
-      return ok(await listMovimenti(buonoId));
+      return ok(await listMovimenti(voucherId));
     }
 
     // -----------------------------------------------------------
-    // POST /api/buoni/{id}/movimenti
+    // POST /api/voucher/{id}/movimenti
     // -----------------------------------------------------------
-    if (method === 'POST' && buonoId && isMovimentiRoute) {
+    if (method === 'POST' && voucherId && isMovimentiRoute) {
       requireAdmin(auth);
       const body = JSON.parse(event.body ?? '{}');
       // Whitelist esplicita: incontro_id è gestito solo internamente da
       // incontri.service (movimento generato automaticamente), non deve
       // poter essere impostato tramite questo endpoint pubblico.
-      return created(await createMovimento(buonoId, {
+      return created(await createMovimento(voucherId, {
         importo: body.importo,
         descrizione: body.descrizione,
       }));
