@@ -1,6 +1,6 @@
 {
   "name": "clubmanager-backend",
-  "version": "2.0.1",
+  "version": "2.3.0",
   "description": "ClubManager API",
   "type": "module",
   "scripts": {

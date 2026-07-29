@@ -6,6 +6,7 @@ import {
   createMovimento,
   getMovimentoByIncontroId,
   updateMovimentoImporto,
+  updateMovimentoData,
 } from './vouchers.service.js';
 
 export interface Incontro {
@@ -111,6 +112,7 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
           importo: -Number(input.costo),
           descrizione: `Incontro del ${input.data_incontro}`,
           incontro_id: incontro.id,
+          data_movimento: input.data_incontro,
         },
         q
       );
@@ -163,10 +165,17 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
     );
     const incontro = toIncontro(result.rows[0]);
 
-    if (input.costo !== undefined) {
+    // Il movimento collegato segue l'incontro sia nell'importo sia nella data:
+    // una sola lettura, poi solo i campi effettivamente cambiati.
+    if (input.costo !== undefined || input.data_incontro !== undefined) {
       const movimento = await getMovimentoByIncontroId(id, q);
       if (movimento) {
-        await updateMovimentoImporto(movimento.id, -Number(input.costo), q);
+        if (input.costo !== undefined) {
+          await updateMovimentoImporto(movimento.id, -Number(input.costo), q);
+        }
+        if (input.data_incontro !== undefined) {
+          await updateMovimentoData(movimento.id, input.data_incontro, q);
+        }
       }
     }
 

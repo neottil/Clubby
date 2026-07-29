@@ -3,12 +3,11 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { theme } from '../theme';
 import { config } from '../config';
+import { MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
-
-const MOBILE_BREAKPOINT = 640;
 
 export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();

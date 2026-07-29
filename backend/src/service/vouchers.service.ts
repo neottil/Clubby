@@ -35,6 +35,13 @@ export interface CreateMovimentoInput {
   importo: number;
   descrizione?: string;
   incontro_id?: string;
+  // Omessa = adesso (ricariche e correzioni manuali, che avvengono nel momento
+  // in cui l'admin le inserisce). L'addebito generato da un incontro la
+  // valorizza invece con la data dell'incontro: un incontro registrato in
+  // ritardo, o programmato in avanti, avrebbe altrimenti un movimento datato
+  // "oggi" e la lista mostrerebbe un addebito prima o dopo l'incontro che lo
+  // ha causato.
+  data_movimento?: string;
 }
 
 function toVoucher(row: unknown): Voucher {
@@ -184,14 +191,18 @@ export async function createMovimento(
   }
 
   const result = await q(
-    `INSERT INTO movimento_voucher (voucher_id, importo, descrizione, incontro_id)
-     VALUES (:voucherId, :importo, :descrizione, :incontroId)
+    // CAST(... AS TIMESTAMP) e non "::timestamp": il convertitore di parametri
+    // con nome (db/client.ts) sostituisce ogni ":parola", quindi interpreterebbe
+    // "::timestamp" come un secondo parametro chiamato "timestamp".
+    `INSERT INTO movimento_voucher (voucher_id, importo, descrizione, incontro_id, data_movimento)
+     VALUES (:voucherId, :importo, :descrizione, :incontroId, COALESCE(CAST(:dataMovimento AS TIMESTAMP), NOW()))
      RETURNING *`,
     {
       voucherId,
       importo: input.importo,
       descrizione: input.descrizione ?? null,
       incontroId: input.incontro_id ?? null,
+      dataMovimento: input.data_movimento ?? null,
     }
   );
 
@@ -228,4 +239,21 @@ export async function updateMovimentoImporto(
     { id, importo: nuovoImporto }
   );
   return toMovimento(result.rows[0]);
+}
+
+/**
+ * Riallinea la data di un movimento a quella dell'incontro che lo ha generato,
+ * quando l'incontro viene spostato di data. Senza questo, modificare la data di
+ * un incontro lascerebbe l'addebito alla data originale e la lista movimenti
+ * tornerebbe incoerente con la lista incontri.
+ */
+export async function updateMovimentoData(
+  id: string,
+  nuovaData: string,
+  q: QueryFn = query
+): Promise<void> {
+  await q(
+    `UPDATE movimento_voucher SET data_movimento = CAST(:nuovaData AS TIMESTAMP) WHERE id = :id`,
+    { id, nuovaData }
+  );
 }

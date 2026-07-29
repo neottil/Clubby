@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
 import SocioSelect from '../components/SocioSelect';
 import { useTableSort } from '../hooks/useTableSort';
+import { useIsMobile } from '../hooks/useIsMobile';
 import TableScroll from '../components/TableScroll';
 import Modal from '../components/Modal';
 import { MarkdownView } from '../components/MarkdownEditor';
@@ -45,16 +46,25 @@ const formatDateIt = (iso: string) => {
   return `${d}-${m}-${y}`;
 };
 
-const incontroLabel = (m: Movimento) => {
-  const parts = ['Incontro'];
-  if (m.incontro_attivita) parts.push(m.incontro_attivita);
-  if (m.incontro_data) parts.push(formatDateIt(m.incontro_data));
-  return parts.join('-');
-};
+// Solo l'attività: la colonna si chiama già "Origine" e l'unica origine
+// possibile è un incontro, mentre la data del movimento coincide ormai con
+// quella dell'incontro (vedi incontri.service.ts) ed è già nella prima
+// colonna. Un'etichetta "Incontro-Mantrailing-20-07-2026" andava a capo su tre
+// righe dentro il chip su schermo stretto, senza aggiungere nulla.
+const incontroLabel = (m: Movimento) => m.incontro_attivita || 'Incontro';
 
 export default function VouchersPage() {
   const { token, user } = useAuth();
   const api = createApiClient(token);
+  const isMobile = useIsMobile();
+
+  // Su schermo stretto i 16px di padding orizzontale per cella costano 128px
+  // sui 375px disponibili — più di un terzo della larghezza spesa in spazio
+  // vuoto, che manda la tabella in scroll orizzontale. Non è esprimibile con
+  // una media query: questi sono oggetti di stile inline React.
+  const cellPad = isMobile
+    ? { th: { padding: '10px 8px' }, td: { padding: '10px 8px' } }
+    : { th: {}, td: {} };
 
   const [vouchers, setVouchers]             = useState<Voucher[]>([]);
   const [soci, setSoci]                 = useState<Socio[]>([]);
@@ -164,7 +174,7 @@ export default function VouchersPage() {
   if (loading) return <div style={styles.loading}>Caricamento...</div>;
 
   return (
-    <div style={styles.page}>
+    <div style={{ ...styles.page, ...(isMobile ? { padding: 16 } : {}) }}>
       <div style={styles.header}>
         <h2 style={styles.title}>Voucher prepagati</h2>
         {user?.isAdmin && <button style={styles.btn} onClick={() => { setVoucherForm({ socio_id: '', saldo_iniziale: '' }); setShowVoucherForm(true); }}>+ Nuovo voucher</button>}
@@ -216,23 +226,23 @@ export default function VouchersPage() {
                     ['socioNome', 'Socio'], ['data_creazione', 'Data'], ['saldo_iniziale', 'Iniziale'],
                     ['saldo_residuo', 'Residuo'],
                   ] as const).map(([key, label]) => (
-                    <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
+                    <th key={key} style={{ ...styles.thSortable, ...cellPad.th }} onClick={() => toggleSort(key)}>
                       {label}{sortIndicator(key)}
                     </th>
                   ))}
-                  <th style={styles.th}>Azioni</th>
+                  <th style={{ ...styles.th, ...cellPad.th }}>Azioni</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedVouchers.map(b => (
                   <tr key={b.id} style={{ ...styles.tr, ...(panel?.voucher.id === b.id ? styles.trSelected : {}) }}>
-                    <td style={styles.td}>{b.socioNome}</td>
-                    <td style={styles.td}>{b.data_creazione.split('T')[0]}</td>
-                    <td style={styles.td}>€ {Number(b.saldo_iniziale).toFixed(2)}</td>
-                    <td style={{ ...styles.td, fontWeight: 600, color: Number(b.saldo_residuo) > 0 ? theme.success : theme.danger }}>
+                    <td style={{ ...styles.td, ...cellPad.td }}>{b.socioNome}</td>
+                    <td style={{ ...styles.td, ...cellPad.td }}>{b.data_creazione.split('T')[0]}</td>
+                    <td style={{ ...styles.td, ...cellPad.td }}>€ {Number(b.saldo_iniziale).toFixed(2)}</td>
+                    <td style={{ ...styles.td, ...cellPad.td, fontWeight: 600, color: Number(b.saldo_residuo) > 0 ? theme.success : theme.danger }}>
                       € {Number(b.saldo_residuo).toFixed(2)}
                     </td>
-                    <td style={styles.td}>
+                    <td style={{ ...styles.td, ...cellPad.td }}>
                       <button style={styles.btnSmall} onClick={() => openMovimenti(b)}>Movimenti</button>
                       {user?.isAdmin && (
                         <button style={styles.btnSmall} onClick={() => openRicarica(b)}>+ Ricarica</button>
@@ -284,21 +294,32 @@ export default function VouchersPage() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    {['Data', 'Importo', 'Descrizione', 'Origine'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    {['Data', 'Importo', 'Descrizione', 'Origine'].map(h => <th key={h} style={{ ...styles.th, ...cellPad.th }}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {movimenti.map(m => (
                     <tr key={m.id} style={styles.tr}>
-                      <td style={styles.td}>{m.data_movimento.split('T')[0]}</td>
-                      <td style={{ ...styles.td, fontWeight: 600, color: m.importo >= 0 ? theme.success : theme.danger }}>
+                      <td style={{ ...styles.td, ...cellPad.td }}>{m.data_movimento.split('T')[0]}</td>
+                      <td style={{ ...styles.td, ...cellPad.td, fontWeight: 600, color: m.importo >= 0 ? theme.success : theme.danger }}>
                         {m.importo >= 0 ? '+' : ''}€ {Number(m.importo).toFixed(2)}
                       </td>
-                      <td style={styles.td}>{m.descrizione ?? '—'}</td>
+                      <td style={{ ...styles.td, ...cellPad.td }}>{m.descrizione ?? '—'}</td>
                       {/* Movimento manuale: nessuna origine da mostrare, cella vuota */}
-                      <td style={styles.td}>
+                      <td style={{ ...styles.td, ...cellPad.td }}>
                         {m.incontro_id && (
-                          <button style={styles.badgeIncontro} onClick={() => openIncontroDetail(m.incontro_id!)}>{incontroLabel(m)}</button>
+                          <button
+                            // Su schermo stretto un nome di attività lungo
+                            // allargherebbe la colonna (il testo non va a
+                            // capo) mandando la tabella in scroll: qui viene
+                            // troncato, il nome per esteso resta nella modale
+                            // che si apre al tocco.
+                            style={{ ...styles.badgeIncontro, ...(isMobile ? { maxWidth: 110 } : {}) }}
+                            title={incontroLabel(m)}
+                            onClick={() => openIncontroDetail(m.incontro_id!)}
+                          >
+                            {incontroLabel(m)}
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -361,8 +382,12 @@ const styles: Record<string, React.CSSProperties> = {
   formActions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 },
   hint: { fontSize: 13, color: '#666', marginTop: 0, marginBottom: 16 },
   badgeIncontro: {
-    background: '#eff6ff', color: theme.primary, borderRadius: 999, padding: '2px 10px', fontSize: 12,
+    background: '#eff6ff', color: theme.primary, borderRadius: 999, padding: '6px 12px', fontSize: 12,
     fontWeight: 600, border: '1px solid #bfdbfe', cursor: 'pointer',
+    // Una "pillola" ha senso solo su una riga: andando a capo, il raggio 999
+    // la deforma. Il testo è ora corto, ma un nome di attività lungo non deve
+    // comunque spezzarsi — al massimo allarga la colonna.
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
   },
   detailRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f1f5f9', fontSize: 14 },
   detailBlock: { display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 0', fontSize: 14 },

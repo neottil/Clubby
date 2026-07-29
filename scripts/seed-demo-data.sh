@@ -208,21 +208,28 @@ echo "  Giulia Verdi  -> $GIULIA_ID"
 # ------------------------------------------------------------
 echo "▶ Creo i voucher..."
 
+# data_creazione esplicita e non il default NOW(): il voucher deve esistere
+# prima dei movimenti che lo muovono. Lasciandola a "oggi", la lista mostrava
+# voucher creati stamattina con addebiti di venti giorni fa. 30 giorni copre
+# l'incontro demo più vecchio (Giulia, 20 giorni fa) ed è successiva alla data
+# di iscrizione di tutti e tre i soci.
+VOUCHER_CREATO="NOW() - INTERVAL '30 days'"
+
 MARIO_VOUCHER_ID=$(psql_scalar "
-  INSERT INTO voucher (socio_id, saldo_iniziale)
-  VALUES ('$MARIO_ID', 100.00)
+  INSERT INTO voucher (socio_id, saldo_iniziale, data_creazione)
+  VALUES ('$MARIO_ID', 100.00, $VOUCHER_CREATO)
   RETURNING id;
 ")
 
 LAURA_VOUCHER_ID=$(psql_scalar "
-  INSERT INTO voucher (socio_id, saldo_iniziale)
-  VALUES ('$LAURA_ID', 30.00)
+  INSERT INTO voucher (socio_id, saldo_iniziale, data_creazione)
+  VALUES ('$LAURA_ID', 30.00, $VOUCHER_CREATO)
   RETURNING id;
 ")
 
 GIULIA_VOUCHER_ID=$(psql_scalar "
-  INSERT INTO voucher (socio_id, saldo_iniziale)
-  VALUES ('$GIULIA_ID', 50.00)
+  INSERT INTO voucher (socio_id, saldo_iniziale, data_creazione)
+  VALUES ('$GIULIA_ID', 50.00, $VOUCHER_CREATO)
   RETURNING id;
 ")
 
@@ -246,6 +253,9 @@ days_ago() {
 # ATTENZIONE: le note vengono interpolate dentro un letterale SQL fra apici
 # singoli — non devono contenere apostrofi (in Markdown non servono, e usarli
 # richiederebbe di raddoppiarli).
+# L'addebito prende la stessa data dell'incontro che lo genera, come fa
+# createIncontro() nel backend (incontri.service.ts): le due liste devono
+# raccontare la stessa cronologia.
 crea_incontro_con_addebito() {
   local socio_id="$1" voucher_id="$2" data="$3" attivita="$4" costo="$5" note="$6" note_markdown="${7:-false}"
   local incontro_id
