@@ -63,6 +63,8 @@ Tutte le API richiedono un JWT Keycloak valido (Bearer token).
 | POST | `/api/admin/associa-viewer` | Associa utente a socio (body: socio_id, keycloak_user_id) | admin |
 | DELETE | `/api/admin/associa-viewer/:socioId` | Disassocia viewer da socio | admin |
 | POST | `/api/admin/promuovi` | Promuovi utente ad admin (body: keycloak_user_id) | admin |
+| POST | `/api/admin/retrocedi` | Retrocedi admin a viewer (body: keycloak_user_id) | admin |
+| GET | `/api/version` | Versione del backend in esecuzione (pagina Info) | admin / viewer |
 
 ## Sviluppo locale
 
@@ -191,9 +193,9 @@ ClubManager/
 │   ├── src/
 │   │   ├── auth/           # AuthContext (Keycloak OIDC + PKCE)
 │   │   ├── api/            # API client factory
-│   │   ├── pages/          # SociPage, IncontriPage, VoucherPage, AdminPage, InfoPage, LoginPage
-│   │   ├── components/     # Layout (navbar a hamburger), TableScroll
-│   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID, versione app)
+│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, AdminPage, InfoPage, LoginPage
+│   │   ├── components/     # Layout (navbar a hamburger), TableScroll, SearchSelect
+│   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID) + fetch /version.json
 │   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-frontend.yml
 │   ├── Dockerfile
 │   ├── nginx.conf
@@ -415,6 +417,12 @@ incluso in quanto sottocartella) — e decide:
 Se non trova nessun tag `<scope>-<branch>-*` precedente per uno scope su questo branch (prima run in
 assoluto, o dopo una pulizia con il workflow **Cleanup build tags**, vedi sotto), builda e deploya sempre
 tutto per quello scope, per sicurezza.
+
+**Forzare tutto** — lanciandolo manualmente c'è l'input `force_all` (default `false`): se attivo, il diff
+viene ignorato e sia backend che frontend vengono ribuildati e rideployati. Serve quando lo stato del cluster
+non è più deducibile dalla history dei commit: il caso tipico è un namespace ricreato da zero, dove ConfigMap
+e Secret applicativi non esistono più ma per il diff "non è cambiato niente", quindi senza forzatura i job di
+deploy non girerebbero affatto.
 
 **Come avanza il tag `<scope>-<branch>-*`**, sempre a fine job (`register-backend-tag`/`register-frontend-tag`,
 dopo che il job di deploy corrispondente è andato a buon fine):

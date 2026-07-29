@@ -35,7 +35,7 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 | Workflow | Trigger | Scopo |
 |---|---|---|
 | [`infra.yml`](workflows/infra.yml) | Manuale (`workflow_dispatch`) | Provisiona/aggiorna infrastruttura condivisa e a lunga vita: namespace k8s, database, identity provider. Da lanciare una tantum per ambiente. |
-| [`build-deploy.yml`](workflows/build-deploy.yml) | Push su branch di sviluppo, o manuale | Builda le immagini Docker cambiate e le deploya in **sviluppo**, in modo condizionale e indipendente per componente. |
+| [`build-deploy.yml`](workflows/build-deploy.yml) | Push su branch di sviluppo, o manuale (input `force_all`) | Builda le immagini Docker cambiate e le deploya in **sviluppo**, in modo condizionale e indipendente per componente. Con `force_all` ribuilda e rideploya tutto, ignorando il diff. |
 | [`deploy-backend.yml`](workflows/deploy-backend.yml) / [`deploy-frontend.yml`](workflows/deploy-frontend.yml) | Solo `workflow_call` (riutilizzabile) | Applica i manifest k8s di un componente, verifica il rollout. Chiamati sia da `build-deploy.yml` (sviluppo) sia da `promote.yml` (produzione). |
 | [`tag.yml`](workflows/tag.yml) | Manuale | Promuove lo stato attualmente deployato a versione "reale" (tag Git, ri-tag Docker, GitHub Release), senza rebuild. **Non deploya nulla.** |
 | [`promote.yml`](workflows/promote.yml) | Manuale (con input `<scope>_version`) | Deploya in **produzione** la versione indicata (già taggata da `tag.yml`). **Non tagga né rilascia nulla.** |
@@ -382,7 +382,13 @@ accesso root) — questo workflow non crea il cluster, ci si appoggia sopra.
 
 ### `build-deploy.yml`
 
-**Trigger**: push sui branch di sviluppo/feature, o manuale.
+**Trigger**: push sui branch di sviluppo/feature, o manuale con input `force_all` (booleano, default `false`).
+
+**`force_all`**: scavalca il diff e tratta entrambi gli scope come "codice + manifest cambiati", quindi
+ribuilda e rideploya tutto. Serve quando lo stato del cluster non è più deducibile dalla history dei commit —
+il caso tipico è un namespace ricreato da zero: ConfigMap e Secret applicativi non esistono più, ma per il
+diff "non è cambiato niente" e i job di deploy non girerebbero affatto. Come ogni altra run che ribuilda,
+crea tag `<scope>-<branch>-<data>` nuovi.
 
 **Cosa fa**: per ciascuno scope (qui: backend, frontend) applica i pattern 2 e 3 sopra — diff condizionale,
 build solo se serve, deploy solo se serve, mai un rebuild "a vuoto" su un deploy manifest-only. Sequenza job

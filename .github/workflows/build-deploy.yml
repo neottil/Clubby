@@ -13,7 +13,18 @@ on:
       - main
       - 'feature/**'
       - 'fix/**'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      # Scavalca l'analisi del diff: builda e deploya ENTRAMBI gli scope a
+      # prescindere da cosa è cambiato rispetto all'ultimo tag. Serve quando lo
+      # stato del cluster non è più deducibile dalla history dei commit — il
+      # caso tipico è un namespace ricreato da zero (ConfigMap e Secret
+      # applicativi non esistono più, ma per il diff "non è cambiato niente" e
+      # i job di deploy non girerebbero affatto).
+      force_all:
+        description: 'Forza rebuild e redeploy di backend e frontend, ignorando il diff'
+        type: boolean
+        default: false
 
 jobs:
   # Calcola le versioni "reali" (da package.json) e decide, per backend e
@@ -56,15 +67,26 @@ jobs:
       # comunque un rebuild, quindi va guardato esplicitamente. Solo questo
       # file, non l'intera cartella scripts/ (il resto non finisce
       # nell'immagine).
+      #
+      # L'input force_all (solo workflow_dispatch) salta l'analisi del tutto e
+      # tratta entrambi gli scope come "codice + manifest cambiati". Sui push
+      # la variabile è stringa vuota, quindi il confronto con "true" è falso e
+      # il comportamento normale resta invariato.
       - name: Analizza modifiche (backend e frontend indipendentemente)
         id: analyze
+        env:
+          FORCE_ALL: ${{ inputs.force_all }}
         run: |
           BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
 
           for SCOPE in backend frontend; do
             PREV_TAG=$(git tag --merged HEAD --sort=-creatordate -l "${SCOPE}-${BRANCH_SLUG}-*" | head -1)
 
-            if [ -z "$PREV_TAG" ]; then
+            if [ "$FORCE_ALL" = "true" ]; then
+              echo "[$SCOPE] force_all attivo: rebuild e redeploy forzati, diff ignorato."
+              HAS_CODE=true
+              HAS_K8S=true
+            elif [ -z "$PREV_TAG" ]; then
               echo "[$SCOPE] Nessun tag precedente su questo branch: prima build, eseguo tutto."
               HAS_CODE=true
               HAS_K8S=true
