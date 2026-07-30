@@ -11,6 +11,7 @@
  *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa      (obbligatoria)
  *   VITE_TENANT_NAME           = La mia ASD           (obbligatoria)
  *   VITE_ACTIVITY_SELECT_VALUES_MAPPING = JSON {"Attività": costoDefault, ...} (opzionale)
+ *   VITE_SELECT_ISTRUTTORI_VALUES = Luca,Elisabetta,Marco (opzionale)
  *
  * Produzione:
  *   VITE_API_BASE_URL          = https://api.<dominio>
@@ -19,6 +20,7 @@
  *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa      (obbligatoria)
  *   VITE_TENANT_NAME           = La mia ASD           (obbligatoria)
  *   VITE_ACTIVITY_SELECT_VALUES_MAPPING = JSON {"Attività": costoDefault, ...} (opzionale)
+ *   VITE_SELECT_ISTRUTTORI_VALUES = Luca,Elisabetta,Marco (opzionale)
  */
 
 function requireEnv(name: string): string {
@@ -35,6 +37,24 @@ function requireEnv(name: string): string {
  * malformata, restituisce un mapping vuoto (nessun blocco dell'app) e avvisa
  * in console.
  */
+/**
+ * Elenco degli istruttori selezionabili, da VITE_SELECT_ISTRUTTORI_VALUES
+ * (lista separata da virgole, es. "Luca,Elisabetta,Marco").
+ *
+ * Opzionale, e l'assenza è significativa: un tenant con un solo istruttore non
+ * la configura, e allora il campo non viene mostrato da nessuna parte (form,
+ * tabella incontri) e il resoconto presenta un unico prospetto senza
+ * intestazione per istruttore. Vedi IncontriPage e ResocontoPage.
+ */
+function parseIstruttori(): string[] {
+  const raw = import.meta.env.VITE_SELECT_ISTRUTTORI_VALUES;
+  if (!raw) return [];
+  return (raw as string)
+    .split(',')
+    .map(nome => nome.trim())
+    .filter(Boolean);
+}
+
 function parseActivityMapping(): Record<string, number> {
   const raw = import.meta.env.VITE_ACTIVITY_SELECT_VALUES_MAPPING;
   if (!raw) return {};
@@ -57,7 +77,15 @@ export const config = {
   keycloakClientId:     requireEnv('VITE_KEYCLOAK_CLIENT_ID'),
   tenantName:           requireEnv('VITE_TENANT_NAME'),
   activityCostMapping:  parseActivityMapping(),
+  istruttori:           parseIstruttori(),
 } as const;
+
+/**
+ * True se il tenant ha configurato più istruttori: unico interruttore per la
+ * visibilità del campo "istruttore" nel form e nella tabella incontri, e per
+ * il raggruppamento nella pagina Resoconto.
+ */
+export const istruttoriAbilitati = config.istruttori.length > 0;
 
 /**
  * Versione del frontend in esecuzione: il tag dell'immagine deployata, servito

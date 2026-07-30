@@ -257,12 +257,15 @@ days_ago() {
 # L'addebito prende la stessa data dell'incontro che lo genera, come fa
 # createIncontro() nel backend (incontri.service.ts): le due liste devono
 # raccontare la stessa cronologia.
+# L'8° parametro (istruttore) è opzionale: i nomi usati sono gli stessi di
+# VITE_SELECT_ISTRUTTORI_VALUES in frontend/.env.example, così la pagina
+# Resoconto della demo mostra il raggruppamento per istruttore già popolato.
 crea_incontro_con_addebito() {
-  local socio_id="$1" voucher_id="$2" data="$3" attivita="$4" costo="$5" note="$6" note_markdown="${7:-false}"
+  local socio_id="$1" voucher_id="$2" data="$3" attivita="$4" costo="$5" note="$6" note_markdown="${7:-false}" istruttore="${8:-}"
   local incontro_id
   incontro_id=$(psql_scalar "
-    INSERT INTO incontro (socio_id, data_incontro, attivita, costo, note, note_markdown)
-    VALUES ('$socio_id', '$data', '$attivita', $costo, '$note', $note_markdown)
+    INSERT INTO incontro (socio_id, data_incontro, attivita, istruttore, costo, note, note_markdown)
+    VALUES ('$socio_id', '$data', '$attivita', $([ -n "$istruttore" ] && echo "'$istruttore'" || echo NULL), $costo, '$note', $note_markdown)
     RETURNING id;
   ")
   psql_exec "
@@ -301,12 +304,12 @@ Il **passo laterale** va ripreso: appoggio posteriore ancora incerto.
 Scheda degli esercizi: [K9 Cross](https://example.local/schede/k9-cross)"
 
 # Mario Rossi: due incontri, saldo finale 100 - 20 - 25 = 55
-crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 10)" "Dog Dance" 20.00 "Lezione di gruppo"
-crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 3)" "Mantrailing" 25.00 "$NOTA_MD_MANTRAILING" true
+crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 10)" "Dog Dance" 20.00 "Lezione di gruppo" false "Luca"
+crea_incontro_con_addebito "$MARIO_ID" "$MARIO_VOUCHER_ID" "$(days_ago 3)" "Mantrailing" 25.00 "$NOTA_MD_MANTRAILING" true "Luca"
 
 # Giulia Verdi: due incontri, saldo finale 50 - 20 - 15 = 15
-crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_VOUCHER_ID" "$(days_ago 20)" "Educazione singolo" 20.00 "Primo incontro"
-crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_VOUCHER_ID" "$(days_ago 5)" "Passeggiata" 15.00 "Passeggiata di gruppo"
+crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_VOUCHER_ID" "$(days_ago 20)" "Educazione singolo" 20.00 "Primo incontro" false "Elisabetta"
+crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_VOUCHER_ID" "$(days_ago 5)" "Passeggiata" 15.00 "Passeggiata di gruppo" false "Elisabetta"
 
 # Laura Bianchi: ricarica + due incontri più costosi -> saldo finale negativo
 # Ricarica (movimento senza incontro collegato), precedente ai due incontri
@@ -314,7 +317,10 @@ psql_exec "
   INSERT INTO movimento_voucher (voucher_id, incontro_id, data_movimento, importo, descrizione)
   VALUES ('$LAURA_VOUCHER_ID', NULL, CURRENT_DATE - INTERVAL '15 days', 50.00, 'Ricarica voucher');
 "
-crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "$NOTA_MD_K9" true
+crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "$NOTA_MD_K9" true "Marco"
+# Volutamente senza istruttore: rappresenta gli incontri registrati prima
+# dell'introduzione del campo, e mostra come il Resoconto li segnala come
+# esclusi dal raggruppamento invece di farne sparire il costo.
 crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 1)" "Piscina" 60.00 "Idroterapia"
 # Saldo Laura: 30 (iniziale) + 50 (ricarica) - 40 - 60 = -20 (negativo, come richiesto)
 

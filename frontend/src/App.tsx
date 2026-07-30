@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import SociPage from './pages/SociPage';
 import IncontriPage from './pages/IncontriPage';
 import VouchersPage from './pages/VouchersPage';
+import ResocontoPage from './pages/ResocontoPage';
 import AdminPage from './pages/AdminPage';
 import InfoPage from './pages/InfoPage';
 
@@ -38,7 +39,11 @@ function ProtectedRoutes() {
         <Route path='/soci'     element={<SociPage />} />
         <Route path='/incontri' element={<IncontriPage />} />
         <Route path='/voucher'  element={<VouchersPage />} />
-        <Route path='/admin'    element={<AdminPage />} />
+        {/* Resoconto è solo per admin: la rotta non viene nemmeno registrata
+            per un viewer, così l'URL digitato a mano ricade sul catch-all e
+            torna alla home invece di aprire una pagina che poi fallirebbe. */}
+        {user.isAdmin && <Route path='/resoconto' element={<ResocontoPage />} />}
+        {user.isAdmin && <Route path='/admin'    element={<AdminPage />} /> }
         <Route path='/info'     element={<InfoPage />} />
         <Route path='*'         element={<Navigate to={defaultRoute} replace />} />
       </Routes>

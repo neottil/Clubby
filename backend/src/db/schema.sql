@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS incontro (
   -- ("Incontro: {attivita}", vedi incontri.service.ts). Un incontro senza
   -- attività produceva una riga di movimento indistinguibile dalle altre.
   attivita        VARCHAR(100) NOT NULL,
+  -- Nome dell'istruttore che ha tenuto l'incontro, scelto fra quelli
+  -- configurati nel frontend (VITE_SELECT_ISTRUTTORI_VALUES). Nullable: le
+  -- installazioni con un solo istruttore non configurano la variabile e non
+  -- mostrano affatto il campo, e gli incontri registrati prima
+  -- dell'introduzione del campo non hanno un valore da attribuire.
+  -- Non è una FK: gli istruttori non sono un'entità a db, sono una lista di
+  -- configurazione per tenant.
+  istruttore      VARCHAR(100),
   costo           DECIMAL(10,2) NOT NULL CHECK (costo >= 0),
   note            TEXT,
   -- Formato di "note": false = testo semplice, true = Markdown. Serve al
@@ -68,6 +76,12 @@ CREATE TABLE IF NOT EXISTS incontro (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Il CREATE TABLE sopra non viene rieseguito su una tabella che esiste già:
+-- questa ALTER è ciò che aggiunge la colonna ai database creati prima
+-- dell'introduzione del campo istruttore. È idempotente (IF NOT EXISTS) e
+-- innocua sui database nuovi, dove la colonna c'è già.
+ALTER TABLE incontro ADD COLUMN IF NOT EXISTS istruttore VARCHAR(100);
 
 -- idx_incontro_data resta: serve alla lista globale (listIncontri() senza
 -- filtro socio, incontri.service.ts) ordinata per data su tutti i soci.

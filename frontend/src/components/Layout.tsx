@@ -19,6 +19,7 @@ export default function Layout({ children }: LayoutProps) {
     { to: '/voucher', label: 'Voucher' },
     ...(user?.isAdmin ? [{ to: '/soci', label: 'Soci' }] : []),
     { to: '/incontri', label: 'Incontri' },
+    ...(user?.isAdmin ? [{ to: '/resoconto', label: 'Resoconto' }] : []),
     { to: '/info',    label: 'Info' },
     ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin' }] : []),
   ];

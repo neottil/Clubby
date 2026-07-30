@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
-import { config } from '../config';
+import { config, istruttoriAbilitati } from '../config';
 import SocioSelect from '../components/SocioSelect';
 import ActivitySelect from '../components/ActivitySelect';
+import DateRangeFilter, { isInDateRange } from '../components/DateRangeFilter';
 import { useTableSort } from '../hooks/useTableSort';
 import TableScroll from '../components/TableScroll';
 import Modal from '../components/Modal';
@@ -15,6 +16,10 @@ interface Incontro {
   socio_id: string;
   data_incontro: string;
   attivita: string;
+  // null per gli incontri registrati prima dell'introduzione del campo, o
+  // quando il tenant non configura VITE_SELECT_ISTRUTTORI_VALUES (un solo
+  // istruttore: il campo non viene mostrato affatto).
+  istruttore: string | null;
   costo: number;
   note: string | null;
   // Formato di "note": false = testo semplice, true = Markdown. Deciso in fase
@@ -28,8 +33,22 @@ interface Incontro {
 interface Socio { id: string; nome: string; cognome: string; }
 interface Voucher { id: string; socio_id: string; saldo_residuo: number; }
 
-const emptyForm = { socio_id: '', data_incontro: '', attivita: '', costo: '', note: '', note_markdown: false };
+const emptyForm = { socio_id: '', data_incontro: '', attivita: '', istruttore: '', costo: '', note: '', note_markdown: false };
 const activityOptions = Object.keys(config.activityCostMapping);
+
+// Righe della tabella arricchite col nome del socio: è la forma su cui lavorano
+// ordinamento e ricerca, non l'Incontro grezzo dell'API.
+type IncontroRiga = Incontro & { socioNome: string };
+
+// La colonna Istruttore c'è solo dove gli istruttori sono configurati (vedi il
+// campo nel form): è visibile sia ad admin che a viewer.
+const colonneOrdinabili: [keyof IncontroRiga, string][] = [
+  ['socioNome', 'Socio'],
+  ['data_incontro', 'Data'],
+  ['attivita', 'Attività'],
+  ...(istruttoriAbilitati ? [['istruttore', 'Istruttore'] as [keyof IncontroRiga, string]] : []),
+  ['costo', 'Costo'],
+];
 
 export default function IncontriPage() {
   const { token, user } = useAuth();
@@ -46,6 +65,8 @@ export default function IncontriPage() {
   const [saving, setSaving]     = useState(false);
   const [filter, setFilter]           = useState('');
   const [attivitaFilter, setAttivitaFilter] = useState('');
+  const [dataDa, setDataDa]           = useState('');
+  const [dataA, setDataA]             = useState('');
   // Incontro di cui è aperta la modale di lettura della nota.
   const [notaAperta, setNotaAperta]   = useState<Incontro | null>(null);
 
@@ -70,8 +91,21 @@ export default function IncontriPage() {
     return s ? `${s.cognome} ${s.nome}` : id;
   };
 
-  const openCreate = () => { setForm({ ...emptyForm, data_incontro: new Date().toISOString().split('T')[0] }); setEditId(null); setShowForm(true); };
-  const openEdit   = (i: Incontro) => { setForm({ socio_id: i.socio_id, data_incontro: String(i.data_incontro).split('T')[0], attivita: i.attivita, costo: String(i.costo), note: i.note ?? '', note_markdown: !!i.note_markdown }); setEditId(i.id); setShowForm(true); };
+  // In creazione l'istruttore è preselezionato sul primo della lista
+  // configurata (il caso più frequente: chi inserisce è chi ha tenuto
+  // l'incontro). In modifica si mostra invece il valore salvato, vuoto
+  // compreso: precompilare il primo della lista su un incontro storico senza
+  // istruttore gli attribuirebbe al salvataggio un nome che nessuno ha scelto.
+  const openCreate = () => {
+    setForm({
+      ...emptyForm,
+      data_incontro: new Date().toISOString().split('T')[0],
+      istruttore: config.istruttori[0] ?? '',
+    });
+    setEditId(null);
+    setShowForm(true);
+  };
+  const openEdit   = (i: Incontro) => { setForm({ socio_id: i.socio_id, data_incontro: String(i.data_incontro).split('T')[0], attivita: i.attivita, istruttore: i.istruttore ?? '', costo: String(i.costo), note: i.note ?? '', note_markdown: !!i.note_markdown }); setEditId(i.id); setShowForm(true); };
 
   // Selezionando un'attività propone il costo di default associato
   // (VITE_ACTIVITY_SELECT_VALUES_MAPPING); resta comunque modificabile a mano.
@@ -134,13 +168,14 @@ export default function IncontriPage() {
     const q = filter.trim().toLowerCase();
     return enriched.filter(i => {
       if (attivitaFilter && i.attivita !== attivitaFilter) return false;
+      if (!isInDateRange(i.data_incontro, dataDa, dataA)) return false;
       if (!q) return true;
       // Le note sono escluse dalla ricerca: da quando possono essere Markdown
       // il testo cercato non coincide più con quello mostrato (la nota si
       // legge nella modale, e la sintassi "**" o "#" sporcherebbe il match).
       return `${i.socioNome} ${i.attivita}`.toLowerCase().includes(q);
     });
-  }, [enriched, filter, attivitaFilter]);
+  }, [enriched, filter, attivitaFilter, dataDa, dataA]);
 
   const { sorted, toggleSort, sortIndicator } = useTableSort(filtered, {
     initialKey: 'data_incontro',
@@ -177,6 +212,10 @@ export default function IncontriPage() {
             resetLabel='Tutte le attività'
           />
         </div>
+        {/* Il filtro per date è disponibile a tutti, viewer compresi: il
+            viewer vede solo i propri incontri, ma su un'annata intera la
+            lista è comunque lunga da scorrere. */}
+        <DateRangeFilter from={dataDa} to={dataA} onFromChange={setDataDa} onToChange={setDataA} />
       </div>
 
       {showForm && (
@@ -198,6 +237,37 @@ export default function IncontriPage() {
             <label style={styles.label}>Attività *</label>
             <ActivitySelect options={activityOptions} value={form.attivita} onChange={onActivityChange} />
           </div>
+          {/* Solo se il tenant ha configurato più istruttori: con un istruttore
+              solo il campo non aggiungerebbe informazione, e chiederlo a ogni
+              inserimento sarebbe attrito inutile. Select nativa e non
+              ActivitySelect: la lista è di pochi nomi, una casella di ricerca
+              sarebbe più lenta da usare di un menu a tendina. */}
+          {istruttoriAbilitati && (
+            <div style={styles.field}>
+              <label style={styles.label} htmlFor='istruttore'>Istruttore</label>
+              <select
+                id='istruttore'
+                style={styles.input}
+                value={form.istruttore}
+                onChange={e => setForm({ ...form, istruttore: e.target.value })}
+              >
+                {/* Presente solo in modifica di un incontro senza istruttore:
+                    in creazione il primo nome è già preselezionato e questa
+                    opzione vuota non serve. */}
+                {!form.istruttore && <option value=''>—</option>}
+                {/* Un incontro salvato può avere un istruttore non più in
+                    elenco (lista cambiata dopo il salvataggio): innestato fra
+                    le opzioni, altrimenti il campo apparirebbe vuoto in
+                    modifica e salvare lo cancellerebbe. */}
+                {(form.istruttore && !config.istruttori.includes(form.istruttore)
+                  ? [form.istruttore, ...config.istruttori]
+                  : config.istruttori
+                ).map(nome => (
+                  <option key={nome} value={nome}>{nome}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div style={styles.field}>
             <label style={styles.label}>Costo (€)</label>
             <input type='number' step='0.01' min='0' style={styles.input} value={form.costo} onChange={e => setForm({ ...form, costo: e.target.value })} />
@@ -243,9 +313,7 @@ export default function IncontriPage() {
         <table style={styles.table}>
           <thead>
             <tr>
-              {([
-                ['socioNome', 'Socio'], ['data_incontro', 'Data'], ['attivita', 'Attività'], ['costo', 'Costo'],
-              ] as const).map(([key, label]) => (
+              {colonneOrdinabili.map(([key, label]) => (
                 <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
                   {label}{sortIndicator(key)}
                 </th>
@@ -260,6 +328,7 @@ export default function IncontriPage() {
                 <td style={styles.td}>{i.socioNome}</td>
                 <td style={styles.td}>{String(i.data_incontro).split('T')[0]}</td>
                 <td style={styles.td}>{i.attivita}</td>
+                {istruttoriAbilitati && <td style={styles.td}>{i.istruttore ?? '—'}</td>}
                 <td style={styles.td}>€ {Number(i.costo).toFixed(2)}</td>
                 <td style={styles.td}>
                   {i.note?.trim()
@@ -278,7 +347,7 @@ export default function IncontriPage() {
         </table>
       </TableScroll>
       {sorted.length === 0 && !loading && (
-        <p style={styles.empty}>{filter || attivitaFilter ? 'Nessun incontro corrisponde ai filtri.' : 'Nessun incontro registrato.'}</p>
+        <p style={styles.empty}>{filter || attivitaFilter || dataDa || dataA ? 'Nessun incontro corrisponde ai filtri.' : 'Nessun incontro registrato.'}</p>
       )}
 
       {notaAperta && (

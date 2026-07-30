@@ -1,7 +1,7 @@
 {
   "name": "clubmanager-frontend",
   "private": true,
-  "version": "2.5.0",
+  "version": "2.6.0",
   "type": "module",
   "scripts": {
     "predev": "node scripts/apply-logo.mjs",

@@ -232,12 +232,14 @@ if [ -n "$VIEWER_KC_USER_ID" ] && [ "$VIEWER_KC_USER_ID" != "null" ]; then
   echo "  Utente viewer creato, password impostata e ruolo assegnato."
 fi
 
-# Scrivi frontend/.env.local (preservando VITE_ACTIVITY_SELECT_VALUES_MAPPING
-# se già presente da un run precedente: questo script non conosce il mapping
-# attività->costo, va impostato a mano una volta)
-EXISTING_ACTIVITY_MAPPING=""
+# Scrivi frontend/.env.local. Le variabili di configurazione che questo script
+# non conosce (mapping attività->costo, elenco istruttori, tema: si impostano a
+# mano una volta) vengono rilette dal file precedente e riscritte, altrimenti
+# ogni nuovo run le cancellerebbe silenziosamente.
+PRESERVED_VARS=""
 if [ -f "$ROOT_DIR/frontend/.env.local" ]; then
-  EXISTING_ACTIVITY_MAPPING=$(grep '^VITE_ACTIVITY_SELECT_VALUES_MAPPING=' "$ROOT_DIR/frontend/.env.local" || true)
+  PRESERVED_VARS=$(grep -E '^(VITE_ACTIVITY_SELECT_VALUES_MAPPING|VITE_SELECT_ISTRUTTORI_VALUES|VITE_THEME_[A-Z_]+|LOGO_FILE)=' \
+    "$ROOT_DIR/frontend/.env.local" || true)
 fi
 
 cat > "$ROOT_DIR/frontend/.env.local" << EOF
@@ -248,8 +250,8 @@ VITE_KEYCLOAK_CLIENT_ID=clubmanager-spa
 VITE_TENANT_NAME=$TENANT_NAME
 EOF
 
-if [ -n "$EXISTING_ACTIVITY_MAPPING" ]; then
-  echo "$EXISTING_ACTIVITY_MAPPING" >> "$ROOT_DIR/frontend/.env.local"
+if [ -n "$PRESERVED_VARS" ]; then
+  echo "$PRESERVED_VARS" >> "$ROOT_DIR/frontend/.env.local"
 fi
 
 # Scrivi backend/.env

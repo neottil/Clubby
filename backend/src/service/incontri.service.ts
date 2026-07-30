@@ -14,6 +14,11 @@ export interface Incontro {
   socio_id: string;
   data_incontro: string;
   attivita: string;
+  // Nome dell'istruttore, scelto fra quelli configurati nel frontend
+  // (VITE_SELECT_ISTRUTTORI_VALUES). null quando il tenant non configura la
+  // lista (un solo istruttore: il campo non viene nemmeno mostrato) o per gli
+  // incontri registrati prima dell'introduzione del campo.
+  istruttore: string | null;
   costo: number;
   note: string | null;
   note_markdown: boolean;
@@ -25,6 +30,7 @@ export interface CreateIncontroInput {
   socio_id: string;
   data_incontro: string;
   attivita: string;
+  istruttore?: string;
   costo: number;
   note?: string;
   note_markdown?: boolean;
@@ -35,6 +41,7 @@ export interface CreateIncontroInput {
 export interface UpdateIncontroInput {
   data_incontro?: string;
   attivita?: string;
+  istruttore?: string | null;
   costo?: number;
   note?: string;
   note_markdown?: boolean;
@@ -105,13 +112,17 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
 
   return withTransaction(async (q) => {
     const result = await q(
-      `INSERT INTO incontro (socio_id, data_incontro, attivita, costo, note, note_markdown)
-       VALUES (:socio_id, :data_incontro, :attivita, :costo, :note, :note_markdown)
+      `INSERT INTO incontro (socio_id, data_incontro, attivita, istruttore, costo, note, note_markdown)
+       VALUES (:socio_id, :data_incontro, :attivita, :istruttore, :costo, :note, :note_markdown)
        RETURNING *`,
       {
         socio_id: input.socio_id,
         data_incontro: input.data_incontro,
         attivita: input.attivita.trim(),
+        // Stringa vuota normalizzata a NULL: "nessun istruttore" deve essere
+        // un solo valore a db, altrimenti i raggruppamenti del resoconto
+        // vedrebbero due gruppi distinti ('' e NULL) per lo stesso caso.
+        istruttore: input.istruttore?.trim() || null,
         costo: input.costo,
         note: input.note ?? null,
         note_markdown: input.note_markdown ?? false,
@@ -158,6 +169,10 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
       if (!input.attivita.trim()) throw new BadRequestError('attivita è obbligatoria');
       setClauses.push('attivita = :attivita');
       params.attivita = input.attivita.trim();
+    }
+    if (input.istruttore !== undefined) {
+      setClauses.push('istruttore = :istruttore');
+      params.istruttore = input.istruttore?.trim() || null;
     }
     if (input.costo !== undefined) {
       if (input.costo < 0) throw new BadRequestError('costo deve essere >= 0');

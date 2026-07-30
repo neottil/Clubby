@@ -5,8 +5,10 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 ## Funzionalità
 
 - Gestione soci
-- Gestione incontri, con note in testo semplice o in Markdown
+- Gestione incontri, con note in testo semplice o in Markdown, filtrabili per attività e per periodo
+- Attribuzione degli incontri a un istruttore, per le associazioni che ne hanno più di uno
 - Voucher prepagati
+- Resoconto (solo admin): incontri e costi di un periodo, raggruppati per istruttore e attività
 
 ## Architettura
 
@@ -193,8 +195,8 @@ ClubManager/
 │   ├── src/
 │   │   ├── auth/           # AuthContext (Keycloak OIDC + PKCE)
 │   │   ├── api/            # API client factory
-│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, AdminPage, InfoPage, LoginPage
-│   │   ├── components/     # Layout (navbar a hamburger), TableScroll, SearchSelect, Modal, MarkdownEditor
+│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, ResocontoPage, AdminPage, InfoPage, LoginPage
+│   │   ├── components/     # Layout (navbar a hamburger), TableScroll, SearchSelect, DateRangeFilter, Modal, MarkdownEditor
 │   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID) + fetch /version.json
 │   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-frontend.yml
 │   ├── Dockerfile
@@ -219,6 +221,9 @@ all'interno di un singolo database o realm.
 
 Configurazione del tenant tramite variabili d'ambiente:
 - `VITE_TENANT_NAME`: nome visualizzato del tenant (es. "ASD Roma")
+- `VITE_SELECT_ISTRUTTORI_VALUES`: istruttori del tenant (es. "Luca,Elisabetta,Marco"); da lasciare
+  vuota se l'associazione ha un solo istruttore, così il campo non viene mostrato e il Resoconto
+  presenta un unico prospetto
 - Ogni tenant ha il proprio realm Keycloak, database e deploy (nel proprio namespace Kubernetes)
 
 ## Deploy (VPC / Kubernetes)
@@ -676,6 +681,7 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 
 | Nome | Descrizione | Esempio | Default | Usata da |
 |------|-------------|---------|---------|----------|
+| `VITE_SELECT_ISTRUTTORI_VALUES` | Istruttori selezionabili nel form "Nuovo incontro" (lista separata da virgole, il primo è preselezionato), compilata nel bundle frontend. Non impostarla è una scelta valida: il campo "Istruttore" non appare né nel form né nella tabella incontri, e il Resoconto mostra un unico prospetto senza raggruppamenti — il caso dell'associazione con un solo istruttore | `Luca,Elisabetta,Marco` | *(vuota: campo non mostrato)* | Build & Deploy |
 | `SSH_PORT` | Porta SSH della VPS | `22` | `22` | Infra, Build & Deploy |
 | `DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Build & Deploy — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubmanager/k8s` | `/opt/clubmanager/k8s` | Build & Deploy |
 | `INFRA_DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Infra (diverso da `DEPLOY_PATH` per non mischiarli) — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubmanager/infra` | `/opt/clubmanager/infra` | Infra |
