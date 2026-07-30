@@ -208,12 +208,13 @@ echo "  Giulia Verdi  -> $GIULIA_ID"
 # ------------------------------------------------------------
 echo "▶ Creo i voucher..."
 
-# data_creazione esplicita e non il default NOW(): il voucher deve esistere
-# prima dei movimenti che lo muovono. Lasciandola a "oggi", la lista mostrava
-# voucher creati stamattina con addebiti di venti giorni fa. 30 giorni copre
-# l'incontro demo più vecchio (Giulia, 20 giorni fa) ed è successiva alla data
-# di iscrizione di tutti e tre i soci.
-VOUCHER_CREATO="NOW() - INTERVAL '30 days'"
+# data_creazione esplicita e non il default CURRENT_DATE: il voucher deve
+# esistere prima dei movimenti che lo muovono. Lasciandola a "oggi", la lista
+# mostrava voucher creati stamattina con addebiti di venti giorni fa. 30
+# giorni copre l'incontro demo più vecchio (Giulia, 20 giorni fa) ed è
+# successiva alla data di iscrizione di tutti e tre i soci.
+# CURRENT_DATE e non NOW(): data_creazione è una DATE, non un TIMESTAMP.
+VOUCHER_CREATO="CURRENT_DATE - INTERVAL '30 days'"
 
 MARIO_VOUCHER_ID=$(psql_scalar "
   INSERT INTO voucher (socio_id, saldo_iniziale, data_creazione)
@@ -311,7 +312,7 @@ crea_incontro_con_addebito "$GIULIA_ID" "$GIULIA_VOUCHER_ID" "$(days_ago 5)" "Pa
 # Ricarica (movimento senza incontro collegato), precedente ai due incontri
 psql_exec "
   INSERT INTO movimento_voucher (voucher_id, incontro_id, data_movimento, importo, descrizione)
-  VALUES ('$LAURA_VOUCHER_ID', NULL, NOW() - INTERVAL '15 days', 50.00, 'Ricarica voucher');
+  VALUES ('$LAURA_VOUCHER_ID', NULL, CURRENT_DATE - INTERVAL '15 days', 50.00, 'Ricarica voucher');
 "
 crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 8)" "K9 Cross Training" 40.00 "$NOTA_MD_K9" true
 crea_incontro_con_addebito "$LAURA_ID" "$LAURA_VOUCHER_ID" "$(days_ago 1)" "Piscina" 60.00 "Idroterapia"

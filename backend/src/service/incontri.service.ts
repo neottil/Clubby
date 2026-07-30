@@ -58,7 +58,7 @@ function descrizioneAddebito(attivita: string): string {
 export async function listIncontri(socioId?: string): Promise<Incontro[]> {
   if (socioId) {
     const result = await query(
-      `SELECT * FROM incontro WHERE socio_id = :socioId ORDER BY data_incontro DESC`,
+      `SELECT * FROM incontro WHERE socio_id = :socioId ORDER BY data_incontro DESC, created_at DESC`,
       { socioId }
     );
     return result.rows.map(toIncontro);
@@ -68,7 +68,7 @@ export async function listIncontri(socioId?: string): Promise<Incontro[]> {
     `SELECT i.*, s.nome, s.cognome
      FROM incontro i
      JOIN socio s ON s.id = i.socio_id
-     ORDER BY i.data_incontro DESC`
+     ORDER BY i.data_incontro DESC, i.created_at DESC`
   );
   return result.rows.map(toIncontro);
 }

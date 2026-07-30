@@ -31,7 +31,8 @@ export interface CreateMovimentoInput {
   importo: number;
   descrizione?: string;
   incontro_id?: string;
-  // Omessa = adesso (ricariche e correzioni manuali, che avvengono nel momento
+  // Data di calendario "YYYY-MM-DD" (la colonna è una DATE).
+  // Omessa = oggi (ricariche e correzioni manuali, che avvengono nel momento
   // in cui l'admin le inserisce). L'addebito generato da un incontro la
   // valorizza invece con la data dell'incontro: un incontro registrato in
   // ritardo, o programmato in avanti, avrebbe altrimenti un movimento datato
@@ -59,7 +60,7 @@ export async function listVouchers(socioId?: string): Promise<Voucher[]> {
        LEFT JOIN movimento_voucher m ON m.voucher_id = b.id
        ${socioId ? 'WHERE b.socio_id = :socioId' : ''}
        GROUP BY b.id
-       ORDER BY b.data_creazione DESC`;
+       ORDER BY b.data_creazione DESC, b.created_at DESC`;
 
   const params = socioId ? { socioId } : {};
   const result = await query(sql, params);
@@ -143,9 +144,12 @@ export async function listMovimenti(voucherId: string): Promise<MovimentoVoucher
     // Nessuna JOIN con incontro: l'attività è già dentro descrizione
     // ("Incontro: {attivita}", scritta da incontri.service.ts) e il dettaglio
     // completo si carica a parte quando l'utente apre la riga (GET /incontri/:id).
+    // created_at come spareggio: data_movimento è una DATE, quindi due
+    // movimenti dello stesso giorno (tipico: ricarica e addebito) avrebbero
+    // altrimenti un ordine non deterministico, diverso da un refresh all'altro.
     `SELECT * FROM movimento_voucher
      WHERE voucher_id = :voucherId
-     ORDER BY data_movimento DESC`,
+     ORDER BY data_movimento DESC, created_at DESC`,
     { voucherId }
   );
   return result.rows.map(toMovimento);
@@ -188,11 +192,11 @@ export async function createMovimento(
   }
 
   const result = await q(
-    // CAST(... AS TIMESTAMP) e non "::timestamp": il convertitore di parametri
-    // con nome (db/client.ts) sostituisce ogni ":parola", quindi interpreterebbe
-    // "::timestamp" come un secondo parametro chiamato "timestamp".
+    // CAST(... AS DATE) e non "::date": il convertitore di parametri con nome
+    // (db/client.ts) sostituisce ogni ":parola", quindi interpreterebbe
+    // "::date" come un secondo parametro chiamato "date".
     `INSERT INTO movimento_voucher (voucher_id, importo, descrizione, incontro_id, data_movimento)
-     VALUES (:voucherId, :importo, :descrizione, :incontroId, COALESCE(CAST(:dataMovimento AS TIMESTAMP), NOW()))
+     VALUES (:voucherId, :importo, :descrizione, :incontroId, COALESCE(CAST(:dataMovimento AS DATE), CURRENT_DATE))
      RETURNING *`,
     {
       voucherId,
@@ -253,7 +257,7 @@ export async function updateMovimentoDaIncontro(
 ): Promise<void> {
   await q(
     `UPDATE movimento_voucher
-     SET data_movimento = CAST(:dataMovimento AS TIMESTAMP), descrizione = :descrizione
+     SET data_movimento = CAST(:dataMovimento AS DATE), descrizione = :descrizione
      WHERE id = :id`,
     { id, dataMovimento: input.data_movimento, descrizione: input.descrizione }
   );

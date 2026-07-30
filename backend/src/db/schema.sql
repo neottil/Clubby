@@ -9,6 +9,20 @@
 -- Estensione per UUID
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- ------------------------------------------------------------
+-- Convenzione sui tipi temporali
+-- ------------------------------------------------------------
+-- DATE          → date di calendario inserite da un utente (iscrizione,
+--                 incontro, movimento). Non sono istanti: un incontro è "il 28
+--                 luglio" ovunque lo si guardi, e convertirlo in un istante lo
+--                 farebbe scivolare al giorno prima o dopo a seconda del fuso.
+-- TIMESTAMPTZ   → istanti generati dal sistema (created_at/updated_at, usati
+--                 per audit e per ordinare a parità di data). Qui il fuso c'è
+--                 davvero ed è quello del momento della scrittura.
+-- TIMESTAMP     → da evitare: non ha fuso ma il driver pg lo converte come se
+--                 ne avesse (vedi il type parser in db/client.ts).
+-- ------------------------------------------------------------
+
 -- ============================================================
 -- Tabella: socio
 -- ============================================================
@@ -21,8 +35,8 @@ CREATE TABLE IF NOT EXISTS socio (
   data_iscrizione DATE NOT NULL DEFAULT CURRENT_DATE,
   id_viewer       VARCHAR(255) NULL,   -- Keycloak user ID del viewer associato
   note            TEXT,
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_socio_email    ON socio(email);
@@ -51,8 +65,8 @@ CREATE TABLE IF NOT EXISTS incontro (
   -- "*" o "#" verrebbe altrimenti interpretato come sintassi Markdown).
   -- Default false: tutte le note già presenti restano testo semplice.
   note_markdown   BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- idx_incontro_data resta: serve alla lista globale (listIncontri() senza
@@ -62,8 +76,11 @@ CREATE INDEX IF NOT EXISTS idx_incontro_data       ON incontro(data_incontro);
 -- di questo indice composito copre già "WHERE socio_id = ..." da solo).
 -- listIncontri(socioId) filtra per socio_id E ordina per data_incontro DESC:
 -- questo indice evita il sort separato dopo il filtro.
+-- created_at in coda: data_incontro è una DATE, quindi più incontri dello
+-- stesso socio nello stesso giorno hanno bisogno di uno spareggio stabile.
 DROP INDEX IF EXISTS idx_incontro_socio;
-CREATE INDEX IF NOT EXISTS idx_incontro_socio_data ON incontro(socio_id, data_incontro DESC);
+DROP INDEX IF EXISTS idx_incontro_socio_data;
+CREATE INDEX IF NOT EXISTS idx_incontro_socio_data_creato ON incontro(socio_id, data_incontro DESC, created_at DESC);
 
 -- ============================================================
 -- Tabella: voucher
@@ -71,16 +88,20 @@ CREATE INDEX IF NOT EXISTS idx_incontro_socio_data ON incontro(socio_id, data_in
 CREATE TABLE IF NOT EXISTS voucher (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   socio_id        UUID NOT NULL REFERENCES socio(id) ON DELETE CASCADE,
-  data_creazione  TIMESTAMP NOT NULL DEFAULT NOW(),
+  data_creazione  DATE NOT NULL DEFAULT CURRENT_DATE,
   saldo_iniziale  DECIMAL(10,2) NOT NULL CHECK (saldo_iniziale >= 0),
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_voucher_socio ON voucher(socio_id);
 -- listVouchers() senza filtro socio (vouchers.service.ts) ordina sempre per
 -- data_creazione DESC su tutti i vouchers.
-CREATE INDEX IF NOT EXISTS idx_voucher_data ON voucher(data_creazione DESC);
+-- created_at in coda per lo stesso motivo di idx_movimento_voucher_data_creato:
+-- data_creazione è una DATE, e più vouchers creati lo stesso giorno vanno
+-- comunque ordinati in modo stabile.
+DROP INDEX IF EXISTS idx_voucher_data;
+CREATE INDEX IF NOT EXISTS idx_voucher_data_creato ON voucher(data_creazione DESC, created_at DESC);
 
 -- ============================================================
 -- Tabella: movimento_voucher
@@ -89,10 +110,13 @@ CREATE TABLE IF NOT EXISTS movimento_voucher (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   voucher_id      UUID NOT NULL REFERENCES voucher(id) ON DELETE CASCADE,
   incontro_id     UUID REFERENCES incontro(id) ON DELETE CASCADE,
-  data_movimento  TIMESTAMP NOT NULL DEFAULT NOW(),
+  -- DATE e non TIMESTAMP: per un addebito è la data dell'incontro che lo
+  -- genera, che è una data di calendario. A parità di giorno l'ordine dei
+  -- movimenti è dato da created_at (vedi listMovimenti).
+  data_movimento  DATE NOT NULL DEFAULT CURRENT_DATE,
   importo         DECIMAL(10,2) NOT NULL,  -- positivo = ricarica, negativo = addebito
   descrizione     TEXT,
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Sostituisce idx_movimento_voucher e idx_movimento_data (colonne singole):
@@ -102,7 +126,13 @@ CREATE TABLE IF NOT EXISTS movimento_voucher (
 -- e idx_movimento_voucher è ridondante col prefisso di questo indice composito.
 DROP INDEX IF EXISTS idx_movimento_voucher;
 DROP INDEX IF EXISTS idx_movimento_data;
-CREATE INDEX IF NOT EXISTS idx_movimento_voucher_data ON movimento_voucher(voucher_id, data_movimento DESC);
+-- created_at in coda: da quando data_movimento è una DATE, due movimenti dello
+-- stesso giorno hanno la stessa chiave di ordinamento e Postgres non garantisce
+-- un ordine stabile fra loro (la lista poteva cambiare da un refresh all'altro).
+-- listMovimenti ordina quindi per data_movimento DESC, created_at DESC, e
+-- l'indice copre entrambe le colonne per evitare un sort dopo lo scan.
+DROP INDEX IF EXISTS idx_movimento_voucher_data;
+CREATE INDEX IF NOT EXISTS idx_movimento_voucher_data_creato ON movimento_voucher(voucher_id, data_movimento DESC, created_at DESC);
 -- Un incontro genera al più un movimento (creato/aggiornato/rimosso in modo atomico insieme all'incontro)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_movimento_incontro_unique ON movimento_voucher(incontro_id) WHERE incontro_id IS NOT NULL;
 
