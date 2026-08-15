@@ -58,6 +58,40 @@ async function request<T>(
   return res.json();
 }
 
+/**
+ * Risposta degli endpoint a elenco paginato. `total` è il numero di righe che
+ * soddisfano il filtro, non quante ne sono state restituite: serve a sapere se
+ * c'è dell'altro da caricare.
+ */
+export interface Paginated<T> {
+  data: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Query string dai soli parametri valorizzati (gli altri restano ai default del backend). */
+function queryString(params: Record<string, string | number | undefined>): string {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') qs.set(key, String(value));
+  }
+  const s = qs.toString();
+  return s ? `?${s}` : '';
+}
+
+export interface IncontriQuery {
+  socio_id?: string;
+  q?: string;
+  attivita?: string;
+  da?: string;
+  a?: string;
+  sort?: string;
+  dir?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
+}
+
 // ---------------------------------------------------------------
 // Factory: crea un client con il token iniettato
 // ---------------------------------------------------------------
@@ -70,8 +104,12 @@ export function createApiClient(token: string | null) {
     updateSocio:    (id: string, body: any) => request<any>(`/api/soci/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
     deleteSocio:    (id: string)          => request<void>(`/api/soci/${id}`, { method: 'DELETE' }, token),
 
-    // Incontri
-    getIncontri:    (socioId?: string)    => request<any[]>(`/api/incontri${socioId ? `?socio_id=${socioId}` : ''}`, {}, token),
+    // Incontri — elenco paginato: filtri e ordinamento sono applicati dal
+    // backend, perché il client ne vede una pagina per volta.
+    getIncontri:    (params: IncontriQuery = {}) => request<Paginated<any>>(`/api/incontri${queryString(params as Record<string, string | number | undefined>)}`, {}, token),
+    // Resoconto già aggregato per istruttore/attività: non scarica gli
+    // incontri, quindi non è soggetto alla paginazione dell'elenco.
+    getResoconto:   (da?: string, a?: string) => request<any[]>(`/api/incontri/resoconto${queryString({ da, a })}`, {}, token),
     getIncontro:    (id: string)          => request<any>(`/api/incontri/${id}`, {}, token),
     createIncontro: (body: any)           => request<any>('/api/incontri', { method: 'POST', body: JSON.stringify(body) }, token),
     updateIncontro: (id: string, body: any) => request<any>(`/api/incontri/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
@@ -82,7 +120,8 @@ export function createApiClient(token: string | null) {
     createVoucher:    (body: any)           => request<any>('/api/voucher', { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Movimenti
-    getMovimenti:   (voucherId: string)     => request<any[]>(`/api/voucher/${voucherId}/movimenti`, {}, token),
+    getMovimenti:   (voucherId: string, params: { limit?: number; offset?: number } = {}) =>
+      request<Paginated<any>>(`/api/voucher/${voucherId}/movimenti${queryString(params)}`, {}, token),
     createMovimento:(voucherId: string, body: any) => request<any>(`/api/voucher/${voucherId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Admin

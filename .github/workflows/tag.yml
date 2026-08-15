@@ -43,9 +43,25 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      # Il checkout usa WORKFLOW_PAT (non il GITHUB_TOKEN di default) perché
+      # questo job tagga un commit "vecchio" (l'ultimo <scope>-main-* deployato,
+      # non necessariamente la punta attuale di main): GitHub blocca un push di
+      # tag da GITHUB_TOKEN quando il contenuto di .github/workflows/ in quel
+      # commit non è identico a quello dell'ultimo commit di un branch —
+      # condizione quasi certa qui, dato che main può essere avanzato nel
+      # frattempo. I job che taggano sempre HEAD (register-backend-tag/
+      # register-frontend-tag in build-deploy.yml) non hanno questo problema e
+      # restano sul GITHUB_TOKEN di default — solo qui serve un PAT con scope
+      # `workflow`. Va creato manualmente (repo o fine-grained scoped a questo
+      # repo, permesso "Workflows: Read and write") e salvato come secret
+      # `WORKFLOW_PAT` — non riusare il PAT di GHCR (quello finisce in un
+      # Secret k8s persistito sul cluster: dargli anche scope `workflow`
+      # esporrebbe la possibilità di modificare i workflow CI/CD a chiunque
+      # legga quel Secret, un'escalation non necessaria).
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PAT }}
 
       - name: Config git
         run: |

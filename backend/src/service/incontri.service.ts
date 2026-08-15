@@ -52,6 +52,54 @@ function toIncontro(row: unknown): Incontro {
 }
 
 /**
+ * Pagina di risultati: le righe richieste più il totale di quante ne
+ * soddisfano il filtro (non quante ne sono state restituite). Il totale serve
+ * al frontend per sapere se c'è dell'altro da caricare e per dire "25 di 340".
+ */
+export interface Page<T> {
+  rows: T[];
+  total: number;
+}
+
+export interface ListIncontriOptions {
+  socioId?: string;
+  /** Ricerca libera su cognome, nome e attività. */
+  q?: string;
+  attivita?: string;
+  /** Estremi inclusi, "YYYY-MM-DD". */
+  da?: string;
+  a?: string;
+  sort?: string;
+  dir?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Colonne su cui è permesso ordinare, mappate sull'SQL corrispondente.
+ *
+ * Whitelist e non interpolazione diretta: ORDER BY non è parametrizzabile
+ * come un valore, quindi il nome di colonna finisce concatenato nell'SQL —
+ * accettare una stringa arbitraria dal client sarebbe un'iniezione. Le chiavi
+ * sono quelle usate dal frontend per le intestazioni della tabella.
+ */
+// Il valore è la lista di colonne che compongono l'ordinamento: la direzione
+// va ripetuta su ognuna, perché in SQL ASC/DESC vale per la singola colonna —
+// "ORDER BY cognome, nome DESC" ordinerebbe i cognomi in modo crescente.
+const SORT_COLUMNS: Record<string, string[]> = {
+  socioNome:     ['s.cognome', 's.nome'],
+  data_incontro: ['i.data_incontro'],
+  attivita:      ['i.attivita'],
+  istruttore:    ['i.istruttore'],
+  costo:         ['i.costo'],
+};
+
+const DEFAULT_LIMIT = 25;
+// Tetto massimo per una singola pagina: senza, un client potrebbe chiedere
+// limit=1000000 e riportare il problema che la paginazione serve a evitare.
+const MAX_LIMIT = 200;
+
+/**
  * Descrizione del movimento di addebito generato da un incontro.
  *
  * Unico punto in cui viene composta: la usano sia la creazione sia la modifica
@@ -62,22 +110,136 @@ function descrizioneAddebito(attivita: string): string {
   return `Incontro: ${attivita}`;
 }
 
-export async function listIncontri(socioId?: string): Promise<Incontro[]> {
-  if (socioId) {
-    const result = await query(
-      `SELECT * FROM incontro WHERE socio_id = :socioId ORDER BY data_incontro DESC, created_at DESC`,
-      { socioId }
-    );
-    return result.rows.map(toIncontro);
+/**
+ * Elenco paginato degli incontri, filtrato e ordinato dal database.
+ *
+ * Filtri e ordinamento stanno qui e non nel browser perché il frontend riceve
+ * una pagina per volta: filtrare le sole righe già caricate darebbe risultati
+ * falsi (un socio che sta nella pagina successiva risulterebbe inesistente).
+ *
+ * La JOIN con socio è sempre presente, anche filtrando per un singolo socio:
+ * così ogni riga porta con sé nome e cognome e la ricerca libera può cercare
+ * anche sul nominativo, senza che il chiamante debba incrociare a parte
+ * l'elenco dei soci.
+ */
+export async function listIncontri(options: ListIncontriOptions = {}): Promise<Page<Incontro>> {
+  const limit  = Math.min(Math.max(1, options.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
+  const offset = Math.max(0, options.offset ?? 0);
+
+  const where: string[] = [];
+  const params: Record<string, unknown> = { limit, offset };
+
+  if (options.socioId) {
+    where.push('i.socio_id = :socioId');
+    params.socioId = options.socioId;
+  }
+  if (options.attivita) {
+    where.push('i.attivita = :attivita');
+    params.attivita = options.attivita;
+  }
+  // CAST(... AS DATE) e non "::date": il convertitore di parametri con nome
+  // (db/client.ts) sostituisce ogni ":parola" e leggerebbe "::date" come un
+  // secondo parametro chiamato "date".
+  if (options.da) {
+    where.push('i.data_incontro >= CAST(:da AS DATE)');
+    params.da = options.da;
+  }
+  if (options.a) {
+    where.push('i.data_incontro <= CAST(:a AS DATE)');
+    params.a = options.a;
+  }
+  if (options.q?.trim()) {
+    where.push(`(s.cognome ILIKE :q OR s.nome ILIKE :q OR i.attivita ILIKE :q)`);
+    params.q = `%${options.q.trim()}%`;
+  }
+
+  const orderColumns = SORT_COLUMNS[options.sort ?? ''] ?? SORT_COLUMNS.data_incontro;
+  const orderDir     = options.dir === 'asc' ? 'ASC' : 'DESC';
+  // created_at come spareggio: le date sono DATE, quindi più incontri dello
+  // stesso giorno avrebbero altrimenti un ordine che Postgres non garantisce
+  // stabile — e con la paginazione un ordine instabile fa comparire due volte
+  // la stessa riga in pagine diverse, o sparire un'altra.
+  const orderBy = `${orderColumns.map(c => `${c} ${orderDir}`).join(', ')}, i.created_at DESC`;
+
+  const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+
+  // COUNT(*) OVER(): il totale delle righe che passano il filtro viene
+  // calcolato dalla stessa query che restituisce la pagina, evitando una
+  // seconda andata e ritorno al database con gli stessi filtri da tenere
+  // sincronizzati a mano.
+  const result = await query(
+    `SELECT i.*, s.nome, s.cognome, COUNT(*) OVER() AS total_count
+     FROM incontro i
+     JOIN socio s ON s.id = i.socio_id
+     ${whereSql}
+     ORDER BY ${orderBy}
+     LIMIT :limit OFFSET :offset`,
+    params
+  );
+
+  const total = result.rows.length > 0 ? Number(result.rows[0].total_count) : 0;
+  const rows = result.rows.map(row => {
+    // total_count è un dettaglio della query, non un campo dell'incontro:
+    // lasciarlo passerebbe nel JSON di ogni riga.
+    const { total_count: _ignored, ...incontro } = row as Record<string, unknown>;
+    return toIncontro(incontro);
+  });
+
+  return { rows, total };
+}
+
+/** Una riga del resoconto: un'attività di un istruttore, con conteggio e costo. */
+export interface RigaResoconto {
+  /** null per gli incontri senza istruttore (vedi la colonna in schema.sql). */
+  istruttore: string | null;
+  attivita: string;
+  incontri: number;
+  costo: number;
+}
+
+/**
+ * Resoconto aggregato degli incontri di un periodo, raggruppati per istruttore
+ * e attività.
+ *
+ * L'aggregazione è in SQL e non nel browser perché il resoconto ha bisogno di
+ * *tutti* gli incontri del periodo: con l'elenco paginato il frontend ne vedrebbe
+ * solo una pagina e produrrebbe totali più bassi del vero, senza alcun segnale
+ * che manchi qualcosa. Qui il traffico è invece proporzionale al numero di
+ * combinazioni istruttore/attività — poche decine — non al numero di incontri.
+ *
+ * Include anche i gruppi con istruttore NULL: sta al chiamante decidere come
+ * presentarli (ResocontoPage li dichiara come esclusi dai prospetti).
+ */
+export async function resocontoIncontri(da?: string, a?: string): Promise<RigaResoconto[]> {
+  const where: string[] = [];
+  const params: Record<string, unknown> = {};
+
+  if (da) {
+    where.push('data_incontro >= CAST(:da AS DATE)');
+    params.da = da;
+  }
+  if (a) {
+    where.push('data_incontro <= CAST(:a AS DATE)');
+    params.a = a;
   }
 
   const result = await query(
-    `SELECT i.*, s.nome, s.cognome
-     FROM incontro i
-     JOIN socio s ON s.id = i.socio_id
-     ORDER BY i.data_incontro DESC, i.created_at DESC`
+    `SELECT istruttore, attivita, COUNT(*) AS incontri, SUM(costo) AS costo
+     FROM incontro
+     ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+     GROUP BY istruttore, attivita
+     ORDER BY istruttore NULLS LAST, SUM(costo) DESC`,
+    params
   );
-  return result.rows.map(toIncontro);
+
+  // COUNT e SUM arrivano come stringa (bigint e numeric via JSON): convertiti
+  // qui, così il frontend riceve numeri e non deve ricordarsi di farlo.
+  return result.rows.map(row => ({
+    istruttore: (row.istruttore as string | null) ?? null,
+    attivita:   row.attivita as string,
+    incontri:   Number(row.incontri),
+    costo:      Number(row.costo),
+  }));
 }
 
 export async function getIncontroById(id: string, q: QueryFn = query): Promise<Incontro> {

@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
 import { config, istruttoriAbilitati } from '../config';
 import SocioSelect from '../components/SocioSelect';
 import ActivitySelect from '../components/ActivitySelect';
-import DateRangeFilter, { isInDateRange } from '../components/DateRangeFilter';
-import { useTableSort } from '../hooks/useTableSort';
+import DateRangeFilter from '../components/DateRangeFilter';
 import TableScroll from '../components/TableScroll';
 import Modal from '../components/Modal';
 import { MarkdownEditor, MarkdownView } from '../components/MarkdownEditor';
@@ -36,6 +35,11 @@ interface Voucher { id: string; socio_id: string; saldo_residuo: number; }
 const emptyForm = { socio_id: '', data_incontro: '', attivita: '', istruttore: '', costo: '', note: '', note_markdown: false };
 const activityOptions = Object.keys(config.activityCostMapping);
 
+// Righe caricate a ogni "Carica altri". Allineato al default del backend
+// (incontri.service.ts): non è un vincolo, ma tenere lo stesso valore evita
+// pagine di dimensione diversa a seconda di chi decide.
+const PAGE_SIZE = 25;
+
 // Righe della tabella arricchite col nome del socio: è la forma su cui lavorano
 // ordinamento e ricerca, non l'Incontro grezzo dell'API.
 type IncontroRiga = Incontro & { socioNome: string };
@@ -55,9 +59,13 @@ export default function IncontriPage() {
   const api = createApiClient(token);
 
   const [incontri, setIncontri] = useState<Incontro[]>([]);
+  // Quanti incontri soddisfano i filtri in tutto, non quanti ne sono caricati:
+  // è ciò che dice se c'è ancora qualcosa da caricare.
+  const [total, setTotal]       = useState(0);
   const [soci, setSoci]         = useState<Socio[]>([]);
   const [vouchers, setVouchers]     = useState<Voucher[]>([]);
   const [loading, setLoading]   = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError]       = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId]     = useState<string | null>(null);
@@ -67,24 +75,86 @@ export default function IncontriPage() {
   const [attivitaFilter, setAttivitaFilter] = useState('');
   const [dataDa, setDataDa]           = useState('');
   const [dataA, setDataA]             = useState('');
+  // Ordinamento: applicato dal database, non sull'array già caricato — con i
+  // dati a pagine, riordinare in locale ordinerebbe solo la parte visibile.
+  // Default: data decrescente, cioè gli incontri più recenti per primi.
+  const [sortKey, setSortKey]   = useState<string>('data_incontro');
+  const [sortDir, setSortDir]   = useState<'asc' | 'desc'>('desc');
   // Incontro di cui è aperta la modale di lettura della nota.
   const [notaAperta, setNotaAperta]   = useState<Incontro | null>(null);
 
+  // Testo di ricerca "calmato": senza, ogni tasto premuto farebbe una chiamata
+  // al backend. Si aspetta una breve pausa nella digitazione.
+  const [filtroCercato, setFiltroCercato] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setFiltroCercato(filter), 300);
+    return () => clearTimeout(t);
+  }, [filter]);
+
+  // Identifica la richiesta di elenco più recente: le risposte possono
+  // arrivare fuori ordine (cambio filtro rapido), e senza questo confronto una
+  // risposta vecchia potrebbe sovrascrivere quella nuova.
+  const richiestaCorrente = useRef(0);
+
+  const queryFiltri = () => ({
+    q: filtroCercato || undefined,
+    attivita: attivitaFilter || undefined,
+    da: dataDa || undefined,
+    a: dataA || undefined,
+    sort: sortKey,
+    dir: sortDir,
+    limit: PAGE_SIZE,
+  });
+
+  /** Ricarica dall'inizio: primo chunk, sostituendo quanto già caricato. */
   const load = async () => {
+    const richiesta = ++richiestaCorrente.current;
     setLoading(true);
     try {
-      const [i, s, b] = await Promise.all([api.getIncontri(), api.getSoci(), api.getVouchers()]);
-      setIncontri(i);
+      const [i, s, b] = await Promise.all([
+        api.getIncontri({ ...queryFiltri(), offset: 0 }),
+        api.getSoci(),
+        api.getVouchers(),
+      ]);
+      if (richiesta !== richiestaCorrente.current) return;
+      setIncontri(i.data);
+      setTotal(i.total);
       setSoci(s);
       setVouchers(b);
     } catch (e: any) {
-      setError(e.message);
+      if (richiesta === richiestaCorrente.current) setError(e.message);
     } finally {
-      setLoading(false);
+      if (richiesta === richiestaCorrente.current) setLoading(false);
     }
   };
 
-  useEffect(() => { load(); }, []);
+  /** Aggiunge il chunk successivo in coda a quelli già mostrati. */
+  const caricaAltri = async () => {
+    const richiesta = richiestaCorrente.current;
+    setLoadingMore(true);
+    try {
+      const i = await api.getIncontri({ ...queryFiltri(), offset: incontri.length });
+      // Un cambio di filtro mentre il chunk era in volo ha già rimpiazzato la
+      // lista: accodare queste righe le mescolerebbe a un filtro diverso.
+      if (richiesta !== richiestaCorrente.current) return;
+      setIncontri(prev => [...prev, ...i.data]);
+      setTotal(i.total);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Ogni cambio di filtro o di ordinamento riparte dalla prima pagina: le
+  // righe già caricate rispondevano a criteri diversi.
+  useEffect(() => { load(); }, [filtroCercato, attivitaFilter, dataDa, dataA, sortKey, sortDir]);
+
+  const toggleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+  const sortIndicator = (key: string) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
 
   const socioLabel = (id: string) => {
     const s = soci.find(x => x.id === id);
@@ -154,33 +224,24 @@ export default function IncontriPage() {
     catch (e: any) { setError(e.message); }
   };
 
+  // Nome del socio: arriva già con la riga (il backend fa sempre la JOIN con
+  // socio), il fallback copre solo il caso di un socio cancellato.
   const enriched = useMemo(() => incontri.map(i => ({
     ...i,
     socioNome: i.cognome && i.nome ? `${i.cognome} ${i.nome}` : socioLabel(i.socio_id),
   })), [incontri, soci]);
 
-  const attivitaPresenti = useMemo(
-    () => Array.from(new Set(enriched.map(i => i.attivita))).sort(),
-    [enriched]
-  );
-
-  const filtered = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    return enriched.filter(i => {
-      if (attivitaFilter && i.attivita !== attivitaFilter) return false;
-      if (!isInDateRange(i.data_incontro, dataDa, dataA)) return false;
-      if (!q) return true;
-      // Le note sono escluse dalla ricerca: da quando possono essere Markdown
-      // il testo cercato non coincide più con quello mostrato (la nota si
-      // legge nella modale, e la sintassi "**" o "#" sporcherebbe il match).
-      return `${i.socioNome} ${i.attivita}`.toLowerCase().includes(q);
-    });
-  }, [enriched, filter, attivitaFilter, dataDa, dataA]);
-
-  const { sorted, toggleSort, sortIndicator } = useTableSort(filtered, {
-    initialKey: 'data_incontro',
-    numericKeys: ['costo'],
-  });
+  // Attività proposte nel filtro: quelle configurate, non quelle ricavate
+  // dalle righe caricate. Con l'elenco a pagine, quelle presenti nei chunk già
+  // scaricati sono un sottoinsieme arbitrario — l'elenco cambierebbe man mano
+  // che si carica, e mancherebbero attività che esistono più avanti.
+  const attivitaFiltrabili = useMemo(() => {
+    const presenti = new Set(activityOptions);
+    // Un'attività salvata ma non più in configurazione resta filtrabile finché
+    // compare fra le righe caricate.
+    for (const i of incontri) presenti.add(i.attivita);
+    return [...presenti].sort();
+  }, [incontri]);
 
   if (loading) return <div style={styles.loading}>Caricamento...</div>;
 
@@ -201,12 +262,9 @@ export default function IncontriPage() {
             onChange={e => setFilter(e.target.value)}
           />
         )}
-        {/* Filtra tra le sole attività effettivamente presenti negli incontri
-            caricati, non tra quelle configurate: filtrare per un'attività che
-            nessun incontro ha svuoterebbe la tabella senza motivo apparente. */}
         <div style={styles.filterSelect}>
           <ActivitySelect
-            options={attivitaPresenti}
+            options={attivitaFiltrabili}
             value={attivitaFilter}
             onChange={setAttivitaFilter}
             resetLabel='Tutte le attività'
@@ -323,7 +381,7 @@ export default function IncontriPage() {
             </tr>
           </thead>
           <tbody>
-            {sorted.map(i => (
+            {enriched.map(i => (
               <tr key={i.id} style={styles.tr}>
                 <td style={styles.td}>{i.socioNome}</td>
                 <td style={styles.td}>{String(i.data_incontro).split('T')[0]}</td>
@@ -346,8 +404,23 @@ export default function IncontriPage() {
           </tbody>
         </table>
       </TableScroll>
-      {sorted.length === 0 && !loading && (
+      {enriched.length === 0 && !loading && (
         <p style={styles.empty}>{filter || attivitaFilter || dataDa || dataA ? 'Nessun incontro corrisponde ai filtri.' : 'Nessun incontro registrato.'}</p>
+      )}
+
+      {/* Caricamento incrementale: la tabella mostra i primi risultati e si
+          allunga a richiesta, invece di scaricare l'intero storico all'apertura.
+          Il contatore dice sempre a che punto si è del totale filtrato, così
+          "Carica altri" non è un pozzo senza fondo. */}
+      {enriched.length > 0 && (
+        <div style={styles.paginazione}>
+          <span style={styles.conteggio}>{enriched.length} di {total}</span>
+          {enriched.length < total && (
+            <button style={styles.btnSecondary} onClick={caricaAltri} disabled={loadingMore}>
+              {loadingMore ? 'Caricamento...' : 'Carica altri'}
+            </button>
+          )}
+        </div>
       )}
 
       {notaAperta && (
@@ -391,6 +464,8 @@ const styles: Record<string, React.CSSProperties> = {
   readOnlyField: { width: '100%', padding: '8px 12px', borderRadius: 6, background: '#f1f5f9', color: '#555', fontSize: 14, boxSizing: 'border-box' },
   formActions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 },
   filterRow: { display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' },
+  paginazione: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap' },
+  conteggio: { fontSize: 13, color: '#666' },
   filterInput: { flex: 1, minWidth: 240, padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
   // Contenitore dell'ActivitySelect di filtro: il bordo/padding sono ora del
   // suo input interno, qui resta solo la larghezza nella riga dei filtri.

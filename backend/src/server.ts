@@ -45,6 +45,9 @@ const ROUTES: Array<{
   { pattern: /^\/api\/version$/,                     handler: versionHandler,   param: null },
   { pattern: /^\/api\/soci\/([^/]+)$/,               handler: sociHandler,      param: 'id' },
   { pattern: /^\/api\/soci$/,                        handler: sociHandler,      param: null },
+  // Prima della rotta con :id, altrimenti "resoconto" verrebbe interpretato
+  // come l'id di un incontro (le rotte sono valutate in ordine).
+  { pattern: /^\/api\/incontri\/resoconto$/,         handler: incontriHandler,  param: null },
   { pattern: /^\/api\/incontri\/([^/]+)$/,           handler: incontriHandler,  param: 'id' },
   { pattern: /^\/api\/incontri$/,                    handler: incontriHandler,  param: null },
   { pattern: /^\/api\/voucher\/([^/]+)\/movimenti$/, handler: vouchersHandler,  param: 'id' },

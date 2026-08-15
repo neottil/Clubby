@@ -9,6 +9,7 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 - Attribuzione degli incontri a un istruttore, per le associazioni che ne hanno più di uno
 - Voucher prepagati
 - Resoconto (solo admin): incontri e costi di un periodo, raggruppati per istruttore e attività
+- Elenchi di incontri e movimenti caricati a blocchi, per non scaricare l'intero storico a ogni apertura
 
 ## Architettura
 
@@ -52,14 +53,15 @@ Tutte le API richiedono un JWT Keycloak valido (Bearer token).
 | GET | `/api/soci/:id` | Dettaglio socio | admin / viewer (solo il proprio) |
 | PUT | `/api/soci/:id` | Modifica socio | admin |
 | DELETE | `/api/soci/:id` | Elimina socio | admin |
-| GET | `/api/incontri` | Lista incontri (admin: tutti, viewer: solo i propri) | admin / viewer |
+| GET | `/api/incontri` | Lista incontri **paginata** (admin: tutti, viewer: solo i propri) — vedi [Elenchi paginati](#elenchi-paginati) | admin / viewer |
+| GET | `/api/incontri/resoconto` | Incontri e costi aggregati per istruttore e attività (`?da=&a=`) | admin |
 | POST | `/api/incontri` | Crea incontro | admin |
 | GET | `/api/incontri/:id` | Dettaglio incontro | admin / viewer (solo il proprio) |
 | PUT | `/api/incontri/:id` | Modifica incontro | admin |
 | DELETE | `/api/incontri/:id` | Elimina incontro | admin |
 | GET | `/api/voucher` | Lista voucher (admin: tutti, viewer: solo i propri) | admin / viewer |
 | POST | `/api/voucher` | Crea voucher (un solo voucher per socio) | admin |
-| GET | `/api/voucher/:id/movimenti` | Movimenti voucher | admin / viewer (solo il proprio) |
+| GET | `/api/voucher/:id/movimenti` | Movimenti voucher, **paginati** — vedi [Elenchi paginati](#elenchi-paginati) | admin / viewer (solo il proprio) |
 | POST | `/api/voucher/:id/movimenti` | Aggiungi movimento | admin |
 | GET | `/api/admin/users` | Lista utenti Registrati | admin |
 | POST | `/api/admin/associa-viewer` | Associa utente a socio (body: socio_id, keycloak_user_id) | admin |
@@ -67,6 +69,31 @@ Tutte le API richiedono un JWT Keycloak valido (Bearer token).
 | POST | `/api/admin/promuovi` | Promuovi utente ad admin (body: keycloak_user_id) | admin |
 | POST | `/api/admin/retrocedi` | Retrocedi admin a viewer (body: keycloak_user_id) | admin |
 | GET | `/api/version` | Versione del backend in esecuzione (pagina Info) | admin / viewer |
+
+### Elenchi paginati
+
+Incontri e movimenti crescono con l'attività dell'associazione (ogni incontro genera un movimento), quindi
+i due elenchi si leggono a blocchi invece di essere scaricati per intero. L'interfaccia mostra i primi
+risultati e li allunga con "Carica altri", indicando sempre a che punto si è del totale.
+
+Parametri comuni: `limit` (default 25, massimo 200) e `offset`. La risposta è un oggetto invece di un array:
+
+```json
+{ "data": [ ... ], "total": 340, "limit": 25, "offset": 0 }
+```
+
+`total` è il numero di righe che soddisfano il filtro, non quante ne sono state restituite: serve a sapere
+se c'è dell'altro da caricare.
+
+`GET /api/incontri` accetta inoltre `socio_id`, `q` (ricerca su cognome, nome e attività), `attivita`,
+`da`/`a` (estremi inclusi, `YYYY-MM-DD`), `sort` (`socioNome`, `data_incontro`, `attivita`, `istruttore`,
+`costo`) e `dir` (`asc`/`desc`, default `desc` su `data_incontro`, cioè i più recenti per primi). Filtri e
+ordinamento sono applicati dal database e non dal browser: con i dati a blocchi, filtrare le sole righe già
+caricate darebbe risultati falsi.
+
+Il resoconto **non** usa questo elenco: `GET /api/incontri/resoconto` restituisce le righe già aggregate
+(`GROUP BY` istruttore e attività), perché un totale calcolato su una pagina sola sarebbe più basso del vero
+senza alcun segnale che manchi qualcosa.
 
 ## Sviluppo locale
 
@@ -661,6 +688,7 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 | `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Password dell'admin console Keycloak (bootstrap, distinto dall'admin applicativo) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
 | `KEYCLOAK_ADMIN_CLIENT_SECRET` | Client secret del client confidential `clubmanager-backend` su Keycloak — **generato/riusato da Infra** | *(copiata dal riepilogo della run Infra)* |
 | `GHCR_PAT` | Personal Access Token GitHub con scope `read:packages`, usato da **Build & Deploy** per creare il Secret k8s `ghcr-secret` (`imagePullSecrets` di backend/frontend) — i package su `ghcr.io` sono privati di default, senza questo token i pod restano in `ImagePullBackOff`. **Non riusare il `GITHUB_TOKEN` automatico**: è valido solo per la durata della run, i pod devono poter fare pull in qualunque momento futuro. Genera il token da GitHub → Settings (personali) → Developer settings → Personal access tokens → Tokens (classic) → scope `read:packages` | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* |
+| `WORKFLOW_PAT` | **Secret di repository, non per Environment** (unico in questa tabella). Personal Access Token con permesso "Workflows: Read and write" (scope `workflow` sui token classic), usato dal solo workflow **Tag**. Serve perché Tag tagga un commit "vecchio" — l'ultimo `<scope>-main-*` deployato, non la punta attuale di `main` — e il `GITHUB_TOKEN` di default rifiuta il push di un tag quando il contenuto di `.github/workflows/` in quel commit non è identico a quello dell'ultimo commit di un branch, condizione quasi certa una volta che i workflow evolvono. **Non riusare `GHCR_PAT`**: quello finisce in un Secret k8s persistito sul cluster, e dargli anche scope `workflow` permetterebbe di modificare le pipeline CI/CD a chiunque legga quel Secret | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* |
 
 #### Variables
 

@@ -59,6 +59,9 @@ const IconLente = () => (
   </svg>
 );
 
+// Movimenti caricati a ogni "Carica altri", allineato al default del backend.
+const PAGE_SIZE_MOVIMENTI = 25;
+
 export default function VouchersPage() {
   const { token, user } = useAuth();
   const api = createApiClient(token);
@@ -75,6 +78,11 @@ export default function VouchersPage() {
   const [vouchers, setVouchers]             = useState<Voucher[]>([]);
   const [soci, setSoci]                 = useState<Socio[]>([]);
   const [movimenti, setMovimenti]       = useState<Movimento[]>([]);
+  // Totale dei movimenti del voucher aperto, non quanti ne sono caricati: un
+  // socio ne accumula uno per incontro, quindi il pannello ne mostra un blocco
+  // per volta e questo dice se ce ne sono altri.
+  const [movimentiTotal, setMovimentiTotal] = useState(0);
+  const [loadingMovimenti, setLoadingMovimenti] = useState(false);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState('');
 
@@ -111,9 +119,29 @@ export default function VouchersPage() {
 
   const openMovimenti = async (voucher: Voucher) => {
     setPanel({ voucher, mode: 'movimenti' });
+    // Riparte sempre dal primo blocco: il pannello può essere già stato aperto
+    // su un altro voucher, e i suoi movimenti non c'entrano con questo.
+    setMovimenti([]);
+    setMovimentiTotal(0);
     try {
-      setMovimenti(await api.getMovimenti(voucher.id));
+      const m = await api.getMovimenti(voucher.id, { limit: PAGE_SIZE_MOVIMENTI, offset: 0 });
+      setMovimenti(m.data);
+      setMovimentiTotal(m.total);
     } catch (e: any) { setError(e.message); }
+  };
+
+  const caricaAltriMovimenti = async () => {
+    if (panel?.mode !== 'movimenti') return;
+    setLoadingMovimenti(true);
+    try {
+      const m = await api.getMovimenti(panel.voucher.id, {
+        limit: PAGE_SIZE_MOVIMENTI,
+        offset: movimenti.length,
+      });
+      setMovimenti(prev => [...prev, ...m.data]);
+      setMovimentiTotal(m.total);
+    } catch (e: any) { setError(e.message); }
+    finally { setLoadingMovimenti(false); }
   };
 
   const openIncontroDetail = async (incontroId: string) => {
@@ -330,6 +358,16 @@ export default function VouchersPage() {
               </table>
             </TableScroll>
             {movimenti.length === 0 && <p style={styles.empty}>Nessun movimento.</p>}
+            {movimenti.length > 0 && (
+              <div style={styles.paginazione}>
+                <span style={styles.conteggio}>{movimenti.length} di {movimentiTotal}</span>
+                {movimenti.length < movimentiTotal && (
+                  <button style={styles.btnSecondary} onClick={caricaAltriMovimenti} disabled={loadingMovimenti}>
+                    {loadingMovimenti ? 'Caricamento...' : 'Carica altri'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -409,6 +447,8 @@ const styles: Record<string, React.CSSProperties> = {
   trSelected: { background: '#eff6ff' },
   td: { padding: '11px 16px', fontSize: 14, color: '#333' },
   empty: { textAlign: 'center', color: '#999', marginTop: 32 },
+  paginazione: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap' },
+  conteggio: { fontSize: 13, color: '#666' },
   movPanel: { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' },
   movHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   movTitle: { margin: 0, fontSize: 16, fontWeight: 700 },

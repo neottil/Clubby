@@ -20,6 +20,13 @@ import {
 } from '../service/vouchers.service.js';
 import { getSocioByViewerId } from '../service/soci.service.js';
 
+/** Intero non negativo da query string, o undefined se assente/non valido. */
+function intParam(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
 export const handler = async (
   event: RequestEvent
 ): Promise<ResponseResult> => {
@@ -70,7 +77,10 @@ export const handler = async (
       if (auth.role === 'viewer' && voucher.socio_id !== viewerSocioId) {
         throw new ForbiddenError();
       }
-      return ok(await listMovimenti(voucherId));
+      const limit  = intParam(event.queryStringParameters?.limit);
+      const offset = intParam(event.queryStringParameters?.offset);
+      const { rows, total } = await listMovimenti(voucherId, { limit, offset });
+      return ok({ data: rows, total, limit: limit ?? rows.length, offset: offset ?? 0 });
     }
 
     // -----------------------------------------------------------

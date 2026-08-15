@@ -137,8 +137,25 @@ export async function createVoucher(input: CreateVoucherInput): Promise<Voucher>
 // Movimenti
 // ---------------------------------------------------------------
 
-export async function listMovimenti(voucherId: string): Promise<MovimentoVoucher[]> {
+const DEFAULT_LIMIT_MOVIMENTI = 25;
+const MAX_LIMIT_MOVIMENTI = 200;
+
+/**
+ * Movimenti di un voucher, dal più recente, a pagine: un socio accumula un
+ * movimento per ogni incontro, quindi lo storico cresce quanto la sua attività
+ * e il pannello non può caricarlo tutto in una volta.
+ *
+ * Restituisce anche il totale complessivo, che serve al pannello per sapere se
+ * ci sono altri movimenti da caricare.
+ */
+export async function listMovimenti(
+  voucherId: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<{ rows: MovimentoVoucher[]; total: number }> {
   await getVoucherById(voucherId);
+
+  const limit  = Math.min(Math.max(1, options.limit ?? DEFAULT_LIMIT_MOVIMENTI), MAX_LIMIT_MOVIMENTI);
+  const offset = Math.max(0, options.offset ?? 0);
 
   const result = await query(
     // Nessuna JOIN con incontro: l'attività è già dentro descrizione
@@ -146,13 +163,23 @@ export async function listMovimenti(voucherId: string): Promise<MovimentoVoucher
     // completo si carica a parte quando l'utente apre la riga (GET /incontri/:id).
     // created_at come spareggio: data_movimento è una DATE, quindi due
     // movimenti dello stesso giorno (tipico: ricarica e addebito) avrebbero
-    // altrimenti un ordine non deterministico, diverso da un refresh all'altro.
-    `SELECT * FROM movimento_voucher
+    // altrimenti un ordine non deterministico — che con la paginazione
+    // significa righe duplicate o mancanti fra una pagina e l'altra.
+    `SELECT *, COUNT(*) OVER() AS total_count
+     FROM movimento_voucher
      WHERE voucher_id = :voucherId
-     ORDER BY data_movimento DESC, created_at DESC`,
-    { voucherId }
+     ORDER BY data_movimento DESC, created_at DESC
+     LIMIT :limit OFFSET :offset`,
+    { voucherId, limit, offset }
   );
-  return result.rows.map(toMovimento);
+
+  const total = result.rows.length > 0 ? Number(result.rows[0].total_count) : 0;
+  const rows = result.rows.map(row => {
+    const { total_count: _ignored, ...movimento } = row as Record<string, unknown>;
+    return toMovimento(movimento);
+  });
+
+  return { rows, total };
 }
 
 /**

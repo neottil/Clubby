@@ -2,15 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
 import { config, istruttoriAbilitati } from '../config';
-import DateRangeFilter, { isInDateRange } from '../components/DateRangeFilter';
+import DateRangeFilter from '../components/DateRangeFilter';
 import TableScroll from '../components/TableScroll';
 import { theme } from '../theme';
 
-interface Incontro {
-  id: string;
-  data_incontro: string;
-  attivita: string;
+/**
+ * Riga già aggregata dal backend: un'attività di un istruttore, con quanti
+ * incontri e quanto costo nel periodo richiesto.
+ */
+interface RigaResoconto {
+  /** null per gli incontri senza istruttore. */
   istruttore: string | null;
+  attivita: string;
+  incontri: number;
   costo: number;
 }
 
@@ -30,68 +34,72 @@ interface Prospetto {
   totaleCosto: number;
 }
 
-/**
- * Raggruppa gli incontri per attività e somma costi e conteggi.
- * Ordine per costo decrescente: in un resoconto la voce che pesa più sul
- * totale è quella che si cerca per prima.
- */
-function aggregaPerAttivita(incontri: Incontro[]): RigaAttivita[] {
-  const perAttivita = new Map<string, RigaAttivita>();
-  for (const i of incontri) {
-    const riga = perAttivita.get(i.attivita) ?? { attivita: i.attivita, incontri: 0, costo: 0 };
-    riga.incontri += 1;
-    riga.costo += Number(i.costo);
-    perAttivita.set(i.attivita, riga);
-  }
-  return [...perAttivita.values()].sort((a, b) => b.costo - a.costo);
-}
-
 export default function ResocontoPage() {
   const { token } = useAuth();
   const api = createApiClient(token);
 
-  const [incontri, setIncontri] = useState<Incontro[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState('');
-  const [dataDa, setDataDa]     = useState('');
-  const [dataA, setDataA]       = useState('');
+  const [righe, setRighe]     = useState<RigaResoconto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState('');
+  const [dataDa, setDataDa]   = useState('');
+  const [dataA, setDataA]     = useState('');
 
+  // Il raggruppamento è fatto dal database (GROUP BY istruttore, attività) e
+  // non qui: il resoconto ha bisogno di TUTTI gli incontri del periodo, mentre
+  // l'elenco di /api/incontri è paginato — aggregare le sole righe scaricate
+  // darebbe totali più bassi del vero senza alcun segnale. Quello che arriva
+  // sono poche decine di righe già sommate, non l'intero storico.
   useEffect(() => {
+    let annullato = false;
     (async () => {
+      setLoading(true);
       try {
-        // Come IncontriPage: l'admin scarica l'elenco completo e il resoconto
-        // si calcola qui. Non serve un endpoint di aggregazione dedicato — i
-        // dati sono già quelli che la pagina Incontri carica comunque.
-        setIncontri(await api.getIncontri());
+        const r = await api.getResoconto(dataDa || undefined, dataA || undefined);
+        if (!annullato) setRighe(r);
       } catch (e: any) {
-        setError(e.message);
+        if (!annullato) setError(e.message);
       } finally {
-        setLoading(false);
+        if (!annullato) setLoading(false);
       }
     })();
-  }, []);
-
-  const nelPeriodo = useMemo(
-    () => incontri.filter(i => isInDateRange(i.data_incontro, dataDa, dataA)),
-    [incontri, dataDa, dataA]
-  );
+    // Una risposta di un periodo precedente non deve sovrascrivere quella del
+    // periodo appena richiesto.
+    return () => { annullato = true; };
+  }, [dataDa, dataA]);
 
   const prospetti = useMemo<Prospetto[]>(() => {
-    const componi = (istruttore: string | null, gruppo: Incontro[]): Prospetto => {
-      const righe = aggregaPerAttivita(gruppo);
+    const componi = (istruttore: string | null, gruppo: RigaResoconto[]): Prospetto => {
+      // Ordine per costo decrescente: in un resoconto la voce che pesa di più
+      // sul totale è quella che si cerca per prima.
+      const righeOrdinate = [...gruppo]
+        .map(r => ({ attivita: r.attivita, incontri: r.incontri, costo: r.costo }))
+        .sort((a, b) => b.costo - a.costo);
       return {
         istruttore,
-        righe,
-        totaleIncontri: righe.reduce((n, r) => n + r.incontri, 0),
-        totaleCosto:    righe.reduce((n, r) => n + r.costo, 0),
+        righe: righeOrdinate,
+        totaleIncontri: righeOrdinate.reduce((n, r) => n + r.incontri, 0),
+        totaleCosto:    righeOrdinate.reduce((n, r) => n + r.costo, 0),
       };
     };
 
     // Istruttori non configurati: l'associazione ne ha uno solo e attribuire
     // gli incontri a un nome non avrebbe senso. Un unico prospetto, senza
     // intestazione, su tutti gli incontri del periodo.
+    // Istruttori non configurati: l'associazione ne ha uno solo e il
+    // raggruppamento non ha senso. Un unico prospetto, senza intestazione, su
+    // tutte le righe del periodo — che il backend ha comunque già sommato per
+    // istruttore, quindi la stessa attività può comparire in più righe e va
+    // ricomposta in una sola.
     if (!istruttoriAbilitati) {
-      return nelPeriodo.length > 0 ? [componi(null, nelPeriodo)] : [];
+      if (righe.length === 0) return [];
+      const perAttivita = new Map<string, RigaAttivita>();
+      for (const r of righe) {
+        const acc = perAttivita.get(r.attivita) ?? { attivita: r.attivita, incontri: 0, costo: 0 };
+        acc.incontri += r.incontri;
+        acc.costo    += r.costo;
+        perAttivita.set(r.attivita, acc);
+      }
+      return [componi(null, [...perAttivita.values()].map(a => ({ ...a, istruttore: null })))];
     }
 
     // Ordine degli istruttori: quello della configurazione, non quello dei
@@ -99,9 +107,9 @@ export default function ResocontoPage() {
     // Un istruttore senza incontri nel periodo viene omesso: una tabella vuota
     // col suo nome sarebbe rumore.
     return config.istruttori
-      .map(nome => componi(nome, nelPeriodo.filter(i => i.istruttore === nome)))
+      .map(nome => componi(nome, righe.filter(r => r.istruttore === nome)))
       .filter(p => p.righe.length > 0);
-  }, [nelPeriodo]);
+  }, [righe]);
 
   // Incontri che nessun prospetto include: senza istruttore (registrati prima
   // dell'introduzione del campo) o con un nome non più in elenco. Non hanno un
@@ -109,12 +117,12 @@ export default function ResocontoPage() {
   // prospetti sarebbe silenziosamente più bassa del totale reale.
   const esclusi = useMemo(() => {
     if (!istruttoriAbilitati) return { incontri: 0, costo: 0 };
-    const fuori = nelPeriodo.filter(i => !i.istruttore || !config.istruttori.includes(i.istruttore));
+    const fuori = righe.filter(r => !r.istruttore || !config.istruttori.includes(r.istruttore));
     return {
-      incontri: fuori.length,
-      costo: fuori.reduce((n, i) => n + Number(i.costo), 0),
+      incontri: fuori.reduce((n, r) => n + r.incontri, 0),
+      costo:    fuori.reduce((n, r) => n + r.costo, 0),
     };
-  }, [nelPeriodo]);
+  }, [righe]);
 
   const totaleGenerale = useMemo(() => ({
     incontri: prospetti.reduce((n, p) => n + p.totaleIncontri, 0),
