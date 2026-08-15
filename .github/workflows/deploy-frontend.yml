@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       image_tag:
-        description: 'Tag dell''immagine ghcr.io/.../clubmanager-frontend da deployare (tag di data o versione reale X.Y.Z)'
+        description: 'Tag dell''immagine ghcr.io/.../clubby-frontend da deployare (tag di data o versione reale X.Y.Z)'
         required: true
         type: string
 
@@ -26,7 +26,7 @@ jobs:
       - name: Renderizza manifest k8s (frontend)
         env:
           KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
-          FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ inputs.image_tag }}
+          FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubby-frontend:${{ inputs.image_tag }}
           APP_DOMAIN: ${{ vars.APP_DOMAIN }}
           APP_VERSION: ${{ inputs.image_tag }}
         run: |
@@ -45,7 +45,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
           source: "k8s/rendered/*"
-          target: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+          target: ${{ vars.DEPLOY_PATH || '/opt/clubby/k8s' }}
           strip_components: 2
 
       - name: Applica manifest frontend e verifica rollout
@@ -54,7 +54,7 @@ jobs:
           NS: ${{ vars.KUBE_NAMESPACE }}
           GHCR_USER: ${{ github.repository_owner }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubby/k8s' }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
@@ -75,4 +75,4 @@ jobs:
             kubectl apply -f "$DEPLOY_PATH/frontend-deployment.yaml"
             kubectl apply -f "$DEPLOY_PATH/frontend-service.yaml"
             kubectl apply -f "$DEPLOY_PATH/frontend-ingress.yaml"
-            kubectl rollout status deployment/clubmanager-frontend -n "$NS" --timeout=180s
+            kubectl rollout status deployment/clubby-frontend -n "$NS" --timeout=180s

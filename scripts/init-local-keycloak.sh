@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# Inizializzazione Keycloak per ClubManager
+# Inizializzazione Keycloak per Clubby
 # Eseguire UNA VOLTA dopo "docker compose up -d"
 #
 # Prerequisiti: curl, jq
@@ -17,10 +17,10 @@
 set -e
 
 DEFAULT_KEYCLOAK_URL="http://localhost:8080"
-DEFAULT_REALM="clubmanager"
+DEFAULT_REALM="clubby"
 DEFAULT_ADMIN_USER="admin"
 DEFAULT_ADMIN_PASS="admin"
-DEFAULT_TENANT_NAME="ClubManager"
+DEFAULT_TENANT_NAME="Clubby"
 DEFAULT_API_BASE_URL="http://localhost:3000"
 
 echo "=== Configurazione ==="
@@ -52,7 +52,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo ""
-echo "=== ClubManager - Init Keycloak ==="
+echo "=== Clubby - Init Keycloak ==="
 echo ""
 
 # Attendi che Keycloak sia pronto
@@ -127,10 +127,10 @@ kc_api PUT "/$REALM" '{"accessTokenLifespan": 7200}' 2>/dev/null \
   && echo "  Fatto." || echo "  ERRORE nell'aggiornare la durata del token."
 
 # Crea client SPA (public, PKCE)
-echo "▶ Creo client 'clubmanager-spa'..."
+echo "▶ Creo client 'clubby-spa'..."
 kc_api POST "/$REALM/clients" "{
-  \"clientId\": \"clubmanager-spa\",
-  \"name\": \"ClubManager SPA\",
+  \"clientId\": \"clubby-spa\",
+  \"name\": \"Clubby SPA\",
   \"enabled\": true,
   \"publicClient\": true,
   \"standardFlowEnabled\": true,
@@ -147,22 +147,22 @@ kc_api POST "/$REALM/clients" "{
 }" 2>/dev/null || echo "  (client spa già esistente, salto)"
 
 # Crea client backend (confidential, per admin API)
-echo "▶ Creo client 'clubmanager-backend'..."
+echo "▶ Creo client 'clubby-backend'..."
 kc_api POST "/$REALM/clients" "{
-  \"clientId\": \"clubmanager-backend\",
-  \"name\": \"ClubManager Backend\",
+  \"clientId\": \"clubby-backend\",
+  \"name\": \"Clubby Backend\",
   \"enabled\": true,
   \"publicClient\": false,
   \"serviceAccountsEnabled\": true,
   \"standardFlowEnabled\": false,
   \"directAccessGrantsEnabled\": false,
-  \"secret\": \"clubmanager-backend-secret\",
+  \"secret\": \"clubby-backend-secret\",
   \"protocol\": \"openid-connect\"
 }" 2>/dev/null || echo "  (client backend già esistente, salto)"
 
 # Assegna ruoli realm-management al service account del backend
 echo "▶ Configuro permessi service account backend..."
-BACKEND_CLIENT_ID=$(kc_api GET "/$REALM/clients?clientId=clubmanager-backend" | jq -r '.[0].id')
+BACKEND_CLIENT_ID=$(kc_api GET "/$REALM/clients?clientId=clubby-backend" | jq -r '.[0].id')
 SA_USER_ID=$(kc_api GET "/$REALM/clients/$BACKEND_CLIENT_ID/service-account-user" | jq -r '.id')
 REALM_MGMT_CLIENT_ID=$(kc_api GET "/$REALM/clients?clientId=realm-management" | jq -r '.[0].id')
 
@@ -177,23 +177,23 @@ echo "  Permessi configurati."
 
 # Crea ruoli realm: admin, viewer
 echo "▶ Creo ruoli realm..."
-kc_api POST "/$REALM/roles" '{"name": "admin", "description": "Amministratore ClubManager"}' 2>/dev/null || echo "  (ruolo admin già esistente)"
-kc_api POST "/$REALM/roles" '{"name": "viewer", "description": "Viewer ClubManager"}' 2>/dev/null || echo "  (ruolo viewer già esistente)"
+kc_api POST "/$REALM/roles" '{"name": "admin", "description": "Amministratore Clubby"}' 2>/dev/null || echo "  (ruolo admin già esistente)"
+kc_api POST "/$REALM/roles" '{"name": "viewer", "description": "Viewer Clubby"}' 2>/dev/null || echo "  (ruolo viewer già esistente)"
 
 # Crea utente admin di test
-echo "▶ Creo utente admin di test (admin@clubmanager.local)..."
+echo "▶ Creo utente admin di test (admin@clubby.local)..."
 kc_api POST "/$REALM/users" "{
-  \"username\": \"admin@clubmanager.local\",
-  \"email\": \"admin@clubmanager.local\",
+  \"username\": \"admin@clubby.local\",
+  \"email\": \"admin@clubby.local\",
   \"firstName\": \"Admin\",
-  \"lastName\": \"ClubManager\",
+  \"lastName\": \"Clubby\",
   \"emailVerified\": true,
   \"enabled\": true,
   \"requiredActions\": []
 }" 2>/dev/null || echo "  (utente admin già esistente, salto)"
 
 # Imposta password admin separatamente (più affidabile della creazione inline in KC26)
-ADMIN_KC_USER_ID=$(kc_api GET "/$REALM/users?email=admin@clubmanager.local" | jq -r '.[0].id')
+ADMIN_KC_USER_ID=$(kc_api GET "/$REALM/users?email=admin@clubby.local" | jq -r '.[0].id')
 if [ -n "$ADMIN_KC_USER_ID" ] && [ "$ADMIN_KC_USER_ID" != "null" ]; then
   kc_api PUT "/$REALM/users/$ADMIN_KC_USER_ID/reset-password" \
     '{"type":"password","value":"Admin1234!","temporary":false}' 2>/dev/null || true
@@ -207,19 +207,19 @@ if [ -n "$ADMIN_KC_USER_ID" ] && [ "$ADMIN_KC_USER_ID" != "null" ]; then
 fi
 
 # Crea utente viewer di test
-echo "▶ Creo utente viewer di test (viewer@clubmanager.local)..."
+echo "▶ Creo utente viewer di test (viewer@clubby.local)..."
 kc_api POST "/$REALM/users" "{
-  \"username\": \"viewer@clubmanager.local\",
-  \"email\": \"viewer@clubmanager.local\",
+  \"username\": \"viewer@clubby.local\",
+  \"email\": \"viewer@clubby.local\",
   \"firstName\": \"Viewer\",
-  \"lastName\": \"ClubManager\",
+  \"lastName\": \"Clubby\",
   \"emailVerified\": true,
   \"enabled\": true,
   \"requiredActions\": []
 }" 2>/dev/null || echo "  (utente viewer già esistente, salto)"
 
 # Imposta password viewer separatamente
-VIEWER_KC_USER_ID=$(kc_api GET "/$REALM/users?email=viewer@clubmanager.local" | jq -r '.[0].id')
+VIEWER_KC_USER_ID=$(kc_api GET "/$REALM/users?email=viewer@clubby.local" | jq -r '.[0].id')
 if [ -n "$VIEWER_KC_USER_ID" ] && [ "$VIEWER_KC_USER_ID" != "null" ]; then
   kc_api PUT "/$REALM/users/$VIEWER_KC_USER_ID/reset-password" \
     '{"type":"password","value":"Viewer1234!","temporary":false}' 2>/dev/null || true
@@ -246,7 +246,7 @@ cat > "$ROOT_DIR/frontend/.env.local" << EOF
 VITE_API_BASE_URL=$API_BASE_URL
 VITE_KEYCLOAK_URL=$KEYCLOAK_URL
 VITE_KEYCLOAK_REALM=$REALM
-VITE_KEYCLOAK_CLIENT_ID=clubmanager-spa
+VITE_KEYCLOAK_CLIENT_ID=clubby-spa
 VITE_TENANT_NAME=$TENANT_NAME
 EOF
 
@@ -258,14 +258,14 @@ fi
 cat > "$ROOT_DIR/backend/.env" << EOF
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=clubmanager
-DB_USER=clubmanager
-DB_PASSWORD=clubmanager
+DB_NAME=clubby
+DB_USER=clubby
+DB_PASSWORD=clubby
 
 KEYCLOAK_URL=$KEYCLOAK_URL
 KEYCLOAK_REALM=$REALM
-KEYCLOAK_ADMIN_CLIENT_ID=clubmanager-backend
-KEYCLOAK_ADMIN_CLIENT_SECRET=clubmanager-backend-secret
+KEYCLOAK_ADMIN_CLIENT_ID=clubby-backend
+KEYCLOAK_ADMIN_CLIENT_SECRET=clubby-backend-secret
 
 PORT=3000
 EOF
@@ -277,8 +277,8 @@ echo "  Keycloak URL : $KEYCLOAK_URL"
 echo "  Realm        : $REALM"
 echo ""
 echo "  Credenziali di test:"
-echo "    admin@clubmanager.local  / Admin1234!  (ruolo: admin)"
-echo "    viewer@clubmanager.local / Viewer1234! (ruolo: viewer)"
+echo "    admin@clubby.local  / Admin1234!  (ruolo: admin)"
+echo "    viewer@clubby.local / Viewer1234! (ruolo: viewer)"
 echo ""
 echo "  Admin console: $KEYCLOAK_URL/admin (admin / admin)"
 echo ""

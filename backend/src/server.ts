@@ -184,9 +184,9 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[server] ClubManager API listening on http://${HOST}:${PORT}`);
+  console.log(`[server] Clubby API listening on http://${HOST}:${PORT}`);
   console.log(`[server] Keycloak: ${process.env.KEYCLOAK_URL ?? 'http://localhost:8080'}`);
-  console.log(`[server] DB: ${process.env.DB_HOST ?? 'localhost'}:${process.env.DB_PORT ?? 5432}/${process.env.DB_NAME ?? 'clubmanager'}`);
+  console.log(`[server] DB: ${process.env.DB_HOST ?? 'localhost'}:${process.env.DB_PORT ?? 5432}/${process.env.DB_NAME ?? 'clubby'}`);
   console.log(`[server] CORS origin: ${CORS_ORIGIN}`);
 });
 

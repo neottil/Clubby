@@ -124,12 +124,19 @@ export function createApiClient(token: string | null) {
       request<Paginated<any>>(`/api/voucher/${voucherId}/movimenti${queryString(params)}`, {}, token),
     createMovimento:(voucherId: string, body: any) => request<any>(`/api/voucher/${voucherId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
 
+    // Registrazione del socio corrispondente all'account appena creato.
+    // Idempotente: se il socio esiste già restituisce quello.
+    registraSocio:  (body: any)           => request<any>('/api/auth/register', { method: 'POST', body: JSON.stringify(body) }, token),
+
     // Admin
     getAdminUsers:  ()                    => request<any[]>('/api/admin/users', {}, token),
     associaViewer:  (body: any)           => request<any>('/api/admin/associa-viewer', { method: 'POST', body: JSON.stringify(body) }, token),
     disassociaViewer:(socioId: string)    => request<void>(`/api/admin/associa-viewer/${socioId}`, { method: 'DELETE' }, token),
     promuoviAdmin:  (body: any)           => request<any>('/api/admin/promuovi', { method: 'POST', body: JSON.stringify(body) }, token),
     retrocediAdmin: (body: any)           => request<any>('/api/admin/retrocedi', { method: 'POST', body: JSON.stringify(body) }, token),
+    // Restituisce la password temporanea generata: va consegnata
+    // all'interessato, non viene inviata per email e non è più recuperabile.
+    resetPassword:  (body: any)           => request<{ password_temporanea: string }>('/api/admin/reset-password', { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Versione del backend in esecuzione (pagina Info)
     getVersion:     ()                    => request<{ version: string }>('/api/version', {}, token),

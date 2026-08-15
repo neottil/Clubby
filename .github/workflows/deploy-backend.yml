@@ -14,7 +14,7 @@ on:
         required: true
         type: string
       image_tag:
-        description: 'Tag dell''immagine ghcr.io/.../clubmanager-backend da deployare (tag di data o versione reale X.Y.Z)'
+        description: 'Tag dell''immagine ghcr.io/.../clubby-backend da deployare (tag di data o versione reale X.Y.Z)'
         required: true
         type: string
 
@@ -30,16 +30,16 @@ jobs:
       - name: Renderizza manifest k8s (backend)
         env:
           KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
-          BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ inputs.image_tag }}
+          BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubby-backend:${{ inputs.image_tag }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT || 3000 }}
           DB_HOST: ${{ vars.DB_HOST }}
           DB_PORT: ${{ vars.DB_PORT || 5432 }}
-          DB_NAME: ${{ vars.DB_NAME || 'clubmanager' }}
-          DB_USER: ${{ vars.DB_USER || 'clubmanager' }}
+          DB_NAME: ${{ vars.DB_NAME || 'clubby' }}
+          DB_USER: ${{ vars.DB_USER || 'clubby' }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           KEYCLOAK_URL: https://${{ vars.KEYCLOAK_HOST }}
-          KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'clubmanager' }}
-          KEYCLOAK_ADMIN_CLIENT_ID: ${{ vars.KEYCLOAK_ADMIN_CLIENT_ID || 'clubmanager-backend' }}
+          KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'clubby' }}
+          KEYCLOAK_ADMIN_CLIENT_ID: ${{ vars.KEYCLOAK_ADMIN_CLIENT_ID || 'clubby-backend' }}
           KEYCLOAK_ADMIN_CLIENT_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
           APP_DOMAIN: ${{ vars.APP_DOMAIN }}
           APP_VERSION: ${{ inputs.image_tag }}
@@ -63,7 +63,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
           source: "k8s/rendered/*"
-          target: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+          target: ${{ vars.DEPLOY_PATH || '/opt/clubby/k8s' }}
           strip_components: 2
 
       - name: Applica manifest backend e verifica rollout
@@ -72,7 +72,7 @@ jobs:
           NS: ${{ vars.KUBE_NAMESPACE }}
           GHCR_USER: ${{ github.repository_owner }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubmanager/k8s' }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubby/k8s' }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
@@ -104,4 +104,4 @@ jobs:
             kubectl apply -f "$DEPLOY_PATH/backend-deployment.yaml"
             kubectl apply -f "$DEPLOY_PATH/backend-service.yaml"
             kubectl apply -f "$DEPLOY_PATH/backend-ingress.yaml"
-            kubectl rollout status deployment/clubmanager-backend -n "$NS" --timeout=180s
+            kubectl rollout status deployment/clubby-backend -n "$NS" --timeout=180s

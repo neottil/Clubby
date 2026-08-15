@@ -9,7 +9,7 @@
 #   - non chiede input: tutti i parametri arrivano da variabili d'ambiente
 #     (nessun default silenzioso: fallisce subito se qualcosa manca)
 #   - non scrive alcun file .env (non ha senso in k8s)
-#   - non crea utenti di test con credenziali note (admin@clubmanager.local
+#   - non crea utenti di test con credenziali note (admin@clubby.local
 #     ecc.): crea un solo utente admin reale, con password temporanea che
 #     Keycloak obbliga a cambiare al primo login
 #   - stampa un riepilogo finale con i valori da copiare nei GitHub Secrets
@@ -33,7 +33,7 @@ set -euo pipefail
 # L'health check gira sulla porta 9000 (management interface, KC_HEALTH_ENABLED),
 # non sulla porta 8080 di KEYCLOAK_URL (API OIDC/admin) — vedi keycloak-service.yaml.
 # KEYCLOAK_URL qui è sempre l'URL interno al cluster costruito da Infra
-# (http://clubmanager-keycloak.<ns>.svc.cluster.local:8080), quindi la
+# (http://clubby-keycloak.<ns>.svc.cluster.local:8080), quindi la
 # sostituzione di porta è sicura.
 KEYCLOAK_HEALTH_URL="${KEYCLOAK_URL/:8080/:9000}"
 
@@ -97,10 +97,10 @@ echo "▶ Imposto la durata dell'access token a 2 ore..."
 kc_api PUT "/$REALM" '{"accessTokenLifespan": 7200}' 2>/dev/null \
   && echo "  Fatto." || echo "  ERRORE nell'aggiornare la durata del token."
 
-echo "▶ Creo client 'clubmanager-spa'..."
+echo "▶ Creo client 'clubby-spa'..."
 kc_api POST "/$REALM/clients" "{
-  \"clientId\": \"clubmanager-spa\",
-  \"name\": \"ClubManager SPA\",
+  \"clientId\": \"clubby-spa\",
+  \"name\": \"Clubby SPA\",
   \"enabled\": true,
   \"publicClient\": true,
   \"standardFlowEnabled\": true,
@@ -116,10 +116,10 @@ kc_api POST "/$REALM/clients" "{
   \"fullScopeAllowed\": true
 }" 2>/dev/null || echo "  (client spa già esistente, salto)"
 
-echo "▶ Creo client 'clubmanager-backend'..."
+echo "▶ Creo client 'clubby-backend'..."
 kc_api POST "/$REALM/clients" "{
-  \"clientId\": \"clubmanager-backend\",
-  \"name\": \"ClubManager Backend\",
+  \"clientId\": \"clubby-backend\",
+  \"name\": \"Clubby Backend\",
   \"enabled\": true,
   \"publicClient\": false,
   \"serviceAccountsEnabled\": true,
@@ -130,7 +130,7 @@ kc_api POST "/$REALM/clients" "{
 }" 2>/dev/null || echo "  (client backend già esistente, salto)"
 
 echo "▶ Configuro permessi service account backend..."
-BACKEND_CLIENT_ID=$(kc_api GET "/$REALM/clients?clientId=clubmanager-backend" | jq -r '.[0].id')
+BACKEND_CLIENT_ID=$(kc_api GET "/$REALM/clients?clientId=clubby-backend" | jq -r '.[0].id')
 SA_USER_ID=$(kc_api GET "/$REALM/clients/$BACKEND_CLIENT_ID/service-account-user" | jq -r '.id')
 REALM_MGMT_CLIENT_ID=$(kc_api GET "/$REALM/clients?clientId=realm-management" | jq -r '.[0].id')
 
@@ -143,8 +143,8 @@ done
 echo "  Permessi configurati."
 
 echo "▶ Creo ruoli realm..."
-kc_api POST "/$REALM/roles" '{"name": "admin", "description": "Amministratore ClubManager"}' 2>/dev/null || echo "  (ruolo admin già esistente)"
-kc_api POST "/$REALM/roles" '{"name": "viewer", "description": "Viewer ClubManager"}' 2>/dev/null || echo "  (ruolo viewer già esistente)"
+kc_api POST "/$REALM/roles" '{"name": "admin", "description": "Amministratore Clubby"}' 2>/dev/null || echo "  (ruolo admin già esistente)"
+kc_api POST "/$REALM/roles" '{"name": "viewer", "description": "Viewer Clubby"}' 2>/dev/null || echo "  (ruolo viewer già esistente)"
 
 echo "▶ Creo il primo utente admin ($INITIAL_ADMIN_EMAIL), password temporanea..."
 kc_api POST "/$REALM/users" "{
@@ -171,9 +171,9 @@ echo "=== Fatto ==="
 echo ""
 echo "--- COPIA QUESTI VALORI NELL'ENVIRONMENT GITHUB DI QUESTO AMBIENTE ---"
 echo "KEYCLOAK_REALM=$REALM"
-echo "KEYCLOAK_ADMIN_CLIENT_ID=clubmanager-backend"
+echo "KEYCLOAK_ADMIN_CLIENT_ID=clubby-backend"
 echo "KEYCLOAK_ADMIN_CLIENT_SECRET=$BACKEND_CLIENT_SECRET   (Secret)"
-echo "KEYCLOAK_CLIENT_ID=clubmanager-spa"
+echo "KEYCLOAK_CLIENT_ID=clubby-spa"
 echo "---------------------------------------------------------------------------"
 echo ""
 echo "Primo accesso amministratore:"

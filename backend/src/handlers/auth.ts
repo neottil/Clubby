@@ -2,8 +2,12 @@
  * Handler: POST /api/auth/register
  * Ruoli: qualsiasi JWT valido (registrazione autonoma post-login)
  *
- * Dopo il primo login PKCE su Keycloak, il frontend chiama questo endpoint
- * per creare il record socio nel DB e assegnare il ruolo 'viewer'.
+ * Dopo la registrazione o il primo accesso sull'authorizer, il frontend
+ * chiama questo endpoint per creare il record socio corrispondente e legarlo
+ * all'account (socio.id_viewer = `sub` del token).
+ *
+ * Il ruolo non viene toccato qui: gli account nascono già come viewer
+ * nell'authorizer, che è l'unico proprietario dei ruoli.
  */
 
 import {
@@ -15,7 +19,6 @@ import {
 import { ok, created, errorResponse } from '../middleware/response.js';
 import { getSocioByViewerId, createSocio } from '../service/soci.service.js';
 import { associaViewer } from '../service/soci.service.js';
-import { assegnaRuoloViewer } from '../service/admin.service.js';
 
 export const handler = async (
   event: RequestEvent
@@ -48,13 +51,11 @@ export const handler = async (
       nome: body.nome.trim(),
       cognome: body.cognome.trim(),
       email,
+      telefono: body.telefono?.trim() || undefined,
     });
 
-    // 2. Associa il viewer al socio (imposta id_viewer)
+    // 2. Lega il socio all'account (imposta id_viewer col `sub` del token)
     const socioConViewer = await associaViewer(socio.id, auth.userId);
-
-    // 3. Assegna ruolo 'viewer' in Keycloak
-    await assegnaRuoloViewer(auth.userId);
 
     return created(socioConViewer);
   } catch (error) {

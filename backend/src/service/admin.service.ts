@@ -1,222 +1,157 @@
 /**
- * Admin service: gestione ruoli Keycloak e associazione viewer ↔ socio
+ * Amministrazione: ruoli degli utenti e associazione utente ↔ socio.
+ *
+ * I ruoli e gli account vivono nell'authorizer, non qui: questo servizio si
+ * limita a inoltrargli le richieste. L'associazione utente ↔ socio invece è
+ * dato applicativo e resta nel database dell'app (socio.id_viewer).
+ *
+ * Le chiamate all'authorizer riportano il token dell'admin che ha fatto la
+ * richiesta, invece di usare credenziali di servizio: così l'authorizer
+ * applica i propri controlli sull'identità reale di chi opera (compreso il
+ * divieto di togliersi da soli il ruolo di admin), e il backend non custodisce
+ * alcun segreto che gli permetterebbe di modificare utenti per conto proprio.
  */
 
-import { BadRequestError, NotFoundError } from '../middleware/auth.js';
+import { BadRequestError, HttpError, NotFoundError } from '../middleware/auth.js';
 import { associaViewer, disassociaViewer, getSocioById } from './soci.service.js';
 
-const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://localhost:8080';
-const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'clubmanager';
-const KEYCLOAK_ADMIN_CLIENT_ID = process.env.KEYCLOAK_ADMIN_CLIENT_ID || 'clubmanager-backend';
-const KEYCLOAK_ADMIN_CLIENT_SECRET = process.env.KEYCLOAK_ADMIN_CLIENT_SECRET || '';
+const AUTH_INTERNAL_URL = process.env.AUTH_INTERNAL_URL || 'http://localhost:3001';
 
-export interface KeycloakUser {
-  sub: string;
-  email: string;
-  groups: string[];
-  enabled: boolean;
-}
-
-interface KeycloakRole {
+/** Utente come lo espone l'authorizer. */
+export interface UtenteAuth {
   id: string;
-  name: string;
+  email: string;
+  nome: string;
+  cognome: string;
+  telefono: string | null;
+  ruolo: 'admin' | 'viewer';
+  attivo: boolean;
+  cambio_password_richiesto: boolean;
+  ultimo_accesso: string | null;
+  created_at: string;
 }
 
-let cachedToken: { token: string; expiresAt: number } | null = null;
-
-async function getAdminToken(): Promise<string> {
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 30_000) {
-    return cachedToken.token;
+/**
+ * Chiama l'authorizer inoltrando il token del chiamante e ripropaga i suoi
+ * errori con lo stesso codice HTTP: un 403 dell'authorizer deve arrivare al
+ * frontend come 403, non trasformarsi in un 500 generico che nasconde il
+ * motivo del rifiuto.
+ */
+async function chiamaAuthorizer<T>(
+  percorso: string,
+  tokenChiamante: string,
+  options: RequestInit = {}
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_INTERNAL_URL}${percorso}`, {
+      ...options,
+      headers: {
+        Authorization: tokenChiamante,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+  } catch (err) {
+    // L'authorizer irraggiungibile è un guasto dell'infrastruttura, non un
+    // errore della richiesta: va detto chiaramente invece di sembrare un
+    // problema dei dati inviati.
+    throw new HttpError(503, 'Servizio di autenticazione non raggiungibile');
   }
 
-  const tokenUrl = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`;
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: KEYCLOAK_ADMIN_CLIENT_ID,
-    client_secret: KEYCLOAK_ADMIN_CLIENT_SECRET,
-  });
+  if (!res.ok) {
+    let messaggio = `Errore dal servizio di autenticazione (${res.status})`;
+    try {
+      const corpo = await res.json() as { error?: string };
+      if (corpo.error) messaggio = corpo.error;
+    } catch { /* corpo non JSON: resta il messaggio generico */ }
+    throw new HttpError(res.status, messaggio);
+  }
 
-  const res = await fetch(tokenUrl, {
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+// ---------------------------------------------------------------
+// Utenti registrati
+// ---------------------------------------------------------------
+
+export async function listaUtenti(tokenChiamante: string): Promise<UtenteAuth[]> {
+  return chiamaAuthorizer<UtenteAuth[]>('/admin/utenti', tokenChiamante);
+}
+
+/**
+ * Risolve un riferimento a utente — id oppure email — nel suo id.
+ * L'interfaccia admin passa l'id, ma accettare anche l'email rende utilizzabili
+ * a mano gli endpoint (e i file Bruno) senza dover prima cercare l'UUID.
+ */
+async function risolviUtenteId(riferimento: string, tokenChiamante: string): Promise<string> {
+  if (!riferimento) throw new BadRequestError('Utente non specificato');
+  if (!riferimento.includes('@')) return riferimento;
+
+  const utenti = await listaUtenti(tokenChiamante);
+  const trovato = utenti.find(u => u.email.toLowerCase() === riferimento.toLowerCase());
+  if (!trovato) throw new NotFoundError(`Utente '${riferimento}' non trovato`);
+  return trovato.id;
+}
+
+async function cambiaRuolo(
+  riferimento: string,
+  ruolo: 'admin' | 'viewer',
+  tokenChiamante: string
+): Promise<void> {
+  const id = await risolviUtenteId(riferimento, tokenChiamante);
+  await chiamaAuthorizer(`/admin/utenti/${id}/ruolo`, tokenChiamante, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to get admin token: ${res.status} ${text}`);
-  }
-
-  const data = await res.json();
-  cachedToken = {
-    token: data.access_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-  };
-  return cachedToken.token;
-}
-
-async function keycloakAdminFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const token = await getAdminToken();
-  const url = `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}${path}`;
-  return fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    body: JSON.stringify({ ruolo }),
   });
 }
 
-// ---------------------------------------------------------------
-// Lista utenti Registrati (per la UI admin)
-// ---------------------------------------------------------------
-export async function listKeycloakUsers(): Promise<KeycloakUser[]> {
-  const res = await keycloakAdminFetch('/users?max=100');
-  if (!res.ok) {
-    throw new Error(`Failed to list users: ${res.status}`);
-  }
-  const users: any[] = await res.json();
+export async function promuoviAdmin(riferimento: string, tokenChiamante: string): Promise<void> {
+  await cambiaRuolo(riferimento, 'admin', tokenChiamante);
+}
 
-  return Promise.all(
-    users.map(async (u) => {
-      // Get user's realm roles
-      const rolesRes = await keycloakAdminFetch(`/users/${u.id}/role-mappings/realm`);
-      const roles: any[] = rolesRes.ok ? await rolesRes.json() : [];
-      // "default-roles-<realm>" è un ruolo composito che Keycloak assegna
-      // automaticamente a OGNI utente della sua istanza (offline_access,
-      // uma_authorization) — non è un ruolo applicativo, va solo escluso
-      // dalla UI per non confonderlo con admin/viewer.
-      const groups = roles
-        .map((r: any) => r.name)
-        .filter((name: string) => !name.startsWith('default-roles-'));
+/**
+ * Retrocede un admin a viewer. Il divieto di retrocedere sé stessi è
+ * applicato dall'authorizer, che conosce l'identità reale del chiamante dal
+ * token: replicarlo qui sarebbe un secondo punto da tenere allineato.
+ */
+export async function retrocediAdmin(riferimento: string, tokenChiamante: string): Promise<void> {
+  await cambiaRuolo(riferimento, 'viewer', tokenChiamante);
+}
 
-      return {
-        sub: u.id,
-        email: u.email ?? u.username ?? '',
-        firstName: u.firstName,
-        lastName: u.lastName,
-        groups,
-        enabled: u.enabled ?? true,
-      };
-    })
+/**
+ * Azzera la password di un utente e restituisce quella temporanea generata.
+ * Va consegnata all'interessato fuori dall'applicazione (non c'è invio di
+ * email) e va sostituita al primo accesso.
+ */
+export async function resetPasswordUtente(
+  riferimento: string,
+  tokenChiamante: string
+): Promise<{ password_temporanea: string }> {
+  const id = await risolviUtenteId(riferimento, tokenChiamante);
+  return chiamaAuthorizer<{ password_temporanea: string }>(
+    `/admin/utenti/${id}/reset-password`,
+    tokenChiamante,
+    { method: 'POST' }
   );
 }
 
-async function getRealmRole(roleName: string): Promise<KeycloakRole> {
-  const res = await keycloakAdminFetch(`/roles/${roleName}`);
-  if (!res.ok) {
-    throw new NotFoundError(`Ruolo '${roleName}' non trovato in Keycloak`);
-  }
-  return res.json();
-}
-
 // ---------------------------------------------------------------
-// Promuovi utente a admin
+// Associazione utente ↔ socio (dato applicativo, resta nel DB dell'app)
 // ---------------------------------------------------------------
-export async function promuoviAdmin(keycloakUserId: string): Promise<void> {
-  // Find user by email (keycloakUserId can be an email or a UUID)
-  let userId = keycloakUserId;
 
-  // If it looks like an email, resolve to user ID
-  if (keycloakUserId.includes('@')) {
-    const searchRes = await keycloakAdminFetch(`/users?email=${encodeURIComponent(keycloakUserId)}`);
-    if (!searchRes.ok) throw new NotFoundError(`Utente '${keycloakUserId}' non trovato`);
-    const users: any[] = await searchRes.json();
-    if (users.length === 0) throw new NotFoundError(`Utente '${keycloakUserId}' non trovato`);
-    userId = users[0].id;
-  }
-
-  const role = await getRealmRole('admin');
-  const res = await keycloakAdminFetch(`/users/${userId}/role-mappings/realm`, {
-    method: 'POST',
-    body: JSON.stringify([role]),
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to assign admin role: ${res.status}`);
-  }
-}
-
-// ---------------------------------------------------------------
-// Retrocedi utente da admin a solo viewer (rimuove il ruolo admin, il
-// ruolo viewer resta invariato — assegnato a tutti gli utenti registrati
-// fin dalla registrazione)
-// ---------------------------------------------------------------
-export async function retrocediAdmin(keycloakUserId: string, requestingUserId: string): Promise<void> {
-  let userId = keycloakUserId;
-
-  if (keycloakUserId.includes('@')) {
-    const searchRes = await keycloakAdminFetch(`/users?email=${encodeURIComponent(keycloakUserId)}`);
-    if (!searchRes.ok) throw new NotFoundError(`Utente '${keycloakUserId}' non trovato`);
-    const users: any[] = await searchRes.json();
-    if (users.length === 0) throw new NotFoundError(`Utente '${keycloakUserId}' non trovato`);
-    userId = users[0].id;
-  }
-
-  // Non permettere l'auto-retrocessione: rimuoversi da soli il ruolo admin
-  // potrebbe lasciare il pannello senza nessun admin in grado di ripristinarlo.
-  if (userId === requestingUserId) {
-    throw new BadRequestError('Non puoi retrocedere te stesso da admin.');
-  }
-
-  const role = await getRealmRole('admin');
-  const res = await keycloakAdminFetch(`/users/${userId}/role-mappings/realm`, {
-    method: 'DELETE',
-    body: JSON.stringify([role]),
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to remove admin role: ${res.status}`);
-  }
-}
-
-// ---------------------------------------------------------------
-// Assegna ruolo viewer a un utente Keycloak
-// ---------------------------------------------------------------
-export async function assegnaRuoloViewer(keycloakUserId: string): Promise<void> {
-  const role = await getRealmRole('viewer');
-  const res = await keycloakAdminFetch(`/users/${keycloakUserId}/role-mappings/realm`, {
-    method: 'POST',
-    body: JSON.stringify([role]),
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to assign viewer role: ${res.status}`);
-  }
-}
-
-// ---------------------------------------------------------------
-// Associa un viewer Keycloak a un socio
-// ---------------------------------------------------------------
 export async function associaViewerASocio(
   socioId: string,
-  keycloakUserId: string
+  riferimentoUtente: string,
+  tokenChiamante: string
 ): Promise<void> {
-  // Resolve user ID if email was provided
-  let userId = keycloakUserId;
-  if (keycloakUserId.includes('@')) {
-    const searchRes = await keycloakAdminFetch(`/users?email=${encodeURIComponent(keycloakUserId)}`);
-    if (!searchRes.ok) throw new NotFoundError(`Utente Keycloak '${keycloakUserId}' non trovato`);
-    const users: any[] = await searchRes.json();
-    if (users.length === 0) throw new NotFoundError(`Utente Keycloak '${keycloakUserId}' non trovato`);
-    userId = users[0].id;
-  }
-
-  // Verifica esistenza socio
+  const utenteId = await risolviUtenteId(riferimentoUtente, tokenChiamante);
+  // Verifica che il socio esista prima di scrivere l'associazione
   await getSocioById(socioId);
-
-  // Assign viewer role in Keycloak
-  const role = await getRealmRole('viewer');
-  await keycloakAdminFetch(`/users/${userId}/role-mappings/realm`, {
-    method: 'POST',
-    body: JSON.stringify([role]),
-  });
-
-  // Salva l'associazione nel DB
-  await associaViewer(socioId, userId);
+  await associaViewer(socioId, utenteId);
 }
 
-// ---------------------------------------------------------------
-// Disassocia viewer da socio
-// ---------------------------------------------------------------
 export async function disassociaViewerDaSocio(socioId: string): Promise<void> {
   await getSocioById(socioId);
   await disassociaViewer(socioId);

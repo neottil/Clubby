@@ -4,7 +4,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: clubmanager-keycloak
+  name: clubby-keycloak
   namespace: ${KUBE_NAMESPACE}
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
@@ -13,7 +13,7 @@ spec:
   tls:
     - hosts:
         - ${KEYCLOAK_HOST}
-      secretName: clubmanager-keycloak-tls
+      secretName: clubby-keycloak-tls
   rules:
     - host: ${KEYCLOAK_HOST}
       http:
@@ -22,6 +22,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: clubmanager-keycloak
+                name: clubby-keycloak
                 port:
                   number: 8080

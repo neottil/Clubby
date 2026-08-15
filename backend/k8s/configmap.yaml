@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: clubmanager-config
+  name: clubby-config
   namespace: ${KUBE_NAMESPACE}
 data:
   DB_HOST: "${DB_HOST}"

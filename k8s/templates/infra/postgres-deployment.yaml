@@ -8,21 +8,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: clubmanager-postgres
+  name: clubby-postgres
   namespace: ${KUBE_NAMESPACE}
   labels:
-    app: clubmanager-postgres
+    app: clubby-postgres
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: clubmanager-postgres
+      app: clubby-postgres
   template:
     metadata:
       labels:
-        app: clubmanager-postgres
+        app: clubby-postgres
     spec:
       containers:
         - name: postgres
@@ -37,7 +37,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: clubmanager-infra-secrets
+                  name: clubby-infra-secrets
                   key: DB_PASSWORD
           volumeMounts:
             - name: data
@@ -58,7 +58,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: clubmanager-postgres
+            claimName: clubby-postgres
         - name: init-scripts
           configMap:
             name: postgres-init

@@ -1,5 +1,5 @@
 -- ============================================================
--- ClubManager - Schema SQL (PostgreSQL 16)
+-- Clubby - Schema SQL (PostgreSQL 16)
 -- ============================================================
 -- Montato automaticamente da docker-compose in
 -- /docker-entrypoint-initdb.d/01-schema.sql
@@ -189,9 +189,9 @@ $$;
 -- ============================================================
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'clubmanager') THEN
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO clubmanager;
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO clubmanager;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'clubby') THEN
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO clubby;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO clubby;
   END IF;
 END;
 $$;

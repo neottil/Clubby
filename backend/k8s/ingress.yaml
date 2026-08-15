@@ -15,7 +15,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: clubmanager-backend
+  name: clubby-backend
   namespace: ${KUBE_NAMESPACE}
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
@@ -24,7 +24,7 @@ spec:
   tls:
     - hosts:
         - ${APP_DOMAIN}
-      secretName: clubmanager-tls
+      secretName: clubby-tls
   rules:
     - host: ${APP_DOMAIN}
       http:
@@ -33,6 +33,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: clubmanager-backend
+                name: clubby-backend
                 port:
                   number: 80

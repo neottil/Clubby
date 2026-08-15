@@ -5,20 +5,16 @@
  * Variabili necessarie:
  *
  * Locale (docker-compose / .env.local):
- *   VITE_API_BASE_URL          = http://localhost:3000
- *   VITE_KEYCLOAK_URL          = http://localhost:8080
- *   VITE_KEYCLOAK_REALM        = clubmanager          (obbligatoria)
- *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa      (obbligatoria)
- *   VITE_TENANT_NAME           = La mia ASD           (obbligatoria)
+ *   VITE_API_BASE_URL          = http://localhost:3000   (obbligatoria)
+ *   VITE_AUTH_BASE_URL         = http://localhost:3001   (obbligatoria)
+ *   VITE_TENANT_NAME           = La mia ASD              (obbligatoria)
  *   VITE_ACTIVITY_SELECT_VALUES_MAPPING = JSON {"Attività": costoDefault, ...} (opzionale)
  *   VITE_SELECT_ISTRUTTORI_VALUES = Luca,Elisabetta,Marco (opzionale)
  *
  * Produzione:
- *   VITE_API_BASE_URL          = https://api.<dominio>
- *   VITE_KEYCLOAK_URL          = https://auth.<dominio>
- *   VITE_KEYCLOAK_REALM        = clubmanager          (obbligatoria)
- *   VITE_KEYCLOAK_CLIENT_ID    = clubmanager-spa      (obbligatoria)
- *   VITE_TENANT_NAME           = La mia ASD           (obbligatoria)
+ *   VITE_API_BASE_URL          = https://<dominio>/api
+ *   VITE_AUTH_BASE_URL         = https://auth.<dominio>
+ *   VITE_TENANT_NAME           = La mia ASD              (obbligatoria)
  *   VITE_ACTIVITY_SELECT_VALUES_MAPPING = JSON {"Attività": costoDefault, ...} (opzionale)
  *   VITE_SELECT_ISTRUTTORI_VALUES = Luca,Elisabetta,Marco (opzionale)
  */
@@ -72,9 +68,8 @@ function parseActivityMapping(): Record<string, number> {
 
 export const config = {
   apiBaseUrl:           requireEnv('VITE_API_BASE_URL'),
-  keycloakUrl:          requireEnv('VITE_KEYCLOAK_URL'),
-  keycloakRealm:        requireEnv('VITE_KEYCLOAK_REALM'),
-  keycloakClientId:     requireEnv('VITE_KEYCLOAK_CLIENT_ID'),
+  /** URL dell'authorizer: registrazione, accesso e gestione della password. */
+  authBaseUrl:          requireEnv('VITE_AUTH_BASE_URL'),
   tenantName:           requireEnv('VITE_TENANT_NAME'),
   activityCostMapping:  parseActivityMapping(),
   istruttori:           parseIstruttori(),
@@ -107,43 +102,7 @@ export async function fetchFrontendVersion(): Promise<string> {
   }
 }
 
-/** Base URL for Keycloak OIDC endpoints */
-function oidcBase(): string {
-  return `${config.keycloakUrl}/realms/${config.keycloakRealm}/protocol/openid-connect`;
-}
-
-/** Keycloak authorize endpoint (PKCE) */
-export function getKeycloakAuthorizeUrl(redirectUri: string): string {
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id:     config.keycloakClientId,
-    redirect_uri:  redirectUri,
-    scope:         'openid email profile',
-  });
-  return `${oidcBase()}/auth?${params.toString()}`;
-}
-
-/** Keycloak token endpoint */
-export function getKeycloakTokenUrl(): string {
-  return `${oidcBase()}/token`;
-}
-
-/** Keycloak registration endpoint (PKCE) — stessa callback del login */
-export function getKeycloakRegistrationUrl(redirectUri: string): string {
-  const params = new URLSearchParams({
-    client_id:    config.keycloakClientId,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope:        'openid email profile',
-  });
-  return `${oidcBase()}/registrations?${params.toString()}`;
-}
-
-/** Keycloak logout endpoint */
-export function getKeycloakLogoutUrl(redirectUri: string): string {
-  const params = new URLSearchParams({
-    client_id:                config.keycloakClientId,
-    post_logout_redirect_uri: redirectUri,
-  });
-  return `${oidcBase()}/logout?${params.toString()}`;
-}
+// Le funzioni per gli endpoint OIDC di Keycloak (authorize, token,
+// registrations, logout) sono state rimosse insieme a Keycloak: accesso e
+// registrazione avvengono ora con chiamate dirette all'authorizer, vedi
+// auth/authApi.ts.

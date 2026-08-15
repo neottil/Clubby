@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: clubmanager-backend
+  name: clubby-backend
   namespace: ${KUBE_NAMESPACE}
   labels:
-    app: clubmanager-backend
+    app: clubby-backend
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: clubmanager-backend
+      app: clubby-backend
   template:
     metadata:
       labels:
-        app: clubmanager-backend
+        app: clubby-backend
     spec:
       imagePullSecrets:
         - name: ghcr-secret
@@ -24,9 +24,9 @@ spec:
             - containerPort: ${BACKEND_PORT}
           envFrom:
             - configMapRef:
-                name: clubmanager-config
+                name: clubby-config
             - secretRef:
-                name: clubmanager-secrets
+                name: clubby-secrets
           readinessProbe:
             httpGet:
               path: /health

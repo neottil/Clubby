@@ -31,9 +31,9 @@ pg.types.setTypeParser(1114, (val: string) => val.replace(' ', 'T'));
 const pool = new pg.Pool({
   host:     process.env.DB_HOST ?? 'localhost',
   port:     parseInt(process.env.DB_PORT ?? '5432'),
-  database: process.env.DB_NAME ?? 'clubmanager',
-  user:     process.env.DB_USER ?? 'clubmanager',
-  password: process.env.DB_PASSWORD ?? 'clubmanager',
+  database: process.env.DB_NAME ?? 'clubby',
+  user:     process.env.DB_USER ?? 'clubby',
+  password: process.env.DB_PASSWORD ?? 'clubby',
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,

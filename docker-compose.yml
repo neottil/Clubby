@@ -1,81 +1,41 @@
-# Local development infrastructure
-# Run: docker compose up -d
-# Then start backend: cd backend && npm run dev
-# Then start frontend: cd frontend && npm run dev
+# Infrastruttura per lo sviluppo locale
+# Avvio:      docker compose up -d
+# Poi:        cd backend && npm run dev
+#             cd authorizer && npm run dev
+#             cd frontend && npm run dev
+#
+# Un'unica istanza Postgres con due database separati — clubby (applicativo) e
+# clubby_auth (credenziali) — con utenti distinti, come in produzione: il
+# backend non deve poter leggere la tabella delle password nemmeno per errore.
 
 services:
 
-  # ----------------------------------------------------------
-  # PostgreSQL 16 locale (dati applicativi)
-  # ----------------------------------------------------------
   postgres:
     image: postgres:16.3-alpine3.20
-    container_name: clubmanager-postgres
+    container_name: clubby-postgres
     environment:
-      POSTGRES_DB: clubmanager
-      POSTGRES_USER: clubmanager
-      POSTGRES_PASSWORD: clubmanager
+      POSTGRES_DB: clubby
+      POSTGRES_USER: clubby
+      POSTGRES_PASSWORD: clubby
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # Gli script in questa cartella vengono eseguiti in ordine alfabetico da
+      # Postgres al PRIMO avvio, cioè solo su un volume dati vuoto: dopo un
+      # `docker compose down -v` ripartono, altrimenti no.
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema-app.sql:ro
+      - ./scripts/init-auth-db.sh:/docker-entrypoint-initdb.d/02-init-auth-db.sh:ro
+      # Fuori dalla cartella di init di proposito: se stesse lì, Postgres lo
+      # eseguirebbe sul database dell'app. Ci pensa lo script qui sopra ad
+      # applicarlo al database giusto.
+      - ./authorizer/src/db/schema.sql:/schema/authorizer-schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U clubmanager -d clubmanager"]
+      test: ["CMD-SHELL", "pg_isready -U clubby -d clubby"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
-
-  # ----------------------------------------------------------
-  # PostgreSQL per Keycloak (DB dedicato)
-  # ----------------------------------------------------------
-  keycloak-db:
-    image: postgres:16.3-alpine3.20
-    container_name: clubmanager-keycloak-db
-    environment:
-      POSTGRES_DB: keycloak
-      POSTGRES_USER: keycloak
-      POSTGRES_PASSWORD: keycloak
-    volumes:
-      - keycloak_db_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  # ----------------------------------------------------------
-  # Keycloak 26.1.4 — Identity Provider (OIDC)
-  # ----------------------------------------------------------
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.1.4
-    container_name: clubmanager-keycloak
-    command: start-dev
-    environment:
-      KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
-      KC_DB_USERNAME: keycloak
-      KC_DB_PASSWORD: keycloak
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_HEALTH_ENABLED: "true"
-      KC_HOSTNAME_STRICT: "false"
-      KC_HTTP_ENABLED: "true"
-    ports:
-      - "8080:8080"
-      - "9000:9000"
-    depends_on:
-      keycloak-db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q 'UP' <&3"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
 
 volumes:
   postgres_data:
-  keycloak_db_data:

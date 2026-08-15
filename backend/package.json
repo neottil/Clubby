@@ -1,7 +1,7 @@
 {
-  "name": "clubmanager-backend",
+  "name": "clubby-backend",
   "version": "2.6.0",
-  "description": "ClubManager API",
+  "description": "Clubby API",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

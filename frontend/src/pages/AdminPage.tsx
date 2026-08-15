@@ -7,7 +7,17 @@ import SocioSelect from '../components/SocioSelect';
 import SearchSelect from '../components/SearchSelect';
 import { theme } from '../theme';
 
-interface KeycloakUser { sub: string; email: string; groups: string[]; enabled: boolean; }
+/** Utente come lo espone l'authorizer attraverso il backend. */
+interface UtenteRegistrato {
+  id: string;
+  email: string;
+  nome: string;
+  cognome: string;
+  telefono: string | null;
+  ruolo: 'admin' | 'viewer';
+  attivo: boolean;
+  cambio_password_richiesto: boolean;
+}
 interface Socio { id: string; nome: string; cognome: string; email: string | null; id_viewer: string | null; }
 
 export default function AdminPage() {
@@ -15,14 +25,17 @@ export default function AdminPage() {
   const navigate = useNavigate();
   const api = createApiClient(token);
 
-  const [keycloakUsers, setKeycloakUsers] = useState<KeycloakUser[]>([]);
+  const [utenti, setUtenti]               = useState<UtenteRegistrato[]>([]);
   const [soci, setSoci]                   = useState<Socio[]>([]);
   const [loading, setLoading]             = useState(true);
   const [error, setError]                 = useState('');
   const [successMsg, setSuccessMsg]       = useState('');
+  // Password temporanea appena generata: mostrata una sola volta, non è più
+  // recuperabile dopo (a database c'è solo il suo hash).
+  const [passwordTemporanea, setPasswordTemporanea] = useState<{ email: string; password: string } | null>(null);
 
-  // Form associa viewer
-  const [assocForm, setAssocForm]         = useState({ socio_id: '', keycloak_user_id: '' });
+  // Form associa utente
+  const [assocForm, setAssocForm]         = useState({ socio_id: '', utente_id: '' });
   const [saving, setSaving]               = useState(false);
 
   useEffect(() => {
@@ -34,7 +47,7 @@ export default function AdminPage() {
     setLoading(true);
     try {
       const [u, s] = await Promise.all([api.getAdminUsers(), api.getSoci()]);
-      setKeycloakUsers(u);
+      setUtenti(u);
       setSoci(s);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
@@ -45,15 +58,15 @@ export default function AdminPage() {
     setError('');
     try {
       await api.associaViewer(assocForm);
-      setSuccessMsg('Viewer associato con successo');
-      setAssocForm({ socio_id: '', keycloak_user_id: '' });
+      setSuccessMsg('Utente associato al socio');
+      setAssocForm({ socio_id: '', utente_id: '' });
       load();
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   };
 
-  const kcEmailByViewerId = (viewerId: string) =>
-    keycloakUsers.find(u => u.sub === viewerId)?.email ?? '—';
+  const emailUtenteAssociato = (viewerId: string) =>
+    utenti.find(u => u.id === viewerId)?.email ?? '—';
 
   const disassocia = async (socioId: string) => {
     if (!confirm('Rimuovere l\'associazione viewer?')) return;
@@ -64,20 +77,38 @@ export default function AdminPage() {
     } catch (e: any) { setError(e.message); }
   };
 
-  const promuovi = async (userEmail: string) => {
-    if (!confirm(`Promuovere ${userEmail} ad admin?`)) return;
+  const promuovi = async (u: UtenteRegistrato) => {
+    if (!confirm(`Promuovere ${u.email} ad admin?`)) return;
     try {
-      await api.promuoviAdmin({ keycloak_user_id: userEmail });
-      setSuccessMsg(`${userEmail} promosso ad admin`);
+      await api.promuoviAdmin({ utente_id: u.id });
+      setSuccessMsg(`${u.email} promosso ad admin`);
       load();
     } catch (e: any) { setError(e.message); }
   };
 
-  const retrocedi = async (userEmail: string) => {
-    if (!confirm(`Retrocedere ${userEmail} a solo viewer?`)) return;
+  const retrocedi = async (u: UtenteRegistrato) => {
+    // Cambiare ruolo chiude le sessioni aperte dell'interessato: il ruolo sta
+    // dentro il token, e finché quello vecchio non scade porterebbe ancora i
+    // permessi di prima.
+    if (!confirm(`Retrocedere ${u.email} a solo viewer? Dovrà rifare l'accesso.`)) return;
     try {
-      await api.retrocediAdmin({ keycloak_user_id: userEmail });
-      setSuccessMsg(`${userEmail} retrocesso a viewer`);
+      await api.retrocediAdmin({ utente_id: u.id });
+      setSuccessMsg(`${u.email} retrocesso a viewer`);
+      load();
+    } catch (e: any) { setError(e.message); }
+  };
+
+  const resetPassword = async (u: UtenteRegistrato) => {
+    if (!confirm(
+      `Azzerare la password di ${u.email}?\n\n` +
+      `Verrà generata una password temporanea da consegnare all'interessato, ` +
+      `che dovrà sostituirla al primo accesso. Le sessioni aperte verranno chiuse.`
+    )) return;
+    setError('');
+    try {
+      const esito = await api.resetPassword({ utente_id: u.id });
+      setPasswordTemporanea({ email: u.email, password: esito.password_temporanea });
+      setSuccessMsg('');
       load();
     } catch (e: any) { setError(e.message); }
   };
@@ -93,6 +124,21 @@ export default function AdminPage() {
       {error      && <div style={styles.error}>{error}</div>}
       {successMsg && <div style={styles.success}>{successMsg}</div>}
 
+      {/* Mostrata una sola volta: a database resta solo l'hash, quindi
+          ricaricando la pagina questa password non è più recuperabile e
+          servirebbe un nuovo azzeramento. */}
+      {passwordTemporanea && (
+        <div style={styles.passwordBox}>
+          <strong>Password temporanea per {passwordTemporanea.email}</strong>
+          <code style={styles.passwordValore}>{passwordTemporanea.password}</code>
+          <p style={styles.passwordNota}>
+            Consegnala all'interessato: le verrà chiesto di sostituirla al primo accesso.
+            Non sarà più visibile dopo aver chiuso questo avviso.
+          </p>
+          <button style={styles.btnSmall} onClick={() => setPasswordTemporanea(null)}>Ho preso nota</button>
+        </div>
+      )}
+
       {/* Associa utente a socio */}
       <section style={styles.section}>
         <h3 style={styles.sectionTitle}>Associa utente a socio</h3>
@@ -107,21 +153,22 @@ export default function AdminPage() {
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label style={styles.label}>Utente registrato (email)</label>
-            {/* Il backend identifica l'utente Keycloak per email, non per sub:
-                getValue restituisce quindi l'email, non u.sub. */}
+            <label style={styles.label}>Utente registrato</label>
+            {/* L'utente è identificato dal suo id: l'email resta l'etichetta
+                mostrata, ma è modificabile dall'interessato e non è quindi un
+                riferimento stabile. */}
             <SearchSelect
-              options={keycloakUsers.filter(u => !u.groups.includes('admin'))}
-              value={assocForm.keycloak_user_id}
-              onChange={email => setAssocForm({ ...assocForm, keycloak_user_id: email })}
-              getValue={u => u.email}
-              getLabel={u => u.email}
-              placeholder='Cerca per email...'
+              options={utenti.filter(u => u.ruolo !== 'admin')}
+              value={assocForm.utente_id}
+              onChange={id => setAssocForm({ ...assocForm, utente_id: id })}
+              getValue={u => u.id}
+              getLabel={u => `${u.cognome} ${u.nome} — ${u.email}`}
+              placeholder='Cerca per nome o email...'
               emptyLabel='Nessun utente trovato'
             />
           </div>
           <div style={{ alignSelf: 'flex-end' }}>
-            <button style={styles.btn} onClick={associa} disabled={saving || !assocForm.socio_id || !assocForm.keycloak_user_id}>
+            <button style={styles.btn} onClick={associa} disabled={saving || !assocForm.socio_id || !assocForm.utente_id}>
               {saving ? '...' : 'Associa'}
             </button>
           </div>
@@ -140,7 +187,7 @@ export default function AdminPage() {
             </thead>
             <tbody>
               {soci.filter(s => s.id_viewer).map(s => {
-                const kcEmail = kcEmailByViewerId(s.id_viewer!);
+                const kcEmail = emailUtenteAssociato(s.id_viewer!);
                 const mismatch = s.email && kcEmail !== '—' && s.email !== kcEmail;
                 return (
                   <tr key={s.id} style={styles.tr}>
@@ -168,22 +215,35 @@ export default function AdminPage() {
           <table style={styles.table}>
             <thead>
               <tr>
-                {['Email', 'Ruoli', 'Stato', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                {['Nominativo', 'Email', 'Telefono', 'Ruolo', 'Stato', 'Azioni'].map(h => <th key={h} style={styles.th}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
-              {keycloakUsers.map(u => (
-                <tr key={u.sub} style={styles.tr}>
+              {utenti.map(u => (
+                <tr key={u.id} style={styles.tr}>
+                  <td style={styles.td}>{u.cognome} {u.nome}</td>
                   <td style={styles.td}>{u.email}</td>
-                  <td style={styles.td}>{u.groups.join(', ') || 'viewer'}</td>
-                  <td style={styles.td}>{u.enabled ? '✓ Attivo' : '✗ Disabilitato'}</td>
+                  <td style={styles.td}>{u.telefono ?? '—'}</td>
+                  <td style={styles.td}>{u.ruolo}</td>
                   <td style={styles.td}>
-                    {!u.groups.includes('admin') && (
-                      <button style={styles.btnSmall} onClick={() => promuovi(u.email)}>Promuovi admin</button>
+                    {!u.attivo
+                      ? '✗ Disattivato'
+                      : u.cambio_password_richiesto
+                        ? '⏳ Password da impostare'
+                        : '✓ Attivo'}
+                  </td>
+                  <td style={styles.td}>
+                    {u.ruolo !== 'admin' && (
+                      <button style={styles.btnSmall} onClick={() => promuovi(u)}>Promuovi admin</button>
                     )}
-                    {u.groups.includes('admin') && u.email !== user?.email && (
-                      <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => retrocedi(u.email)}>Retrocedi a viewer</button>
+                    {/* Un admin non può retrocedere sé stesso: sarebbe il modo
+                        più rapido di restare senza nessun amministratore.
+                        L'authorizer lo impedisce comunque, il bottone nascosto
+                        evita di far scoprire il divieto con un errore. */}
+                    {u.ruolo === 'admin' && u.id !== user?.sub && (
+                      <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => retrocedi(u)}>Retrocedi a viewer</button>
                     )}
+                    <button style={styles.btnSmall} onClick={() => resetPassword(u)}>Azzera password</button>
                   </td>
                 </tr>
               ))}
@@ -201,6 +261,13 @@ const styles: Record<string, React.CSSProperties> = {
   loading: { padding: 48, textAlign: 'center', color: '#666' },
   error: { background: '#fee', color: theme.danger, padding: '10px 16px', borderRadius: 8, marginBottom: 16 },
   success: { background: '#f0fdf4', color: theme.success, padding: '10px 16px', borderRadius: 8, marginBottom: 16 },
+  passwordBox: { background: '#fffbeb', border: '1px solid #fcd34d', padding: '16px 20px', borderRadius: 8, marginBottom: 16 },
+  passwordValore: {
+    display: 'block', margin: '10px 0', padding: '10px 14px', background: '#fff',
+    border: '1px solid #e5e7eb', borderRadius: 6, fontFamily: 'monospace', fontSize: 18,
+    letterSpacing: 1, userSelect: 'all',
+  },
+  passwordNota: { fontSize: 13, color: '#78350f', margin: '0 0 12px' },
   section: { background: '#fff', borderRadius: 12, padding: 24, marginBottom: 24, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' },
   sectionTitle: { margin: '0 0 8px', fontSize: 16, fontWeight: 700 },
   hint: { color: '#666', fontSize: 13, marginBottom: 16 },

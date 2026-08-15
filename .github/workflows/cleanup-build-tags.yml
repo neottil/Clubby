@@ -2,7 +2,7 @@ name: Cleanup build tags
 
 # Elimina i tag "backend-<branch>-<data>" e "frontend-<branch>-<data>" creati
 # da Build & Deploy — sia i tag Git nel repo, sia le immagini Docker
-# corrispondenti su ghcr.io (clubmanager-backend/clubmanager-frontend).
+# corrispondenti su ghcr.io (clubby-backend/clubby-frontend).
 #
 # Attivazione MANUALE, oppure AUTOMATICA (fire-and-forget) alla fine di ogni
 # promozione riuscita del workflow Tag, scoped a branch=main e
@@ -180,7 +180,7 @@ jobs:
             DOCKER_REGEX='^[a-zA-Z0-9.-]+-[0-9]{8}_[0-9]{4}$'
           fi
 
-          declare -A IMAGE=( [backend]=clubmanager-backend [frontend]=clubmanager-frontend )
+          declare -A IMAGE=( [backend]=clubby-backend [frontend]=clubby-frontend )
 
           for SCOPE in ${{ steps.scopes.outputs.list }}; do
             IMG="${IMAGE[$SCOPE]}"

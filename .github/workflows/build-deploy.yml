@@ -167,8 +167,8 @@ jobs:
           file: backend/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/clubmanager-backend:${{ needs.versions.outputs.date_tag }}
-            ghcr.io/${{ github.repository_owner }}/clubmanager-backend:latest
+            ghcr.io/${{ github.repository_owner }}/clubby-backend:${{ needs.versions.outputs.date_tag }}
+            ghcr.io/${{ github.repository_owner }}/clubby-backend:latest
 
   build-frontend:
     needs: versions
@@ -203,8 +203,8 @@ jobs:
         env:
           VITE_API_BASE_URL: https://${{ vars.APP_DOMAIN }}
           VITE_KEYCLOAK_URL: https://${{ vars.KEYCLOAK_HOST }}
-          VITE_KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'clubmanager' }}
-          VITE_KEYCLOAK_CLIENT_ID: ${{ vars.KEYCLOAK_CLIENT_ID || 'clubmanager-spa' }}
+          VITE_KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'clubby' }}
+          VITE_KEYCLOAK_CLIENT_ID: ${{ vars.KEYCLOAK_CLIENT_ID || 'clubby-spa' }}
           VITE_TENANT_NAME: ${{ vars.VITE_TENANT_NAME }}
           VITE_ACTIVITY_SELECT_VALUES_MAPPING: ${{ vars.VITE_ACTIVITY_SELECT_VALUES_MAPPING }}
           VITE_SELECT_ISTRUTTORI_VALUES: ${{ vars.VITE_SELECT_ISTRUTTORI_VALUES }}
@@ -230,8 +230,8 @@ jobs:
           context: ./frontend
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:${{ needs.versions.outputs.date_tag }}
-            ghcr.io/${{ github.repository_owner }}/clubmanager-frontend:latest
+            ghcr.io/${{ github.repository_owner }}/clubby-frontend:${{ needs.versions.outputs.date_tag }}
+            ghcr.io/${{ github.repository_owner }}/clubby-frontend:latest
 
   # Decide quale immagine backend deployare in QUESTA run (specifico di
   # questa run: branch, history dei tag — resta fuori dal workflow
@@ -432,7 +432,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          for IMG in clubmanager-backend clubmanager-frontend; do
+          for IMG in clubby-backend clubby-frontend; do
             echo "=== $IMG ==="
             VERSIONS=$(gh api "/users/$OWNER/packages/container/$IMG/versions?per_page=100" --paginate 2>/dev/null || echo '[]')
 

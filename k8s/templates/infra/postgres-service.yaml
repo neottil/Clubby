@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: clubmanager-postgres
+  name: clubby-postgres
   namespace: ${KUBE_NAMESPACE}
 spec:
   selector:
-    app: clubmanager-postgres
+    app: clubby-postgres
   ports:
     - port: 5432
       targetPort: 5432

@@ -10,7 +10,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: clubmanager-frontend-config
+  name: clubby-frontend-config
   namespace: ${KUBE_NAMESPACE}
 data:
   version.json: |

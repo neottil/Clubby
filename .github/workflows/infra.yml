@@ -72,8 +72,8 @@ jobs:
       - name: Renderizza manifest k8s/templates/infra
         env:
           KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
-          DB_NAME: ${{ vars.DB_NAME || 'clubmanager' }}
-          DB_USER: ${{ vars.DB_USER || 'clubmanager' }}
+          DB_NAME: ${{ vars.DB_NAME || 'clubby' }}
+          DB_USER: ${{ vars.DB_USER || 'clubby' }}
           POSTGRES_STORAGE_SIZE: ${{ vars.POSTGRES_STORAGE_SIZE || '5Gi' }}
           KEYCLOAK_HOST: ${{ vars.KEYCLOAK_HOST }}
           KEYCLOAK_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
@@ -102,19 +102,19 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
           source: "k8s/rendered-infra/*"
-          target: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubmanager/infra' }}
+          target: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubby/infra' }}
           strip_components: 2
 
       - name: Applica l'infrastruttura e inizializza il realm Keycloak
         uses: appleboy/ssh-action@v1.2.0
         env:
           NS: ${{ vars.KUBE_NAMESPACE }}
-          PATH_REMOTE: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubmanager/infra' }}
+          PATH_REMOTE: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubby/infra' }}
           DB_PASSWORD: ${{ steps.secrets.outputs.db_password }}
           KC_BOOTSTRAP_PASSWORD: ${{ steps.secrets.outputs.kc_bootstrap_password }}
           KC_BACKEND_SECRET: ${{ steps.secrets.outputs.kc_backend_secret }}
           KC_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
-          KC_REALM: ${{ vars.KEYCLOAK_REALM || 'clubmanager' }}
+          KC_REALM: ${{ vars.KEYCLOAK_REALM || 'clubby' }}
           KC_HOST: ${{ vars.KEYCLOAK_HOST }}
           APP_DOMAIN: ${{ vars.APP_DOMAIN }}
           DB_NODE_PORT: ${{ vars.DB_NODE_PORT }}
@@ -138,7 +138,7 @@ jobs:
 
             kubectl apply -f "$PATH_REMOTE/namespace.yaml"
 
-            kubectl create secret generic clubmanager-infra-secrets -n "$NS" \
+            kubectl create secret generic clubby-infra-secrets -n "$NS" \
               --from-literal=DB_PASSWORD="$DB_PASSWORD" \
               --from-literal=KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="$KC_BOOTSTRAP_PASSWORD" \
               --dry-run=client -o yaml | kubectl apply -f -
@@ -150,7 +150,7 @@ jobs:
             kubectl apply -f "$PATH_REMOTE/postgres-pvc.yaml"
             kubectl apply -f "$PATH_REMOTE/postgres-deployment.yaml"
             kubectl apply -f "$PATH_REMOTE/postgres-service.yaml"
-            kubectl rollout status deployment/clubmanager-postgres -n "$NS" --timeout=180s
+            kubectl rollout status deployment/clubby-postgres -n "$NS" --timeout=180s
 
             # NodePort esterno per Postgres: solo se DB_NODE_PORT è impostata
             # (nessun default — feature opt-in, vedi README). Se non impostata,
@@ -165,14 +165,14 @@ jobs:
             kubectl apply -f "$PATH_REMOTE/keycloak-deployment.yaml"
             kubectl apply -f "$PATH_REMOTE/keycloak-service.yaml"
             kubectl apply -f "$PATH_REMOTE/keycloak-ingress.yaml"
-            kubectl rollout status deployment/clubmanager-keycloak -n "$NS" --timeout=300s
+            kubectl rollout status deployment/clubby-keycloak -n "$NS" --timeout=300s
 
             kubectl create configmap keycloak-realm-init-script -n "$NS" \
               --from-file=keycloak-realm-init.sh="$PATH_REMOTE/keycloak-realm-init.sh" \
               --dry-run=client -o yaml | kubectl apply -f -
 
-            kubectl create secret generic clubmanager-init-params -n "$NS" \
-              --from-literal=KEYCLOAK_URL="http://clubmanager-keycloak.$NS.svc.cluster.local:8080" \
+            kubectl create secret generic clubby-init-params -n "$NS" \
+              --from-literal=KEYCLOAK_URL="http://clubby-keycloak.$NS.svc.cluster.local:8080" \
               --from-literal=REALM="$KC_REALM" \
               --from-literal=ADMIN_USER="$KC_BOOTSTRAP_ADMIN" \
               --from-literal=ADMIN_PASS="$KC_BOOTSTRAP_PASSWORD" \
@@ -215,9 +215,9 @@ jobs:
             echo ""
             echo "### Variables"
             echo '```'
-            echo "KEYCLOAK_REALM=${{ vars.KEYCLOAK_REALM || 'clubmanager' }}"
-            echo "KEYCLOAK_ADMIN_CLIENT_ID=clubmanager-backend"
-            echo "KEYCLOAK_CLIENT_ID=clubmanager-spa"
+            echo "KEYCLOAK_REALM=${{ vars.KEYCLOAK_REALM || 'clubby' }}"
+            echo "KEYCLOAK_ADMIN_CLIENT_ID=clubby-backend"
+            echo "KEYCLOAK_CLIENT_ID=clubby-spa"
             echo '```'
             echo ""
             echo "(Le ultime tre hanno comunque questi stessi valori come default: vanno impostate solo se"

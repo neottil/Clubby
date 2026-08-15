@@ -23,7 +23,7 @@
 # Non interattivo: tutti i parametri arrivano da variabili d'ambiente, con
 # default adatti a un ambiente locale (docker-compose) — le stesse identiche
 # variabili sono già presenti nell'ambiente del pod backend (ConfigMap
-# clubmanager-config + Secret clubmanager-secrets), quindi lo script gira
+# clubby-config + Secret clubby-secrets), quindi lo script gira
 # SENZA OVERRIDE anche dentro un pod backend già deployato (utile per
 # popolare dati demo in staging). Il pod backend include già bash/curl/jq/
 # psql e questo stesso script (vedi backend/Dockerfile) — nessun `kubectl cp`
@@ -34,7 +34,7 @@
 # Variabili DB (default = ambiente locale via docker-compose):
 #   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 # Variabili Keycloak (default = ambiente locale): usa le stesse credenziali
-# del client confidential "clubmanager-backend" (grant client_credentials,
+# del client confidential "clubby-backend" (grant client_credentials,
 # stesso meccanismo di backend/src/service/admin.service.ts) — non le
 # credenziali dell'admin bootstrap della console Keycloak (quelle non sono
 # mai presenti nei pod applicativi, solo nei GitHub Secrets di Infra):
@@ -52,14 +52,14 @@ set -euo pipefail
 
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
-DB_NAME="${DB_NAME:-clubmanager}"
-DB_USER="${DB_USER:-clubmanager}"
-DB_PASSWORD="${DB_PASSWORD:-clubmanager}"
+DB_NAME="${DB_NAME:-clubby}"
+DB_USER="${DB_USER:-clubby}"
+DB_PASSWORD="${DB_PASSWORD:-clubby}"
 
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8080}"
-KEYCLOAK_REALM="${KEYCLOAK_REALM:-clubmanager}"
-KEYCLOAK_ADMIN_CLIENT_ID="${KEYCLOAK_ADMIN_CLIENT_ID:-clubmanager-backend}"
-KEYCLOAK_ADMIN_CLIENT_SECRET="${KEYCLOAK_ADMIN_CLIENT_SECRET:-clubmanager-backend-secret}"
+KEYCLOAK_REALM="${KEYCLOAK_REALM:-clubby}"
+KEYCLOAK_ADMIN_CLIENT_ID="${KEYCLOAK_ADMIN_CLIENT_ID:-clubby-backend}"
+KEYCLOAK_ADMIN_CLIENT_SECRET="${KEYCLOAK_ADMIN_CLIENT_SECRET:-clubby-backend-secret}"
 # ------------------------------------------------------------
 # Helper: esegue una query e ritorna un solo valore scalare
 # ------------------------------------------------------------
@@ -96,7 +96,7 @@ echo "  OK."
 # sul realm master): stesso identico meccanismo usato dal backend stesso
 # (getAdminToken() in backend/src/service/admin.service.ts), con le stesse
 # credenziali già presenti nell'ambiente del pod backend (service account del
-# client confidential "clubmanager-backend", permessi manage-users/
+# client confidential "clubby-backend", permessi manage-users/
 # manage-realm assegnati da scripts/keycloak-realm-init.sh) — niente
 # credenziali di bootstrap separate da procurarsi a parte.
 echo "▶ Ottengo token admin Keycloak..."

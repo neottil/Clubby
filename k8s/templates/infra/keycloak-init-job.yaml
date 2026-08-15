@@ -2,7 +2,7 @@
 # workflow Infra) DENTRO al cluster: gira come pod, quindi risolve il DNS
 # interno (*.svc.cluster.local) senza bisogno di port-forward o tunnel SSH.
 # I parametri (KEYCLOAK_URL, REALM, secret generati, ecc.) arrivano dal
-# Secret "clubmanager-init-params", creato ad-hoc dal workflow e mai
+# Secret "clubby-init-params", creato ad-hoc dal workflow e mai
 # committato nel repo.
 apiVersion: batch/v1
 kind: Job
@@ -24,7 +24,7 @@ spec:
             - "apk add --no-cache bash curl jq >/dev/null && bash /scripts/keycloak-realm-init.sh"
           envFrom:
             - secretRef:
-                name: clubmanager-init-params
+                name: clubby-init-params
           volumeMounts:
             - name: script
               mountPath: /scripts

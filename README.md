@@ -1,4 +1,4 @@
-# ClubManager
+# Clubby
 
 Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantistiche (ASD).
 
@@ -36,7 +36,7 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 
 ### Admin principale
 
-- **In locale**: creato da `scripts/init-local-keycloak.sh` — credenziali: admin@clubmanager.local / Admin1234!
+- **In locale**: creato da `scripts/init-local-keycloak.sh` — credenziali: admin@clubby.local / Admin1234!
 - **In produzione**: creato dalla pipeline [Infra](#infra) (email e password temporanea forniti al lancio del workflow, nessuna credenziale hardcoded).
 
 Un admin può promuovere qualsiasi utente viewer ad admin tramite `POST /api/admin/promuovi`.
@@ -118,7 +118,7 @@ senza alcun segnale che manchi qualcosa.
    Lo script è **interattivo**: per ogni parametro (URL Keycloak, realm, utente/password admin Keycloak,
    URL base API backend, nome tenant) mostra un valore predefinito tra parentesi quadre — premi Invio per
    accettarlo, oppure digita un valore diverso. Va eseguito una sola volta dopo l'avvio dei container (o dopo
-   un reset dei volumi). Crea il realm `clubmanager`, i client, i ruoli e gli utenti di test, e scrive
+   un reset dei volumi). Crea il realm `clubby`, i client, i ruoli e gli utenti di test, e scrive
    automaticamente `backend/.env` e `frontend/.env.local`.
 
 3. Installa le dipendenze di backend e frontend:
@@ -187,8 +187,8 @@ Avviare l'app con npm run dev, avviare debugger da launch vscode
 
 | Utente | Password | Ruolo |
 |--------|----------|-------|
-| admin@clubmanager.local | Admin1234! | admin |
-| viewer@clubmanager.local | Viewer1234! | viewer |
+| admin@clubby.local | Admin1234! | admin |
+| viewer@clubby.local | Viewer1234! | viewer |
 
 ### Keycloak Admin UI
 
@@ -197,7 +197,7 @@ http://localhost:8080 → admin / admin
 ## Struttura progetto
 
 ```
-ClubManager/
+Clubby/
 ├── .github/
 │   └── workflows/
 │       ├── infra.yml               # Provisiona namespace + Postgres condiviso + Keycloak (manuale)
@@ -327,20 +327,20 @@ funzionare.
 
 ```
 namespace-<tenant>/
-├── Deployment  backend        (immagine clubmanager-backend, legge Secret/ConfigMap per DB/Keycloak) [build-deploy]
-├── Deployment  frontend       (immagine clubmanager-frontend, statica dietro Ingress)                [build-deploy]
+├── Deployment  backend        (immagine clubby-backend, legge Secret/ConfigMap per DB/Keycloak) [build-deploy]
+├── Deployment  frontend       (immagine clubby-frontend, statica dietro Ingress)                [build-deploy]
 ├── Deployment  keycloak       (immagine Keycloak ufficiale)                                          [infra]
 ├── Deployment  postgres       (istanza condivisa app+Keycloak, con PVC)                               [infra]
 ├── Job         keycloak-realm-init (one-shot: crea realm/client/ruoli/primo admin)                    [infra]
 ├── Service     backend, frontend                                                                      [build-deploy]
 ├── Service     keycloak, postgres                                                                     [infra]
-├── Ingress     clubmanager-backend (path /api, possiede la richiesta TLS/cert-manager)                 [build-deploy]
-├── Ingress     clubmanager-frontend (path /, stesso host/secretName TLS del backend)                   [build-deploy]
-├── Ingress     clubmanager-keycloak (routing verso Keycloak, TLS)                                      [infra]
-├── Secret      clubmanager-secrets (DB_PASSWORD, KEYCLOAK_ADMIN_CLIENT_SECRET, per backend)            [build-deploy]
-├── Secret      clubmanager-infra-secrets (DB_PASSWORD, KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD)              [infra]
+├── Ingress     clubby-backend (path /api, possiede la richiesta TLS/cert-manager)                 [build-deploy]
+├── Ingress     clubby-frontend (path /, stesso host/secretName TLS del backend)                   [build-deploy]
+├── Ingress     clubby-keycloak (routing verso Keycloak, TLS)                                      [infra]
+├── Secret      clubby-secrets (DB_PASSWORD, KEYCLOAK_ADMIN_CLIENT_SECRET, per backend)            [build-deploy]
+├── Secret      clubby-infra-secrets (DB_PASSWORD, KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD)              [infra]
 ├── Secret      ghcr-secret (imagePullSecrets: pull immagini private da ghcr.io)                        [build-deploy]
-└── ConfigMap   clubmanager-config (DB_HOST/PORT/NAME/USER, KEYCLOAK_URL/REALM/CLIENT_ID, PORT)         [build-deploy]
+└── ConfigMap   clubby-config (DB_HOST/PORT/NAME/USER, KEYCLOAK_URL/REALM/CLIENT_ID, PORT)         [build-deploy]
 ```
 
 `[build-deploy]` = generato/applicato automaticamente dal workflow **Build & Deploy** (backend/frontend).
@@ -491,8 +491,8 @@ Job (per ciascuno scope: nomi mostrati per `backend`, `frontend` è identico):
 5. **register-backend-tag**: solo dopo un deploy riuscito, crea/sposta il tag `backend-<branch>-*` (vedi
    sopra "Come avanza il tag").
 6. **cleanup-registry**: dopo almeno un deploy riuscito, ripulisce dal registry le immagini taggate solo con
-   la data, mantenendo le **3 più recenti** per repository immagine (`clubmanager-backend`,
-   `clubmanager-frontend`), a prescindere dal branch. I tag di versione reale (`X.Y.Z`) sono sempre esclusi
+   la data, mantenendo le **3 più recenti** per repository immagine (`clubby-backend`,
+   `clubby-frontend`), a prescindere dal branch. I tag di versione reale (`X.Y.Z`) sono sempre esclusi
    da questa pulizia. Non usa più `actions/delete-package-versions` (dismessa, girava forzata su un runtime
    Node deprecato): usa direttamente l'API di GitHub Packages via `gh api`.
 
@@ -519,7 +519,7 @@ Accetta quattro input:
   un branch `feature/**`/`fix/**` concluso, di solito si lascia vuoto (entrambi gli scope).
 - `branch` (opzionale): se valorizzato (es. `main`, `feature/x`), ripulisce **solo** i tag di quel branch —
   sia Git (`backend-<branch>-*`, `frontend-<branch>-*`) sia le immagini Docker corrispondenti su `ghcr.io`
-  (`clubmanager-backend`/`clubmanager-frontend`), tramite l'API di GitHub Packages (non
+  (`clubby-backend`/`clubby-frontend`), tramite l'API di GitHub Packages (non
   `actions/delete-package-versions`, che non supporta un filtro per tag). Se vuoto, ripulisce i tag di
   **tutti** i branch (`preserve_latest` si applica per singolo branch, non globalmente). In tutti i casi,
   un'immagine il cui digest è aliasato anche da un tag di versione reale (`X.Y.Z`) viene sempre saltata, mai
@@ -663,18 +663,23 @@ k8s/
 
 ### Variabili e secret da configurare su GitHub
 
-**Per Environment** (Repository → Settings → Environments → crea `dev` e `prod`, poi per ciascuno
-"Environment secrets"/"Environment variables"), non più a livello di repository: `Build & Deploy` e `Tag`
-leggono sempre l'Environment `dev`; `Infra` legge l'Environment passato come input (`dev` o `prod`) al
-lancio. Le tabelle sotto vanno quindi configurate **due volte**, una per `dev` e una per `prod`, con valori
-diversi (hostname, namespace, credenziali VPS/DB/Keycloak di ciascun ambiente). Le **Secrets** sono cifrate
-e mai visibili nei log; le **Variables** sono in chiaro, per valori non sensibili.
+**Per Environment** (Repository → Settings → Environments → crea `development` e `production`, poi per
+ciascuno "Environment secrets"/"Environment variables"), non più a livello di repository: `Build & Deploy` e
+`Tag` leggono sempre l'Environment `development`; `Infra` legge l'Environment passato come input
+(`development` o `production`) al lancio. Le tabelle sotto vanno quindi configurate **due volte**, una per
+`development` e una per `production`, con valori diversi (hostname, namespace, credenziali VPS/DB di ciascun
+ambiente). Le **Secrets** sono cifrate e mai visibili nei log; le **Variables** sono in chiaro, per valori
+non sensibili.
+
+Attenzione a non confondere due nomi che si somigliano: gli **Environment GitHub** si chiamano per esteso
+`development` e `production`, mentre i **namespace Kubernetes** usano i suffissi brevi `-dev` e `-prod`
+(es. `clubby-dev`, `clubby-prod`, e `postgres-dev`/`postgres-prod` per il database).
 
 Usati sia da **Infra** che da **Build & Deploy** salvo dove indicato. `DB_PASSWORD`,
 `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` e `KEYCLOAK_ADMIN_CLIENT_SECRET` **non vanno inventati a mano**: la prima
 volta Infra li genera casualmente e li stampa nel riepilogo della sua run (vedi [Infra](#infra), incluso se
-la run fallisce dopo averli generati) — copiali nell'Environment corrispondente (`dev` o `prod`) subito
-dopo. **Importante**: se questi Secrets sono già presenti sull'Environment quando rilanci Infra, vengono
+la run fallisce dopo averli generati) — copiali nell'Environment corrispondente (`development` o
+`production`) subito dopo. **Importante**: se questi Secrets sono già presenti sull'Environment quando rilanci Infra, vengono
 **riusati così come sono** invece di rigenerarne di nuovi — fondamentale perché Postgres e Keycloak
 persistono i dati tra un run e l'altro (PVC), quindi una password rigenerata ogni volta smetterebbe di
 corrispondere a quella realmente impostata al primo avvio, rompendo i login su ogni run successivo al primo.
@@ -686,7 +691,7 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 | `SSH_PRIVATE_KEY` | Chiave privata SSH (PEM) corrispondente a una chiave pubblica autorizzata sulla VPS | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
 | `DB_PASSWORD` | Password del database Postgres condiviso (app + Keycloak) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
 | `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Password dell'admin console Keycloak (bootstrap, distinto dall'admin applicativo) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
-| `KEYCLOAK_ADMIN_CLIENT_SECRET` | Client secret del client confidential `clubmanager-backend` su Keycloak — **generato/riusato da Infra** | *(copiata dal riepilogo della run Infra)* |
+| `KEYCLOAK_ADMIN_CLIENT_SECRET` | Client secret del client confidential `clubby-backend` su Keycloak — **generato/riusato da Infra** | *(copiata dal riepilogo della run Infra)* |
 | `GHCR_PAT` | Personal Access Token GitHub con scope `read:packages`, usato da **Build & Deploy** per creare il Secret k8s `ghcr-secret` (`imagePullSecrets` di backend/frontend) — i package su `ghcr.io` sono privati di default, senza questo token i pod restano in `ImagePullBackOff`. **Non riusare il `GITHUB_TOKEN` automatico**: è valido solo per la durata della run, i pod devono poter fare pull in qualunque momento futuro. Genera il token da GitHub → Settings (personali) → Developer settings → Personal access tokens → Tokens (classic) → scope `read:packages` | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* |
 | `WORKFLOW_PAT` | **Secret di repository, non per Environment** (unico in questa tabella). Personal Access Token con permesso "Workflows: Read and write" (scope `workflow` sui token classic), usato dal solo workflow **Tag**. Serve perché Tag tagga un commit "vecchio" — l'ultimo `<scope>-main-*` deployato, non la punta attuale di `main` — e il `GITHUB_TOKEN` di default rifiuta il push di un tag quando il contenuto di `.github/workflows/` in quel commit non è identico a quello dell'ultimo commit di un branch, condizione quasi certa una volta che i workflow evolvono. **Non riusare `GHCR_PAT`**: quello finisce in un Secret k8s persistito sul cluster, e dargli anche scope `workflow` permetterebbe di modificare le pipeline CI/CD a chiunque legga quel Secret | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* |
 
@@ -698,11 +703,11 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 |------|-------------|---------|----------|
 | `SSH_HOST` | Indirizzo della VPS su cui gira il cluster k8s | `203.0.113.10` | Infra, Build & Deploy |
 | `SSH_USER` | Utente SSH per connettersi alla VPS | `deploy` | Infra, Build & Deploy |
-| `KUBE_NAMESPACE` | Namespace Kubernetes target — deve essere diverso tra `dev` e `prod` anche se condividono la stessa VPC/cluster | `clubmanager-prod` | Infra, Build & Deploy |
-| `APP_DOMAIN` | Hostname pubblico dell'app (usato nell'Ingress per frontend **e** backend sullo stesso host, routing per path: `/api` → backend, `/` → frontend; anche base per `VITE_API_BASE_URL` e per i redirect URI SPA creati da Infra) | `app.clubmanager.example.com` | Infra, Build & Deploy |
+| `KUBE_NAMESPACE` | Namespace Kubernetes target — deve essere diverso tra `dev` e `prod` anche se condividono la stessa VPC/cluster | `clubby-prod` | Infra, Build & Deploy |
+| `APP_DOMAIN` | Hostname pubblico dell'app (usato nell'Ingress per frontend **e** backend sullo stesso host, routing per path: `/api` → backend, `/` → frontend; anche base per `VITE_API_BASE_URL` e per i redirect URI SPA creati da Infra) | `app.clubby.example.com` | Infra, Build & Deploy |
 | `VITE_TENANT_NAME` | Nome tenant visualizzato in UI, compilato nel bundle frontend | `ASD Roma` | Build & Deploy |
-| `KEYCLOAK_HOST` | Hostname pubblico di Keycloak (bare host) — usato sia nell'Ingress di Infra sia per costruire `KEYCLOAK_URL` (`https://` + questo valore); non punta al DNS interno del cluster, il backend valida il claim `iss` del JWT confrontandolo esattamente con `https://KEYCLOAK_HOST` (vedi nota sull'issuer JWT sopra) | `auth.clubmanager.example.com` | Infra, Build & Deploy |
-| `DB_HOST` | Host del Postgres condiviso raggiungibile dal cluster (nome del Service creato da Infra, include il namespace) | `clubmanager-postgres.clubmanager-prod.svc.cluster.local` | Build & Deploy |
+| `KEYCLOAK_HOST` | Hostname pubblico di Keycloak (bare host) — usato sia nell'Ingress di Infra sia per costruire `KEYCLOAK_URL` (`https://` + questo valore); non punta al DNS interno del cluster, il backend valida il claim `iss` del JWT confrontandolo esattamente con `https://KEYCLOAK_HOST` (vedi nota sull'issuer JWT sopra) | `auth.clubby.example.com` | Infra, Build & Deploy |
+| `DB_HOST` | Host del Postgres condiviso raggiungibile dal cluster (nome del Service creato da Infra, include il namespace) | `clubby-postgres.clubby-prod.svc.cluster.local` | Build & Deploy |
 | `VITE_ACTIVITY_SELECT_VALUES_MAPPING` | Mapping JSON attività→costo di default per il form "Nuovo incontro", compilato nel bundle frontend | `{"Dog Dance":20,"Mantrailing":20,"K9 Cross Training":25,"Educazione singolo":20,"Passeggiata":25,"Piscina":25}` | Build & Deploy |
 
 ##### Opzionali (default applicato se non impostate)
@@ -711,19 +716,19 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 |------|-------------|---------|---------|----------|
 | `VITE_SELECT_ISTRUTTORI_VALUES` | Istruttori selezionabili nel form "Nuovo incontro" (lista separata da virgole, il primo è preselezionato), compilata nel bundle frontend. Non impostarla è una scelta valida: il campo "Istruttore" non appare né nel form né nella tabella incontri, e il Resoconto mostra un unico prospetto senza raggruppamenti — il caso dell'associazione con un solo istruttore | `Luca,Elisabetta,Marco` | *(vuota: campo non mostrato)* | Build & Deploy |
 | `SSH_PORT` | Porta SSH della VPS | `22` | `22` | Infra, Build & Deploy |
-| `DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Build & Deploy — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubmanager/k8s` | `/opt/clubmanager/k8s` | Build & Deploy |
-| `INFRA_DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Infra (diverso da `DEPLOY_PATH` per non mischiarli) — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubmanager/infra` | `/opt/clubmanager/infra` | Infra |
+| `DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Build & Deploy — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubby/k8s` | `/opt/clubby/k8s` | Build & Deploy |
+| `INFRA_DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Infra (diverso da `DEPLOY_PATH` per non mischiarli) — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubby/infra` | `/opt/clubby/infra` | Infra |
 | `BACKEND_PORT` | Porta interna su cui ascolta il backend (Deployment + ConfigMap `PORT`) | `3000` | `3000` | Build & Deploy |
 | `POSTGRES_STORAGE_SIZE` | Dimensione del PVC per l'istanza Postgres condivisa | `5Gi` | `5Gi` | Infra |
 | `DB_PORT` | Porta Postgres | `5432` | `5432` | Build & Deploy |
 | `DB_NODE_PORT` | Porta `NodePort` su cui esporre Postgres sull'IP pubblico della VPS, per collegarsi da un client locale (DBeaver, ecc.) — feature opt-in, **nessun default**: se non impostata il Service `NodePort` non viene creato (o viene rimosso se era stato creato in precedenza). Vedi sezione "Connessione al DB da un client locale" valori possibili 30000-32767 | `30432` | `-` (disattivato) | Infra |
-| `DB_NAME` | Nome del database applicativo (il database `keycloak` è fisso, creato da Infra) | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
-| `DB_USER` | Utente Postgres applicativo (condiviso anche da Keycloak) | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
+| `DB_NAME` | Nome del database applicativo (il database `keycloak` è fisso, creato da Infra) | `clubby` | `clubby` | Infra, Build & Deploy |
+| `DB_USER` | Utente Postgres applicativo (condiviso anche da Keycloak) | `clubby` | `clubby` | Infra, Build & Deploy |
 | `KEYCLOAK_BOOTSTRAP_ADMIN` | Username dell'admin console Keycloak (bootstrap, non l'admin applicativo) | `admin` | `admin` | Infra |
 | `KEYCLOAK_START_MODE` | Comando di avvio di Keycloak (`args` del container): `start-dev` per sviluppo, `start` (build ottimizzata) per produzione — impostare `start-dev` solo sull'Environment `dev` | `start` | `start` | Infra |
-| `KEYCLOAK_REALM` | Realm Keycloak del tenant | `clubmanager` | `clubmanager` | Infra, Build & Deploy |
-| `KEYCLOAK_ADMIN_CLIENT_ID` | Client ID del client confidential backend | `clubmanager-backend` | `clubmanager-backend` | Build & Deploy |
-| `KEYCLOAK_CLIENT_ID` | Client ID pubblico SPA (compilato nel frontend come `VITE_KEYCLOAK_CLIENT_ID`) | `clubmanager-spa` | `clubmanager-spa` | Build & Deploy |
+| `KEYCLOAK_REALM` | Realm Keycloak del tenant | `clubby` | `clubby` | Infra, Build & Deploy |
+| `KEYCLOAK_ADMIN_CLIENT_ID` | Client ID del client confidential backend | `clubby-backend` | `clubby-backend` | Build & Deploy |
+| `KEYCLOAK_CLIENT_ID` | Client ID pubblico SPA (compilato nel frontend come `VITE_KEYCLOAK_CLIENT_ID`) | `clubby-spa` | `clubby-spa` | Build & Deploy |
 | `VITE_THEME_PRIMARY` | Colore primario (bottoni, link attivi) | `#FF6B4A` | `#FF6B4A` | Build & Deploy |
 | `VITE_THEME_PRIMARY_TEXT` | Colore del testo sopra il colore primario | `#ffffff` | `#ffffff` | Build & Deploy |
 | `VITE_THEME_DANGER` | Colore per importi negativi/azioni distruttive | `#dc2626` | `#dc2626` | Build & Deploy |
@@ -745,14 +750,14 @@ Due modi per collegarti da un client locale:
 Da terminale locale:
 ```bash
 ssh -i ~/.ssh/k9_deploy 5432:localhost:5432 deploy@<IP_VPS> \
-  'export KUBECONFIG=/home/deploy/.kube/config && kubectl port-forward -n <namespace> svc/clubmanager-postgres 5432:5432'
+  'export KUBECONFIG=/home/deploy/.kube/config && kubectl port-forward -n <namespace> svc/clubby-postgres 5432:5432'
 ```
-(sostituisci `<IP_VPS>` e `<namespace>`, es. `clubmanager-dev`; sostituisci `deploy` se il tuo `SSH_USER` è
+(sostituisci `<IP_VPS>` e `<namespace>`, es. `clubby-dev`; sostituisci `deploy` se il tuo `SSH_USER` è
 diverso). Lascia il terminale aperto finché usi il client — il tunnel resta attivo finché la sessione SSH è
 connessa.
 
 Poi in DBeaver: host `localhost`, porta `5432`, database/utente/password = `DB_NAME`/`DB_USER`/`DB_PASSWORD`
-dell'Environment (default `clubmanager`/`clubmanager`; la password è quella generata da Infra, vedi tabella
+dell'Environment (default `clubby`/`clubby`; la password è quella generata da Infra, vedi tabella
 sopra).
 
 #### 2. `NodePort` (esposizione pubblica sull'IP della VPS, opt-in)

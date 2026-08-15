@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: clubmanager-frontend
+  name: clubby-frontend
   namespace: ${KUBE_NAMESPACE}
   labels:
-    app: clubmanager-frontend
+    app: clubby-frontend
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: clubmanager-frontend
+      app: clubby-frontend
   template:
     metadata:
       labels:
-        app: clubmanager-frontend
+        app: clubby-frontend
     spec:
       imagePullSecrets:
         - name: ghcr-secret
@@ -24,7 +24,7 @@ spec:
         # versione deployata su quel pod.
         - name: version
           configMap:
-            name: clubmanager-frontend-config
+            name: clubby-frontend-config
       containers:
         - name: frontend
           image: ${FRONTEND_IMAGE}

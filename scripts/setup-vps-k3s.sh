@@ -114,11 +114,11 @@ EOF
 # /opt è tipicamente root:root (755): senza questo passo l'utente di deploy
 # non ha i permessi per creare le sottocartelle dove le pipeline Infra/Build &
 # Deploy copiano i manifest via scp (DEPLOY_PATH/INFRA_DEPLOY_PATH, default
-# /opt/clubmanager/k8s e /opt/clubmanager/infra — vedi README), causando un
+# /opt/clubby/k8s e /opt/clubby/infra — vedi README), causando un
 # errore "Process exited with status 1" nello step scp-action.
-echo "=== 6/6: Preparo /opt/clubmanager per l'utente $DEPLOY_USER ==="
-mkdir -p /opt/clubmanager
-chown -R "$DEPLOY_USER":"$DEPLOY_USER" /opt/clubmanager
+echo "=== 6/6: Preparo /opt/clubby per l'utente $DEPLOY_USER ==="
+mkdir -p /opt/clubby
+chown -R "$DEPLOY_USER":"$DEPLOY_USER" /opt/clubby
 
 echo ""
 echo "=== Fatto ==="
@@ -127,7 +127,7 @@ echo "  kubectl configurato per l'utente: $DEPLOY_USER (~/.kube/config)"
 echo "  Ingress Controller               : Traefik (già incluso in k3s, ingressClassName: traefik)"
 echo "  ClusterIssuer 'letsencrypt-staging': per test, nessun rate limit reale"
 echo "  ClusterIssuer 'letsencrypt'        : produzione, usato da k8s/templates/ingress.yaml"
-echo "  /opt/clubmanager                   : creata, di proprietà di $DEPLOY_USER"
+echo "  /opt/clubby                   : creata, di proprietà di $DEPLOY_USER"
 echo ""
 echo "  I certificati emessi da cert-manager si rinnovano AUTOMATICAMENTE, nessuna"
 echo "  azione manuale richiesta (vedi README, sezione K8s, per i dettagli)."

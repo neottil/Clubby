@@ -1,18 +1,22 @@
 /**
- * Middleware di autenticazione e autorizzazione
+ * Middleware di autenticazione e autorizzazione.
  *
- * Estrae i claims JWT dal token Keycloak.
- * In prod: Ingress / reverse proxy valida firma e scadenza.
- * In locale: il server verifica via JWKS.
+ * I token sono emessi dall'authorizer (servizio in authorizer/) e verificati
+ * qui con la sua chiave pubblica, scaricata da /.well-known/jwks.json. Il
+ * backend può quindi verificare i token ma non emetterli: la chiave privata
+ * non esce mai dall'authorizer.
  */
 
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
-export interface KeycloakClaims {
+export interface TokenClaims {
   sub: string;
-  preferred_username: string;
-  email?: string;
-  realm_access: { roles: string[] };
+  email: string;
+  nome: string;
+  cognome: string;
+  roles: string[];
+  /** True finché l'utente non ha sostituito una password temporanea. */
+  cambio_password_richiesto?: boolean;
   iat: number;
   exp: number;
 }
@@ -49,22 +53,27 @@ export interface ResponseResult {
   body?: string;
 }
 
-const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://localhost:8080';
-const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'clubmanager';
-
-const jwksUrl = new URL(
-  `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`
-);
-const JWKS = createRemoteJWKSet(jwksUrl);
+/**
+ * Emittente atteso dei token: è l'URL *pubblico* dell'authorizer, quello che
+ * l'authorizer stesso scrive nel claim `iss`. Confrontarlo è ciò che impedisce
+ * a un token emesso da un'altra istanza (per esempio quella di sviluppo) di
+ * essere accettato qui.
+ */
+const AUTH_ISSUER = process.env.AUTH_ISSUER || 'http://localhost:3001';
 
 /**
- * Verify JWT via JWKS — used in local server mode.
+ * URL da cui scaricare le chiavi pubbliche. Distinto dall'issuer perché in
+ * cluster il backend raggiunge l'authorizer sul Service interno, mentre
+ * l'issuer resta il nome pubblico scritto nei token.
  */
-export async function verifyToken(token: string): Promise<KeycloakClaims> {
-  const { payload } = await jwtVerify(token, JWKS, {
-    issuer: `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`,
-  });
-  return payload as unknown as KeycloakClaims;
+const AUTH_INTERNAL_URL = process.env.AUTH_INTERNAL_URL || AUTH_ISSUER;
+
+const JWKS = createRemoteJWKSet(new URL(`${AUTH_INTERNAL_URL}/.well-known/jwks.json`));
+
+/** Verifica firma, scadenza ed emittente del token. */
+export async function verifyToken(token: string): Promise<TokenClaims> {
+  const { payload } = await jwtVerify(token, JWKS, { issuer: AUTH_ISSUER });
+  return payload as unknown as TokenClaims;
 }
 
 /**
@@ -78,20 +87,15 @@ export function getAuthContext(event: RequestEvent): AuthContext {
     throw new UnauthorizedError('Token non presente o non valido');
   }
 
-  // realm_access può arrivare come stringa JSON serializzata
-  let realmAccess: { roles: string[] } = { roles: [] };
-  if (claims.realm_access) {
-    realmAccess = typeof claims.realm_access === 'string'
-      ? JSON.parse(claims.realm_access)
-      : claims.realm_access;
-  }
-
-  const groups = realmAccess.roles ?? [];
+  const groups: string[] = Array.isArray(claims.roles) ? claims.roles : [];
+  // Qualunque cosa non sia esplicitamente 'admin' vale come viewer: un token
+  // senza ruoli riconoscibili deve ricadere sui permessi minimi, non su
+  // nessun permesso né su tutti.
   const role: UserRole = groups.includes('admin') ? 'admin' : 'viewer';
 
   return {
     userId: claims.sub,
-    email: claims.email ?? claims.preferred_username ?? '',
+    email: claims.email ?? '',
     groups,
     role,
   };

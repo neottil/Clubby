@@ -90,7 +90,7 @@ jobs:
         id: promuovi
         run: |
           declare -A REAL_PREFIX=( [backend]=server [frontend]=client )
-          declare -A IMAGE=( [backend]=clubmanager-backend [frontend]=clubmanager-frontend )
+          declare -A IMAGE=( [backend]=clubby-backend [frontend]=clubby-frontend )
           declare -A PROMOTED=( [backend]=false [frontend]=false )
 
           for SCOPE in backend frontend; do

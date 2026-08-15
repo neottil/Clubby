@@ -1,14 +1,19 @@
 /**
  * Handler: /api/admin/*
  * Ruoli: solo admin
+ *
+ * Gli endpoint che riguardano gli account (elenco, ruoli, reset password)
+ * sono inoltrati all'authorizer riportandone il token del chiamante; quelli
+ * sull'associazione utente ↔ socio lavorano sul database applicativo.
  */
 
-import { type RequestEvent, type ResponseResult, getAuthContext, requireAdmin } from '../middleware/auth.js';
+import { type RequestEvent, type ResponseResult, getAuthContext, requireAdmin, UnauthorizedError } from '../middleware/auth.js';
 import { ok, noContent, errorResponse } from '../middleware/response.js';
 import {
-  listKeycloakUsers,
+  listaUtenti,
   promuoviAdmin,
   retrocediAdmin,
+  resetPasswordUtente,
   associaViewerASocio,
   disassociaViewerDaSocio,
 } from '../service/admin.service.js';
@@ -24,22 +29,26 @@ export const handler = async (
     const path    = event.requestContext.http.path;
     const socioId = event.pathParameters?.socioId;
 
+    // Il token grezzo serve per inoltrare le richieste all'authorizer a nome
+    // dell'admin che ha chiamato. Il server lo ha già verificato prima di
+    // arrivare qui: questo controllo copre solo il caso di un header perso.
+    const tokenChiamante = event.headers?.authorization ?? event.headers?.Authorization;
+    if (!tokenChiamante) throw new UnauthorizedError('Token mancante');
+
     // -----------------------------------------------------------
-    // GET /api/admin/users  - Lista utenti Registrati (Keycloak)
+    // GET /api/admin/users — utenti registrati (dall'authorizer)
     // -----------------------------------------------------------
     if (method === 'GET' && path.endsWith('/users')) {
-      const users = await listKeycloakUsers();
-      return ok(users);
+      return ok(await listaUtenti(tokenChiamante));
     }
 
     // -----------------------------------------------------------
-    // POST /api/admin/associa-viewer
-    // Body: { socio_id, keycloak_user_id }
+    // POST /api/admin/associa-viewer   Body: { socio_id, utente_id }
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/associa-viewer')) {
       const body = JSON.parse(event.body ?? '{}');
-      await associaViewerASocio(body.socio_id, body.keycloak_user_id);
-      return ok({ message: 'Viewer associato con successo' });
+      await associaViewerASocio(body.socio_id, body.utente_id, tokenChiamante);
+      return ok({ message: 'Utente associato al socio' });
     }
 
     // -----------------------------------------------------------
@@ -51,23 +60,31 @@ export const handler = async (
     }
 
     // -----------------------------------------------------------
-    // POST /api/admin/promuovi
-    // Body: { keycloak_user_id }
+    // POST /api/admin/promuovi   Body: { utente_id }
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/promuovi')) {
       const body = JSON.parse(event.body ?? '{}');
-      await promuoviAdmin(body.keycloak_user_id);
-      return ok({ message: `Utente promosso ad admin` });
+      await promuoviAdmin(body.utente_id, tokenChiamante);
+      return ok({ message: 'Utente promosso ad admin' });
     }
 
     // -----------------------------------------------------------
-    // POST /api/admin/retrocedi
-    // Body: { keycloak_user_id }
+    // POST /api/admin/retrocedi   Body: { utente_id }
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/retrocedi')) {
       const body = JSON.parse(event.body ?? '{}');
-      await retrocediAdmin(body.keycloak_user_id, auth.userId);
-      return ok({ message: `Utente retrocesso a viewer` });
+      await retrocediAdmin(body.utente_id, tokenChiamante);
+      return ok({ message: 'Utente retrocesso a viewer' });
+    }
+
+    // -----------------------------------------------------------
+    // POST /api/admin/reset-password   Body: { utente_id }
+    // Restituisce la password temporanea generata: va consegnata
+    // all'interessato: non viene inviata per email e non è più recuperabile.
+    // -----------------------------------------------------------
+    if (method === 'POST' && path.endsWith('/reset-password')) {
+      const body = JSON.parse(event.body ?? '{}');
+      return ok(await resetPasswordUtente(body.utente_id, tokenChiamante));
     }
 
     return errorResponse({ statusCode: 404, message: 'Route non trovata' });

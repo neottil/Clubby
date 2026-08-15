@@ -15,19 +15,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: clubmanager-keycloak
+  name: clubby-keycloak
   namespace: ${KUBE_NAMESPACE}
   labels:
-    app: clubmanager-keycloak
+    app: clubby-keycloak
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: clubmanager-keycloak
+      app: clubby-keycloak
   template:
     metadata:
       labels:
-        app: clubmanager-keycloak
+        app: clubby-keycloak
     spec:
       containers:
         - name: keycloak
@@ -37,20 +37,20 @@ spec:
             - name: KC_DB
               value: postgres
             - name: KC_DB_URL
-              value: jdbc:postgresql://clubmanager-postgres.${KUBE_NAMESPACE}.svc.cluster.local:5432/keycloak
+              value: jdbc:postgresql://clubby-postgres.${KUBE_NAMESPACE}.svc.cluster.local:5432/keycloak
             - name: KC_DB_USERNAME
               value: "${DB_USER}"
             - name: KC_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: clubmanager-infra-secrets
+                  name: clubby-infra-secrets
                   key: DB_PASSWORD
             - name: KEYCLOAK_ADMIN
               value: "${KEYCLOAK_BOOTSTRAP_ADMIN}"
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: clubmanager-infra-secrets
+                  name: clubby-infra-secrets
                   key: KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
             - name: KC_HOSTNAME
               value: "https://${KEYCLOAK_HOST}"
