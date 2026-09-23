@@ -382,6 +382,12 @@ Problemi reali incontrati costruendo questi workflow, non ovvi in anticipo:
   dalla **stessa** Variable dell'Environment in entrambi i workflow di deploy — un solo posto da
   cambiare, nessun rischio di disallineamento fra ciò che si vede e ciò che risponde.
 
+- **Il runner è fissato, non `ubuntu-latest`.** Tutti i job girano su `ubuntu-24.04`. `ubuntu-latest` è
+  un'etichetta mobile: GitHub la sposta alla LTS successiva a una data annunciata (il 19 ottobre 2026 passa
+  a Ubuntu 26.04), e il primo run dopo quel giorno sarebbe anche il primo test della nuova immagine — in
+  una pipeline che arriva in produzione, scoperto durante un deploy. Fissarla sposta l'aggiornamento a
+  quando lo si decide: si cambia l'etichetta, si lancia un dry-run e una build di prova, e poi si prosegue.
+
 ## Workflow, uno per uno
 
 ### `infra.yml`
@@ -457,7 +463,10 @@ lo slug dei tag lo ricava il workflow; vuoto = tutti i branch),
 specificato, di un solo scope), raggruppati per (scope, branch), mantenendo sempre il più recente di
 ciascun gruppo se `preserve_latest=true`, con salvaguardia sulle versioni aliasate a un tag reale.
 `dry_run=true` di default: primo lancio sempre "a vuoto" per rivedere cosa verrebbe toccato prima di
-cancellare davvero.
+cancellare davvero. Chiude con un **riepilogo** nella pagina della run (come `infra.yml`): per ciascuno
+scope, i tag Git e le immagini Docker eliminate — o che verrebbero eliminate in dry-run, con i verbi al
+condizionale — e i tag mantenuti. Ha `if: always()`, così dopo un fallimento a metà si legge comunque
+cosa era già stato toccato.
 
 ## Come adattarlo a un altro progetto
 

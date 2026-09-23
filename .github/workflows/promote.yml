@@ -50,7 +50,7 @@ jobs:
   # versione esista davvero nel repo, altrimenti fallisce subito con un
   # errore chiaro invece di procedere.
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       backend_image_tag: ${{ steps.check.outputs.backend_image_tag }}
       frontend_image_tag: ${{ steps.check.outputs.frontend_image_tag }}

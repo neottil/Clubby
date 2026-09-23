@@ -61,7 +61,7 @@ on:
 
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       packages: write
@@ -101,6 +101,10 @@ jobs:
           for SCOPE in ${{ steps.scopes.outputs.list }}; do
             : > "/tmp/cleanup/${SCOPE}_delete_git.txt"
             : > "/tmp/cleanup/${SCOPE}_keep_datetags.txt"
+            # Stessi tag di _keep_datetags, ma col nome completo: quello serve
+            # al confronto con i tag Docker, questo al riepilogo finale.
+            : > "/tmp/cleanup/${SCOPE}_keep_git.txt"
+            : > "/tmp/cleanup/${SCOPE}_docker.txt"
 
             if [ -n "$BRANCH_FILTER" ]; then
               PATTERN="${SCOPE}-${BRANCH_FILTER}-*"
@@ -130,6 +134,7 @@ jobs:
                 SEEN_BRANCH[$BR]=1
                 echo "[$SCOPE/$BR] mantengo $tag"
                 echo "$DATE_TAG" >> "/tmp/cleanup/${SCOPE}_keep_datetags.txt"
+                echo "$tag" >> "/tmp/cleanup/${SCOPE}_keep_git.txt"
               else
                 echo "[$SCOPE/$BR] da eliminare: $tag"
                 echo "$tag" >> "/tmp/cleanup/${SCOPE}_delete_git.txt"
@@ -222,5 +227,82 @@ jobs:
                 echo "  Elimino versione $ID (tag: $TAGS_INLINE)"
                 gh api -X DELETE "/users/$OWNER/packages/container/$IMG/versions/$ID"
               fi
+              # Annotata per il riepilogo finale. Il file va scritto qui e non
+              # ricostruito dopo: questo ciclo gira in una subshell (è in una
+              # pipeline), quindi nessuna variabile sopravvive alla fine.
+              echo "$IMG: $TAGS_INLINE(versione $ID)" >> "/tmp/cleanup/${SCOPE}_docker.txt"
             done
           done
+
+      # Riepilogo leggibile nella pagina della run, come per Infra. if: always()
+      # perché serve soprattutto quando qualcosa è fallito a metà: dice cosa era
+      # già stato toccato prima dell'errore.
+      - name: Riepilogo
+        if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          SCOPES: ${{ steps.scopes.outputs.list }}
+        run: |
+          # In dry-run non è stato cancellato nulla: il riepilogo deve dirlo al
+          # tempo giusto, altrimenti si legge come un elenco di danni fatti.
+          if [ "$DRY_RUN" = "true" ]; then
+            VERBO_TAG="Tag Git che verrebbero eliminati"
+            VERBO_IMG="Immagini Docker che verrebbero eliminate"
+          else
+            VERBO_TAG="Tag Git eliminati"
+            VERBO_IMG="Immagini Docker eliminate"
+          fi
+
+          # Elenco puntato del contenuto di un file, o un trattino se è vuoto
+          # o non esiste (uno step fallito prima può non averlo nemmeno creato).
+          elenco() {
+            if [ -s "$1" ]; then sed 's/^/- `/; s/$/`/' "$1"; else echo "_nessuno_"; fi
+          }
+          conta() { [ -s "$1" ] && wc -l < "$1" || echo 0; }
+
+          {
+            echo "## Cleanup build tags — riepilogo (${{ job.status }})"
+            echo ""
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "> **Prova a vuoto** (\`dry_run=true\`): non è stato eliminato nulla."
+              echo "> Rilancia con \`dry_run=false\` per applicare quanto segue."
+              echo ""
+            fi
+            echo "| Parametro | Valore |"
+            echo "|---|---|"
+            echo "| scope | \`${{ inputs.scope || 'tutti' }}\` |"
+            echo "| branch | \`${{ inputs.branch || 'tutti' }}\` |"
+            echo "| preserve_latest | \`${{ inputs.preserve_latest }}\` |"
+            echo "| dry_run | \`${{ inputs.dry_run }}\` |"
+            echo ""
+
+            for SCOPE in $SCOPES; do
+              DEL="/tmp/cleanup/${SCOPE}_delete_git.txt"
+              KEEP="/tmp/cleanup/${SCOPE}_keep_git.txt"
+              DOCK="/tmp/cleanup/${SCOPE}_docker.txt"
+
+              echo "### $SCOPE"
+              echo ""
+              echo "**$VERBO_TAG** ($(conta "$DEL"))"
+              echo ""
+              elenco "$DEL"
+              echo ""
+              echo "**$VERBO_IMG** ($(conta "$DOCK"))"
+              echo ""
+              elenco "$DOCK"
+              echo ""
+              # I tag mantenuti sono la baseline del prossimo diff di Build &
+              # Deploy: con preserve_latest=false non ne resta nessuno, e vale
+              # la pena che si veda.
+              echo "**Tag mantenuti** ($(conta "$KEEP"))"
+              echo ""
+              elenco "$KEEP"
+              echo ""
+            done
+
+            if [ "${{ inputs.preserve_latest }}" != "true" ]; then
+              echo "⚠️ \`preserve_latest=false\`: per i branch coinvolti non resta alcun tag di build."
+              echo "La prossima run di **Build & Deploy** su quei branch non ha una baseline da cui"
+              echo "calcolare il diff e ribuilderà tutti gli scope."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

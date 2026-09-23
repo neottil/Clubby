@@ -29,7 +29,7 @@ jobs:
   # Calcola le versioni "reali" (da package.json) e decide, per backend e
   # frontend INDIPENDENTEMENTE, cosa serve davvero eseguire.
   versions:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: development
     outputs:
       server: ${{ steps.v.outputs.server }}
@@ -130,7 +130,7 @@ jobs:
   build-backend:
     needs: versions
     if: needs.versions.outputs.has_backend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: development
     permissions:
       contents: read
@@ -176,7 +176,7 @@ jobs:
   build-frontend:
     needs: versions
     if: needs.versions.outputs.has_frontend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: development
     permissions:
       contents: read
@@ -218,7 +218,7 @@ jobs:
   build-authorizer:
     needs: versions
     if: needs.versions.outputs.has_authorizer == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: development
     permissions:
       contents: read
@@ -275,7 +275,7 @@ jobs:
       needs.versions.outputs.deploy_backend == 'true' &&
       needs.versions.result == 'success' &&
       (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       image_tag: ${{ steps.image.outputs.image_tag }}
       branch_slug: ${{ steps.image.outputs.branch_slug }}
@@ -327,7 +327,7 @@ jobs:
   register-backend-tag:
     needs: [versions, resolve-backend-image, deploy-backend]
     if: needs.deploy-backend.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -360,7 +360,7 @@ jobs:
       needs.versions.outputs.deploy_frontend == 'true' &&
       needs.versions.result == 'success' &&
       (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       image_tag: ${{ steps.image.outputs.image_tag }}
       branch_slug: ${{ steps.image.outputs.branch_slug }}
@@ -403,7 +403,7 @@ jobs:
   register-frontend-tag:
     needs: [versions, resolve-frontend-image, deploy-frontend]
     if: needs.deploy-frontend.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -436,7 +436,7 @@ jobs:
       needs.versions.outputs.deploy_authorizer == 'true' &&
       needs.versions.result == 'success' &&
       (needs.build-authorizer.result == 'success' || needs.build-authorizer.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       image_tag: ${{ steps.image.outputs.image_tag }}
       branch_slug: ${{ steps.image.outputs.branch_slug }}
@@ -475,7 +475,7 @@ jobs:
   register-authorizer-tag:
     needs: [versions, resolve-authorizer-image, deploy-authorizer]
     if: needs.deploy-authorizer.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -518,7 +518,7 @@ jobs:
       (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped') &&
       (needs.deploy-authorizer.result == 'success' || needs.deploy-authorizer.result == 'skipped') &&
       (needs.deploy-backend.result == 'success' || needs.deploy-frontend.result == 'success' || needs.deploy-authorizer.result == 'success')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: development
     permissions:
       packages: write

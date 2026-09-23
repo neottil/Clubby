@@ -776,6 +776,11 @@ Accetta quattro input:
 - `dry_run` (default `true`): elenca solo cosa verrebbe eliminato (tag Git e immagini Docker), senza
   cancellare nulla.
 
+Al termine scrive un **riepilogo** nella pagina della run: i parametri usati e, per ciascuno scope, i tag
+Git e le immagini Docker eliminate, oltre ai tag mantenuti. In `dry_run` il riepilogo è al condizionale
+("che verrebbero eliminati") e lo dichiara in apertura, così non si scambia per un elenco di cose già
+cancellate.
+
 #### `Tag` ([tag.yml](.github/workflows/tag.yml))
 
 **Attivazione manuale** (`workflow_dispatch`, nessun input, tab Actions → Tag → Run workflow): non parte da
