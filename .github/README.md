@@ -449,7 +449,8 @@ crea Release.** Sicuro da rilanciare più volte con lo stesso input.
 ### `cleanup-build-tags.yml`
 
 **Trigger**: manuale, oppure automatico (fire-and-forget) a fine `tag.yml`. Input: `scope` (opzionale:
-vuoto = entrambi, `backend`/`frontend` per uno solo), `branch` (opzionale: vuoto = tutti i branch),
+vuoto = tutti e tre, `backend`/`frontend`/`authorizer` per uno solo), `branch` (opzionale: si scrive com'è,
+lo slug dei tag lo ricava il workflow; vuoto = tutti i branch),
 `preserve_latest` (default `true`) e `dry_run` (default `true`).
 
 **Cosa fa**: applica il pattern 6 — elimina i tag Git e le immagini Docker superate di un branch (e, se

@@ -756,14 +756,15 @@ su un branch ancora attivo come `main`: dopo la pulizia resta comunque un tag da
 calcolare il prossimo diff.
 
 Accetta quattro input:
-- `scope` (opzionale): `backend`, `frontend`, o vuoto per **entrambi** (default). Backend e frontend sono
-  processati come scope completamente indipendenti (tag Git, immagini Docker, tutto separato) — questo
-  input limita la pulizia a uno solo dei due. Usato dal trigger automatico da **Tag** quando ha promosso un
-  solo scope in quella run (l'altro non è cambiato, non c'è motivo di ripulirlo). Per una pulizia manuale di
-  un branch `feature/**`/`fix/**` concluso, di solito si lascia vuoto (entrambi gli scope).
-- `branch` (opzionale): se valorizzato (es. `main`, `feature/x`), ripulisce **solo** i tag di quel branch —
-  sia Git (`backend-<branch>-*`, `frontend-<branch>-*`) sia le immagini Docker corrispondenti su `ghcr.io`
-  (`clubby-backend`/`clubby-frontend`), tramite l'API di GitHub Packages (non
+- `scope` (opzionale): `backend`, `frontend`, `authorizer`, o vuoto per **tutti e tre** (default). I tre
+  moduli sono processati come scope completamente indipendenti (tag Git, immagini Docker, tutto separato) —
+  questo input limita la pulizia a uno solo. Usato dal trigger automatico da **Tag** quando ha promosso un
+  solo scope in quella run (gli altri non sono cambiati, non c'è motivo di ripulirli). Per una pulizia manuale di
+  un branch `feature/**`/`fix/**` concluso, di solito si lascia vuoto (tutti gli scope).
+- `branch` (opzionale): si scrive com'è (es. `main`, `feature/refactoring`); alla conversione nello slug dei
+  tag (`/` → `-`) pensa il workflow. Se valorizzato, ripulisce **solo** i tag di quel branch — sia Git
+  (`<scope>-<branch>-*`) sia le immagini Docker corrispondenti su `ghcr.io`
+  (`clubby-backend`, `clubby-frontend`, `clubby-authorizer`), tramite l'API di GitHub Packages (non
   `actions/delete-package-versions`, che non supporta un filtro per tag). Se vuoto, ripulisce i tag di
   **tutti** i branch (`preserve_latest` si applica per singolo branch, non globalmente). In tutti i casi,
   un'immagine il cui digest è aliasato anche da un tag di versione reale (`X.Y.Z`) viene sempre saltata, mai

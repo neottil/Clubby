@@ -1,15 +1,16 @@
 name: Cleanup build tags
 
-# Elimina i tag "backend-<branch>-<data>" e "frontend-<branch>-<data>" creati
-# da Build & Deploy — sia i tag Git nel repo, sia le immagini Docker
-# corrispondenti su ghcr.io (clubby-backend/clubby-frontend).
+# Elimina i tag "<scope>-<branch>-<data>" creati da Build & Deploy per i tre
+# moduli (backend, frontend, authorizer) — sia i tag Git nel repo, sia le
+# immagini Docker corrispondenti su ghcr.io (clubby-backend, clubby-frontend,
+# clubby-authorizer).
 #
 # Attivazione MANUALE, oppure AUTOMATICA (fire-and-forget) alla fine di ogni
 # promozione riuscita del workflow Tag, scoped a branch=main e
-# preserve_latest=true. Backend e frontend sono scope indipendenti (vedi
-# input "scope" sotto): il trigger automatico da Tag lo passa quando ha
-# promosso un solo scope in quella run, per non ripulire (e non generare
-# rumore nei log/summary) uno scope che non ha subito nessuna modifica.
+# preserve_latest=true. I tre moduli sono scope indipendenti (vedi input
+# "scope" sotto): il trigger automatico da Tag lo passa quando ha promosso un
+# solo scope in quella run, per non ripulire (e non generare rumore nei
+# log/summary) uno scope che non ha subito nessuna modifica.
 #
 # Questi tag non sono "usa e getta": sono anche la baseline che Build & Deploy
 # usa per calcolare il diff della prossima run su quel branch (vedi
@@ -40,10 +41,8 @@ on:
         default: ''
       branch:
         description: >-
-          Branch da ripulire (es. "main", "feature/x" — usa lo stesso slug
-          dei tag: "/" diventa "-"). Vuoto = ripulisce i tag di TUTTI i
-          branch (preserve_latest si applica per singolo branch, non
-          globalmente su tutti insieme).
+          Branch da ripulire: (es. "main", "feature/refactoring").
+          Vuoto = ripulisce i tag di TUTTI i branch.
         required: false
         default: ''
       preserve_latest:
@@ -180,10 +179,21 @@ jobs:
             DOCKER_REGEX='^[a-zA-Z0-9.-]+-[0-9]{8}_[0-9]{4}$'
           fi
 
-          declare -A IMAGE=( [backend]=clubby-backend [frontend]=clubby-frontend )
+          declare -A IMAGE=(
+            [backend]=clubby-backend
+            [frontend]=clubby-frontend
+            [authorizer]=clubby-authorizer
+          )
 
           for SCOPE in ${{ steps.scopes.outputs.list }}; do
             IMG="${IMAGE[$SCOPE]}"
+            # Uno scope senza immagine qui produrrebbe una URL con doppio slash,
+            # una risposta che non è la lista attesa e un errore di jq a valle,
+            # lontano dalla causa: meglio fermarsi qui dicendo cosa manca.
+            if [ -z "$IMG" ]; then
+              echo "::error::Nessuna immagine Docker associata allo scope '$SCOPE': aggiungila alla mappa IMAGE in questo workflow."
+              exit 1
+            fi
             KEEP_FILE="/tmp/cleanup/${SCOPE}_keep_datetags.txt"
 
             echo "=== $IMG ==="
