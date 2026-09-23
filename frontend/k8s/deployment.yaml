@@ -20,9 +20,9 @@ spec:
       volumes:
         # Montato come DIRECTORY (non subPath sul singolo file): con subPath
         # kubelet copia il file una volta sola e non lo aggiorna più quando il
-        # ConfigMap cambia, quindi /version.json resterebbe fermo alla prima
-        # versione deployata su quel pod.
-        - name: version
+        # ConfigMap cambia, quindi /version.json e /config.json resterebbero
+        # fermi al primo deploy su quel pod.
+        - name: runtime-config
           configMap:
             name: clubby-frontend-config
       containers:
@@ -32,10 +32,10 @@ spec:
             - containerPort: 80
           volumeMounts:
             # Fuori da /usr/share/nginx/html: montarci dentro nasconderebbe
-            # gli asset statici dell'immagine. nginx.conf lo espone su
-            # /version.json con una location dedicata.
-            - name: version
-              mountPath: /etc/frontend-version
+            # gli asset statici dell'immagine. nginx.conf espone i file su
+            # /version.json e /config.json con location dedicate.
+            - name: runtime-config
+              mountPath: /etc/frontend-config
               readOnly: true
           readinessProbe:
             httpGet:

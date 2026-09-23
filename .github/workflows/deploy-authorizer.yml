@@ -1,0 +1,150 @@
+name: Deploy Authorizer
+
+# Solo workflow_call: non compare come workflow lanciabile a sé nella tab
+# Actions. Applica i manifest authorizer/k8s/* sull'Environment/immagine
+# indicati dal chiamante e verifica il rollout — nessuna conoscenza di *perché*
+# si sta deployando quel tag né di *dove* venga (tag di data effimero da
+# build-deploy.yml, o versione reale da promote.yml).
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment GitHub da usare (development o il nome di un club)'
+        required: true
+        type: string
+      image_tag:
+        description: 'Tag dell''immagine ghcr.io/.../clubby-authorizer da deployare (tag di data o versione reale X.Y.Z)'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # Vedi deploy-backend.yml. AUTH_JWT_PRIVATE_KEY è indispensabile: senza,
+      # l'authorizer si genera una chiave effimera e a ogni riavvio del pod
+      # tutti gli utenti vengono disconnessi. INITIAL_ADMIN_EMAIL e la sua
+      # password servono a creare il primo admin: mancando, l'authorizer parte
+      # comunque ma senza alcun account da cui amministrare.
+      - name: Verifica Variables e Secrets dell'ambiente
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
+          INITIAL_ADMIN_EMAIL: ${{ vars.INITIAL_ADMIN_EMAIL }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          AUTH_DB_PASSWORD: ${{ secrets.AUTH_DB_PASSWORD }}
+          AUTH_JWT_PRIVATE_KEY: ${{ secrets.AUTH_JWT_PRIVATE_KEY }}
+          INITIAL_ADMIN_PASSWORD: ${{ secrets.INITIAL_ADMIN_PASSWORD }}
+        run: |
+          mancanti=0
+          for nome in SSH_HOST SSH_USER APP_DOMAIN AUTH_DOMAIN INITIAL_ADMIN_EMAIL; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::La Variable $nome non è impostata sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          for nome in SSH_PRIVATE_KEY GHCR_PAT AUTH_DB_PASSWORD AUTH_JWT_PRIVATE_KEY INITIAL_ADMIN_PASSWORD; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::Il Secret $nome non è impostato sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          exit $mancanti
+
+      # Vedi deploy-backend.yml: namespace, nome del database e cartella sulla
+      # VPS derivano dal nome dell'Environment, l'indirizzo di Postgres da
+      # DB_NAMESPACE. Gli output letti più sotto come steps.ambiente.outputs.*
+      # sono dichiarati in .github/actions/ambiente/action.yml.
+      - name: Ricava namespace e percorsi dall'ambiente
+        id: ambiente
+        uses: ./.github/actions/ambiente
+        with:
+          environment: ${{ inputs.environment }}
+          db_namespace: ${{ vars.DB_NAMESPACE }}
+
+      - name: Renderizza manifest k8s (authorizer)
+        env:
+          KUBE_NAMESPACE: ${{ steps.ambiente.outputs.app_namespace }}
+          AUTHORIZER_IMAGE: ghcr.io/${{ github.repository_owner }}/clubby-authorizer:${{ inputs.image_tag }}
+          AUTH_PORT: ${{ vars.AUTH_PORT || 3001 }}
+          AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          # Postgres sta in un namespace dedicato: serve il nome completo del
+          # Service, altrimenti la risoluzione avverrebbe nel namespace
+          # dell'applicazione, dove quel Service non esiste.
+          DB_HOST: ${{ steps.ambiente.outputs.db_host }}
+          DB_PORT: ${{ vars.DB_PORT || 5432 }}
+          # Utente omonimo del database, creato da Infra come suo proprietario.
+          AUTH_DB_NAME: ${{ steps.ambiente.outputs.auth_db_name }}
+          AUTH_DB_USER: ${{ steps.ambiente.outputs.auth_db_name }}
+          AUTH_DB_PASSWORD: ${{ secrets.AUTH_DB_PASSWORD }}
+          AUTH_JWT_PRIVATE_KEY: ${{ secrets.AUTH_JWT_PRIVATE_KEY }}
+          INITIAL_ADMIN_EMAIL: ${{ vars.INITIAL_ADMIN_EMAIL }}
+          INITIAL_ADMIN_PASSWORD: ${{ secrets.INITIAL_ADMIN_PASSWORD }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p k8s/rendered
+          VARS='$KUBE_NAMESPACE $AUTHORIZER_IMAGE $AUTH_PORT $AUTH_DOMAIN $APP_DOMAIN $DB_HOST $DB_PORT $AUTH_DB_NAME $AUTH_DB_USER $AUTH_DB_PASSWORD $AUTH_JWT_PRIVATE_KEY $INITIAL_ADMIN_EMAIL $INITIAL_ADMIN_PASSWORD'
+          # Prefisso "authorizer-" nel nome renderizzato: backend e frontend
+          # usano file con lo stesso nome nelle proprie cartelle, ma sulla VPS
+          # finiscono nella STESSA directory di deploy — senza prefisso si
+          # sovrascriverebbero a vicenda.
+          for f in authorizer/k8s/*.yaml; do
+            envsubst "$VARS" < "$f" > "k8s/rendered/authorizer-$(basename "$f")"
+          done
+
+      - name: Copia manifest authorizer sulla VPS via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          source: "k8s/rendered/*"
+          target: ${{ steps.ambiente.outputs.deploy_path }}
+          strip_components: 2
+
+      - name: Applica manifest authorizer e verifica rollout
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          NS: ${{ steps.ambiente.outputs.app_namespace }}
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          DEPLOY_PATH: ${{ steps.ambiente.outputs.deploy_path }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          envs: NS,GHCR_USER,GHCR_PAT,DEPLOY_PATH
+          script: |
+            set -e
+            # Vedi commento gemello in infra.yml: kubectl (symlink a k3s) senza
+            # KUBECONFIG esplicito risolve su /etc/rancher/k3s/k3s.yaml
+            # (root:root), illeggibile dall'utente di deploy.
+            export KUBECONFIG="$HOME/.kube/config"
+
+            # Idempotente: lo creano anche deploy-backend e deploy-frontend,
+            # ricrearlo non fa danno. Serve perché i package ghcr.io sono
+            # privati di default e senza questo Secret i pod restano in
+            # ImagePullBackOff.
+            kubectl create secret docker-registry ghcr-secret -n "$NS" \
+              --docker-server=ghcr.io \
+              --docker-username="$GHCR_USER" \
+              --docker-password="$GHCR_PAT" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl apply -f "$DEPLOY_PATH/authorizer-configmap.yaml"
+            kubectl apply -f "$DEPLOY_PATH/authorizer-secret.yaml"
+            kubectl apply -f "$DEPLOY_PATH/authorizer-deployment.yaml"
+            kubectl apply -f "$DEPLOY_PATH/authorizer-service.yaml"
+            kubectl apply -f "$DEPLOY_PATH/authorizer-ingress.yaml"
+            kubectl rollout status deployment/clubby-authorizer -n "$NS" --timeout=180s

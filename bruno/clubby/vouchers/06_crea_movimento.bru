@@ -16,13 +16,24 @@ auth:bearer {
 
 body:json {
   {
-    "importo": -10.00,
-    "descrizione": "Seduta del 10/03/2024"
+    "tipo": "ricarica",
+    "importo": 50.00,
+    "descrizione": "Ricarica voucher"
   }
 }
 
 docs {
-  Solo admin. Aggiunge un movimento al voucher.
-  importo: positivo = ricarica, negativo = addebito (scalare dal saldo).
+  Solo admin. Aggiunge un movimento manuale al voucher.
+
+  tipo:
+    ricarica   credito acquistato dal socio; importo > 0; conteggiato in Fatturazione
+    addebito   consumo del credito; importo < 0; non fatturato, perché già
+               coperto dalla ricarica che lo paga
+  Omesso: importo positivo = ricarica, negativo = addebito. Un importo del
+  segno sbagliato rispetto al tipo indicato viene rifiutato (400).
+
+  Gli addebiti degli incontri li crea il backend insieme all'incontro, e
+  restano collegati (incontro_id).
+
   Il saldo corrente è calcolato come saldo_iniziale + somma movimenti.
 }

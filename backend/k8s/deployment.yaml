@@ -27,6 +27,16 @@ spec:
                 name: clubby-config
             - secretRef:
                 name: clubby-secrets
+          # Moduli opzionali qui e non nel ConfigMap di proposito: le variabili
+          # lette con envFrom non si aggiornano in un container già avviato, e
+          # un deploy che cambia solo il ConfigMap non modifica il Deployment,
+          # quindi non fa ripartire il pod. Scritte nel Deployment, accendere o
+          # spegnere un modulo cambia la spec e provoca il rollout.
+          env:
+            - name: ENABLE_MODULE_TESSERAMENTO
+              value: "${ENABLE_MODULE_TESSERAMENTO}"
+            - name: ENABLE_MODULE_FATTURAZIONE
+              value: "${ENABLE_MODULE_FATTURAZIONE}"
           readinessProbe:
             httpGet:
               path: /health

@@ -1,0 +1,20 @@
+meta {
+  name: Storico tesseramento di un socio
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/tesseramenti/{{socio_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Tutti i rinnovi di un socio, dal più recente:
+    id, socio_id, data_rinnovo, scadenza, importo, created_at
+}

@@ -7,10 +7,23 @@
  * sull'associazione utente ↔ socio lavorano sul database applicativo.
  */
 
-import { type RequestEvent, type ResponseResult, getAuthContext, requireAdmin, UnauthorizedError } from '../middleware/auth.js';
+import {
+  type RequestEvent,
+  type ResponseResult,
+  getAuthContext,
+  requireAdmin,
+  UnauthorizedError,
+  NotFoundError,
+} from '../middleware/auth.js';
 import { ok, noContent, errorResponse } from '../middleware/response.js';
+import { corpoJson } from '../util/corpo.js';
+import { intParam, paginazioneRichiesta } from '../util/paginazione.js';
 import {
   listaUtenti,
+  listaUtentiPaginata,
+  impostaRuolo,
+  impostaAdmin,
+  cambiaAttivoUtente,
   promuoviAdmin,
   retrocediAdmin,
   resetPasswordUtente,
@@ -39,6 +52,15 @@ export const handler = async (
     // GET /api/admin/users — utenti registrati (dall'authorizer)
     // -----------------------------------------------------------
     if (method === 'GET' && path.endsWith('/users')) {
+      const qs = event.queryStringParameters;
+      // Con limit/offset: pagina della card Utenti - Soci, con il numero di
+      // account da collegare. Senza: l'elenco completo.
+      if (paginazioneRichiesta(qs)) {
+        const limit  = intParam(qs?.limit);
+        const offset = intParam(qs?.offset);
+        const { rows, total, da_collegare } = await listaUtentiPaginata(tokenChiamante, { q: qs?.q, limit, offset });
+        return ok({ data: rows, total, da_collegare, limit: limit ?? rows.length, offset: offset ?? 0 });
+      }
       return ok(await listaUtenti(tokenChiamante));
     }
 
@@ -46,13 +68,14 @@ export const handler = async (
     // POST /api/admin/associa-viewer   Body: { socio_id, utente_id }
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/associa-viewer')) {
-      const body = JSON.parse(event.body ?? '{}');
+      const body = corpoJson(event);
       await associaViewerASocio(body.socio_id, body.utente_id, tokenChiamante);
       return ok({ message: 'Utente associato al socio' });
     }
 
     // -----------------------------------------------------------
     // DELETE /api/admin/associa-viewer/{socioId}
+    // Solo scollegamento: lo stato dell'account non viene toccato.
     // -----------------------------------------------------------
     if (method === 'DELETE' && socioId) {
       await disassociaViewerDaSocio(socioId);
@@ -60,10 +83,41 @@ export const handler = async (
     }
 
     // -----------------------------------------------------------
+    // POST /api/admin/attivo   Body: { utente_id, attivo }
+    // -----------------------------------------------------------
+    if (method === 'POST' && path.endsWith('/attivo')) {
+      const body = corpoJson(event);
+      await cambiaAttivoUtente(body.utente_id, body.attivo === true, tokenChiamante);
+      return ok({ message: body.attivo === true ? 'Account riattivato' : 'Account disattivato' });
+    }
+
+    // -----------------------------------------------------------
+    // POST /api/admin/amministratore   Body: { utente_id, admin }
+    // Concede o toglie il privilegio di amministrare l'app, indipendente dal
+    // ruolo nel club.
+    // -----------------------------------------------------------
+    if (method === 'POST' && path.endsWith('/amministratore')) {
+      const body = corpoJson(event);
+      await impostaAdmin(body.utente_id, body.admin === true, tokenChiamante);
+      return ok({ message: body.admin === true ? 'Privilegio di amministratore concesso' : 'Privilegio di amministratore rimosso' });
+    }
+
+    // -----------------------------------------------------------
+    // POST /api/admin/ruolo   Body: { utente_id, ruolo }
+    // Assegna il ruolo nel club: socio o istruttore. /promuovi e /retrocedi
+    // restano come scorciatoie per concedere e togliere il privilegio admin.
+    // -----------------------------------------------------------
+    if (method === 'POST' && path.endsWith('/ruolo')) {
+      const body = corpoJson(event);
+      await impostaRuolo(body.utente_id, body.ruolo, tokenChiamante);
+      return ok({ message: `Ruolo impostato a ${body.ruolo}` });
+    }
+
+    // -----------------------------------------------------------
     // POST /api/admin/promuovi   Body: { utente_id }
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/promuovi')) {
-      const body = JSON.parse(event.body ?? '{}');
+      const body = corpoJson(event);
       await promuoviAdmin(body.utente_id, tokenChiamante);
       return ok({ message: 'Utente promosso ad admin' });
     }
@@ -72,9 +126,9 @@ export const handler = async (
     // POST /api/admin/retrocedi   Body: { utente_id }
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/retrocedi')) {
-      const body = JSON.parse(event.body ?? '{}');
+      const body = corpoJson(event);
       await retrocediAdmin(body.utente_id, tokenChiamante);
-      return ok({ message: 'Utente retrocesso a viewer' });
+      return ok({ message: 'Privilegio di amministratore rimosso' });
     }
 
     // -----------------------------------------------------------
@@ -83,11 +137,11 @@ export const handler = async (
     // all'interessato: non viene inviata per email e non è più recuperabile.
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/reset-password')) {
-      const body = JSON.parse(event.body ?? '{}');
+      const body = corpoJson(event);
       return ok(await resetPasswordUtente(body.utente_id, tokenChiamante));
     }
 
-    return errorResponse({ statusCode: 404, message: 'Route non trovata' });
+    return errorResponse(new NotFoundError('Route non trovata'));
   } catch (error) {
     return errorResponse(error);
   }

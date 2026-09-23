@@ -1,0 +1,614 @@
+openapi: 3.1.0
+info:
+  title: Clubby Authorizer
+  version: 1.0.0
+  description: |
+    Servizio di autenticazione di Clubby: registrazione, accesso, sessioni, ruoli e password.
+
+    Emette i token che il backend verifica con la chiave pubblica esposta su
+    `/.well-known/jwks.json`.
+
+    **Token**
+    - *Access token*: JWT firmato RS256, dura 15 minuti. Claim: `sub` (id dell'account),
+      `email`, `roles` (il ruolo nel club, più `admin` se l'account ha il privilegio),
+      `cambio_password_richiesto`, `iss`, `iat`, `exp`.
+    - *Refresh token*: stringa opaca, dura 30 giorni, vale per un solo utilizzo (ogni
+      rinnovo lo revoca e ne emette uno nuovo).
+
+    Cambiare ruolo, privilegio admin o password, disattivare l'account o azzerarne la
+    password chiude tutte le sessioni dell'interessato.
+
+    **Errori**: sempre nella forma `{ "error": "messaggio" }`.
+servers:
+  - url: http://localhost:3001
+    description: Sviluppo locale
+  - url: https://{authDomain}
+    description: Cluster (variabile AUTH_DOMAIN dell'Environment)
+    variables:
+      authDomain:
+        default: auth.tuodominio.it
+
+tags:
+  - name: Sessione
+    description: Registrazione, accesso e rinnovo della sessione
+  - name: Account
+    description: Operazioni sull'account di chi chiama
+  - name: Amministrazione
+    description: Gestione degli account, riservata agli admin
+  - name: Servizio
+    description: Chiavi pubbliche e sonde
+
+paths:
+  /auth/register:
+    post:
+      tags: [Sessione]
+      summary: Registra un account
+      description: |
+        Crea un account con ruolo `socio`, senza privilegio admin, e apre subito una
+        sessione. L'email è salvata in minuscolo. Il collegamento a una scheda socio
+        lo fa in seguito un admin.
+
+        Limitato a 10 tentativi ogni 5 minuti per indirizzo IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credenziali'
+      responses:
+        '201':
+          description: Account creato, sessione aperta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sessione'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '409':
+          description: Esiste già un account con questa email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+        '429':
+          $ref: '#/components/responses/TroppiTentativi'
+
+  /auth/login:
+    post:
+      tags: [Sessione]
+      summary: Accede con email e password
+      description: |
+        Il messaggio d'errore è lo stesso sia per un'email inesistente sia per una
+        password sbagliata.
+
+        Limitato a 10 tentativi ogni 5 minuti per indirizzo IP; un accesso riuscito
+        azzera il contatore.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credenziali'
+      responses:
+        '200':
+          description: Sessione aperta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sessione'
+        '401':
+          description: Email o password non corretti
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+        '403':
+          description: Account disattivato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+        '429':
+          $ref: '#/components/responses/TroppiTentativi'
+
+  /auth/refresh:
+    post:
+      tags: [Sessione]
+      summary: Rinnova la sessione
+      description: Scambia un refresh token valido con una sessione nuova; quello usato viene revocato.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RichiestaRefreshToken'
+      responses:
+        '200':
+          description: Nuova sessione
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sessione'
+        '401':
+          description: Refresh token mancante, scaduto o già usato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+        '403':
+          description: Account disattivato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  /auth/logout:
+    post:
+      tags: [Sessione]
+      summary: Chiude la sessione
+      description: |
+        Revoca il refresh token indicato. Risponde 204 anche se il token non esiste o
+        manca: l'esito per chi chiama è comunque una sessione chiusa.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RichiestaRefreshToken'
+      responses:
+        '204':
+          description: Sessione chiusa
+
+  /auth/me:
+    get:
+      tags: [Account]
+      summary: Account di chi chiama
+      responses:
+        '200':
+          description: Dati dell'account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Utente'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /auth/cambia-password:
+    post:
+      tags: [Account]
+      summary: Cambia la propria password
+      description: |
+        Richiede la password attuale. Chiude tutte le sessioni dell'account, compresa
+        quella in uso, e ne restituisce una nuova con `cambio_password_richiesto` a false.
+
+        Finché una password temporanea non viene sostituita, gli endpoint di
+        amministrazione rispondono 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password_attuale, password_nuova]
+              properties:
+                password_attuale:
+                  type: string
+                  format: password
+                password_nuova:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Password cambiata, nuova sessione
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sessione'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          description: Token non valido, oppure password attuale non corretta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  /utenti/istruttori:
+    get:
+      tags: [Account]
+      summary: Istruttori attivi
+      description: |
+        Accessibile a qualsiasi account autenticato. Espone solo id ed email: il
+        nominativo sta sulla scheda socio e lo aggiunge il backend.
+      responses:
+        '200':
+          description: Istruttori, in ordine di email
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Istruttore'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+
+  /admin/utenti:
+    get:
+      tags: [Amministrazione]
+      summary: Elenco degli account
+      description: Riservato agli admin che non hanno una password temporanea da sostituire.
+      responses:
+        '200':
+          description: Account, in ordine di email
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Utente'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/RiservatoAdmin'
+
+  /admin/utenti/{id}/ruolo:
+    post:
+      tags: [Amministrazione]
+      summary: Cambia il ruolo nel club
+      description: Non tocca il privilegio admin. Chiude le sessioni dell'interessato.
+      parameters:
+        - $ref: '#/components/parameters/IdUtente'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ruolo]
+              properties:
+                ruolo:
+                  $ref: '#/components/schemas/Ruolo'
+      responses:
+        '200':
+          description: Account aggiornato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Utente'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/RiservatoAdmin'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /admin/utenti/{id}/admin:
+    post:
+      tags: [Amministrazione]
+      summary: Concede o toglie il privilegio admin
+      description: |
+        Un admin non può toglierlo a sé stesso, così non si resta mai senza
+        amministratori. Chiude le sessioni dell'interessato. Qualunque valore di
+        `admin` diverso da `true` toglie il privilegio.
+      parameters:
+        - $ref: '#/components/parameters/IdUtente'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [admin]
+              properties:
+                admin:
+                  type: boolean
+      responses:
+        '200':
+          description: Account aggiornato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Utente'
+        '400':
+          description: Tentativo di togliere il privilegio a sé stessi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/RiservatoAdmin'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /admin/utenti/{id}/attivo:
+    post:
+      tags: [Amministrazione]
+      summary: Attiva o disattiva un account
+      description: |
+        Un account disattivato non accede più e le sue sessioni vengono chiuse; non
+        viene eliminato. Un admin non può disattivare sé stesso. Qualunque valore di
+        `attivo` diverso da `true` disattiva.
+      parameters:
+        - $ref: '#/components/parameters/IdUtente'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attivo]
+              properties:
+                attivo:
+                  type: boolean
+      responses:
+        '200':
+          description: Account aggiornato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Utente'
+        '400':
+          description: Tentativo di disattivare sé stessi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/RiservatoAdmin'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /admin/utenti/{id}/reset-password:
+    post:
+      tags: [Amministrazione]
+      summary: Azzera la password
+      description: |
+        Genera una password temporanea, restituita solo in questa risposta: l'admin la
+        consegna all'interessato, che dovrà sostituirla al primo accesso. Chiude tutte
+        le sessioni dell'account.
+      parameters:
+        - $ref: '#/components/parameters/IdUtente'
+      responses:
+        '200':
+          description: Password temporanea
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordTemporanea'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/RiservatoAdmin'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /.well-known/jwks.json:
+    get:
+      tags: [Servizio]
+      summary: Chiavi pubbliche per verificare i token
+      description: Formato JWKS standard. Risposta memorizzabile in cache per 5 minuti.
+      security: []
+      responses:
+        '200':
+          description: Set di chiavi
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Jwks'
+
+  /health:
+    get:
+      tags: [Servizio]
+      summary: Sonda di liveness
+      security: []
+      responses:
+        '200':
+          description: Servizio in esecuzione
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Salute'
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token ottenuto da login, registrazione o rinnovo.
+
+  parameters:
+    IdUtente:
+      name: id
+      in: path
+      required: true
+      description: Id dell'account
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    RichiestaNonValida:
+      description: Dati mancanti o non validi (email, password troppo debole, ruolo sconosciuto, JSON malformato)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    NonAutenticato:
+      description: Token mancante, non valido o scaduto
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    RiservatoAdmin:
+      description: Chi chiama non è admin, oppure deve prima sostituire la password temporanea
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    NonTrovato:
+      description: Account non trovato
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    TroppiTentativi:
+      description: Superati i 10 tentativi in 5 minuti dallo stesso indirizzo IP
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+          example:
+            error: Troppi tentativi. Riprova fra 240 secondi.
+
+  schemas:
+    Errore:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+      example:
+        error: Email o password non corretti
+
+    Credenziali:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: mario.rossi@example.com
+        password:
+          type: string
+          format: password
+
+    RichiestaRefreshToken:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+
+    Ruolo:
+      type: string
+      enum: [socio, istruttore]
+      description: Ruolo nel club. Amministrare l'applicazione non è un ruolo ma il flag `admin`.
+
+    Utente:
+      type: object
+      description: Account. Nome, cognome e telefono non sono qui ma sulla scheda socio del backend.
+      required: [id, email, ruolo, admin, attivo, cambio_password_richiesto, ultimo_accesso, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        ruolo:
+          $ref: '#/components/schemas/Ruolo'
+        admin:
+          type: boolean
+          description: Privilegio di amministrare l'applicazione, indipendente dal ruolo
+        attivo:
+          type: boolean
+        cambio_password_richiesto:
+          type: boolean
+          description: True finché l'account non sostituisce una password temporanea
+        ultimo_accesso:
+          type: [string, 'null']
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    Sessione:
+      type: object
+      required: [access_token, refresh_token, expires_in, utente]
+      properties:
+        access_token:
+          type: string
+          description: JWT RS256
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Durata dell'access token in secondi
+          example: 900
+        utente:
+          $ref: '#/components/schemas/Utente'
+
+    Istruttore:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+
+    PasswordTemporanea:
+      type: object
+      required: [password_temporanea]
+      properties:
+        password_temporanea:
+          type: string
+
+    Jwks:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required: [kty, n, e, kid, use, alg]
+            properties:
+              kty:
+                type: string
+                example: RSA
+              n:
+                type: string
+              e:
+                type: string
+                example: AQAB
+              kid:
+                type: string
+                description: Derivato dal contenuto della chiave pubblica
+              use:
+                type: string
+                example: sig
+              alg:
+                type: string
+                example: RS256
+
+    Salute:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok

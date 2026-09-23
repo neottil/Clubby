@@ -1,0 +1,21 @@
+meta {
+  name: Situazione tesseramenti
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/tesseramenti
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Tutti i soci, ciascuno con l'ultimo rinnovo del tesseramento:
+    socio_id, nome, cognome, ultimo_rinnovo, scadenza, rinnovi
+  ultimo_rinnovo e scadenza sono null per chi non è mai stato tesserato.
+}

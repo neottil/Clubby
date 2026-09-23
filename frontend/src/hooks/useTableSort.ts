@@ -39,7 +39,8 @@ export function useTableSort<T>(items: T[], options: UseTableSortOptions<T> = {}
     else { setSortKey(key); setSortDir('asc'); }
   };
 
-  const sortIndicator = (key: keyof T) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  /** Direzione di ordinamento della colonna, o null se la tabella non è ordinata su di essa. */
+  const direzione = (key: keyof T): SortDir | null => (sortKey === key ? sortDir : null);
 
-  return { sorted, toggleSort, sortIndicator };
+  return { sorted, toggleSort, direzione };
 }

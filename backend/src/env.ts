@@ -12,23 +12,30 @@
  * service/admin.service.ts) che leggono process.env a livello di modulo.
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { config } from 'dotenv';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const envPath = resolve(__dirname, '../.env');
 
+/*
+ * Il parsing è di dotenv e non scritto a mano: virgolette esterne, "\n" nei
+ * valori fra doppi apici, commenti in linea e valori su più righe hanno
+ * altrimenti un trattamento diverso da quello che Vite (che usa dotenv) applica
+ * ai .env del frontend, e lo stesso file letto dai due moduli darebbe valori
+ * diversi.
+ *
+ * `path` esplicito: il default di dotenv è process.cwd()/.env, che cambia a
+ * seconda di dove viene lanciato il processo — `npm run dev` parte dalla
+ * cartella del modulo, `node dist/server.js` può partire dalla radice del repo.
+ *
+ * `override` lasciato al default (false): ciò che è già in process.env vince
+ * sul file. È il comportamento indispensabile in Kubernetes, dove le variabili
+ * arrivano da ConfigMap e Secret.
+ */
 if (existsSync(envPath)) {
-  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const val = trimmed.slice(eq + 1).trim();
-    // Non sovrascrive variabili già iniettate dal container runtime
-    if (!(key in process.env)) process.env[key] = val;
-  }
+  config({ path: envPath, quiet: true });
   console.log(`[env] Loaded from ${envPath}`);
 }

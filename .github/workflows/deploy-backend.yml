@@ -10,7 +10,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: 'Environment GitHub da usare (development, production, ...)'
+        description: 'Environment GitHub da usare (development o il nome di un club)'
         required: true
         type: string
       image_tag:
@@ -27,26 +27,72 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Tutto ciò che non ha un default, controllato prima di iniziare: senza,
+      # un valore mancante emergerebbe più avanti come errore di scp, come un
+      # Secret k8s vuoto o come un pod che non parte, lontano dalla causa.
+      - name: Verifica Variables e Secrets dell'ambiente
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          mancanti=0
+          for nome in SSH_HOST SSH_USER APP_DOMAIN AUTH_DOMAIN; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::La Variable $nome non è impostata sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          for nome in SSH_PRIVATE_KEY GHCR_PAT DB_PASSWORD; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::Il Secret $nome non è impostato sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          exit $mancanti
+
+      # Namespace, nome del database e cartella sulla VPS derivano dal nome
+      # dell'Environment (clubby-<env>-app, <env>-clubby); l'indirizzo di
+      # Postgres dal namespace della sua istanza (DB_NAMESPACE), che più club
+      # possono condividere.
+      # È una composite action locale: gli output letti più sotto come
+      # steps.ambiente.outputs.* (app_namespace, db_host, db_name, deploy_path…)
+      # sono dichiarati nella sezione outputs di .github/actions/ambiente/action.yml.
+      - name: Ricava namespace e percorsi dall'ambiente
+        id: ambiente
+        uses: ./.github/actions/ambiente
+        with:
+          environment: ${{ inputs.environment }}
+          db_namespace: ${{ vars.DB_NAMESPACE }}
+
       - name: Renderizza manifest k8s (backend)
         env:
-          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
+          KUBE_NAMESPACE: ${{ steps.ambiente.outputs.app_namespace }}
           BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubby-backend:${{ inputs.image_tag }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT || 3000 }}
-          DB_HOST: ${{ vars.DB_HOST }}
+          DB_HOST: ${{ steps.ambiente.outputs.db_host }}
           DB_PORT: ${{ vars.DB_PORT || 5432 }}
-          DB_NAME: ${{ vars.DB_NAME || 'clubby' }}
-          DB_USER: ${{ vars.DB_USER || 'clubby' }}
+          # Utente omonimo del database, creato da Infra come suo proprietario.
+          DB_NAME: ${{ steps.ambiente.outputs.db_name }}
+          DB_USER: ${{ steps.ambiente.outputs.db_name }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          KEYCLOAK_URL: https://${{ vars.KEYCLOAK_HOST }}
-          KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'clubby' }}
-          KEYCLOAK_ADMIN_CLIENT_ID: ${{ vars.KEYCLOAK_ADMIN_CLIENT_ID || 'clubby-backend' }}
-          KEYCLOAK_ADMIN_CLIENT_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
+          AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
           APP_DOMAIN: ${{ vars.APP_DOMAIN }}
           APP_VERSION: ${{ inputs.image_tag }}
+          # Moduli opzionali: attivi solo con il valore esatto "true", quindi
+          # una Variable non impostata li lascia spenti (vedi
+          # backend/src/util/moduli.ts). Le stesse due Variables le legge il
+          # deploy del frontend per nascondere pagine e voci di menu.
+          ENABLE_MODULE_TESSERAMENTO: ${{ vars.ENABLE_MODULE_TESSERAMENTO }}
+          ENABLE_MODULE_FATTURAZIONE: ${{ vars.ENABLE_MODULE_FATTURAZIONE }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered
-          VARS='$KUBE_NAMESPACE $BACKEND_IMAGE $BACKEND_PORT $DB_HOST $DB_PORT $DB_NAME $DB_USER $DB_PASSWORD $KEYCLOAK_URL $KEYCLOAK_REALM $KEYCLOAK_ADMIN_CLIENT_ID $KEYCLOAK_ADMIN_CLIENT_SECRET $APP_DOMAIN $APP_VERSION'
+          VARS='$KUBE_NAMESPACE $BACKEND_IMAGE $BACKEND_PORT $DB_HOST $DB_PORT $DB_NAME $DB_USER $DB_PASSWORD $AUTH_DOMAIN $APP_DOMAIN $APP_VERSION $ENABLE_MODULE_TESSERAMENTO $ENABLE_MODULE_FATTURAZIONE'
           # Prefisso "backend-" nel nome renderizzato: frontend usa file con lo
           # stesso nome (deployment.yaml, service.yaml, ...) nella propria
           # cartella, ma sulla VPS finiscono nella STESSA directory di deploy
@@ -63,16 +109,16 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
           source: "k8s/rendered/*"
-          target: ${{ vars.DEPLOY_PATH || '/opt/clubby/k8s' }}
+          target: ${{ steps.ambiente.outputs.deploy_path }}
           strip_components: 2
 
       - name: Applica manifest backend e verifica rollout
         uses: appleboy/ssh-action@v1.2.0
         env:
-          NS: ${{ vars.KUBE_NAMESPACE }}
+          NS: ${{ steps.ambiente.outputs.app_namespace }}
           GHCR_USER: ${{ github.repository_owner }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubby/k8s' }}
+          DEPLOY_PATH: ${{ steps.ambiente.outputs.deploy_path }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}

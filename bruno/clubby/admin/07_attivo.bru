@@ -1,0 +1,39 @@
+meta {
+  name: Attiva o disattiva un account
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/api/admin/attivo
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "utente_id": "{{utente_id}}",
+    "attivo": false
+  }
+}
+
+docs {
+  Solo admin. Spegne o riaccende un account.
+
+  utente_id accetta l'id dell'account oppure la sua email.
+
+  Un account disattivato non accede più e le sue sessioni aperte vengono
+  revocate. Non viene eliminato: resta come traccia di chi ha operato in
+  passato, e i riferimenti sparsi negli incontri e nelle abilitazioni — che
+  vivono nel database applicativo, dove nessuna foreign key può ripulirli —
+  restano validi.
+
+  Un admin non può disattivare sé stesso.
+
+  Il collegamento alla scheda socio non viene toccato: se va sciolto, si usa
+  "Scollega account da socio" come decisione a parte.
+}

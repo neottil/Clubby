@@ -6,143 +6,279 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 
 - Gestione soci
 - Gestione incontri, con note in testo semplice o in Markdown, filtrabili per attività e per periodo
-- Attribuzione degli incontri a un istruttore, per le associazioni che ne hanno più di uno
-- Voucher prepagati
-- Resoconto (solo admin): incontri e costi di un periodo, raggruppati per istruttore e attività
-- Elenchi di incontri e movimenti caricati a blocchi, per non scaricare l'intero storico a ogni apertura
+- Listino delle attività con il relativo costo, gestito dal pannello Admin
+- Attribuzione degli incontri a un istruttore, abilitato per singola attività
+- Voucher prepagati, con il credito acquistato registrato come ricarica
+- Tesseramento al club: scadenza per socio, rinnovi con storico e quota configurabile *(modulo opzionale)*
+- Fatturazione: ricariche, quote di tesseramento e incontri non coperti da voucher, con i totali del periodo *(modulo opzionale)*
+- Resoconto: un istruttore vede gli incontri che ha tenuto, con numero e costo complessivo del periodo filtrato
+- Resoconti per l'admin: gli incontri di un istruttore o di un socio a scelta, filtrabili per periodo e attività
+- Elenchi caricati a blocchi (incontri, movimenti, fatturazione, soci, voucher, tesseramenti, account),
+  con ricerca e ordinamento applicati dal server, per non scaricare tutto a ogni apertura
 
 ## Architettura
 
+Tre moduli applicativi, indipendenti fra loro e deployati separatamente:
+
 - **Frontend**: React 19 + Vite + TypeScript
-- **Backend**: Node.js 22, server HTTP nativo (`backend/src/server.ts`), usato sia in locale che in produzione
-- **Database**: PostgreSQL 16
-- **Autenticazione**: Keycloak 26 (OIDC Authorization Code Flow + PKCE)
+- **Backend** (`backend/`): Node.js 24, server HTTP nativo, i dati dell'associazione
+- **Authorizer** (`authorizer/`): Node.js 24, autenticazione — account, ruoli, token
+- **Database**: PostgreSQL 16, un'istanza con due database separati e utenti distinti
 - **Deploy target**: Docker / Kubernetes su VPC privata
+
+L'authorizer è l'unico a conoscere le credenziali degli utenti: ha un proprio database
+con un proprio utente Postgres, a cui il backend non ha accesso. Firma i token con una
+chiave privata RSA che non esce mai da lì, e ne pubblica la parte pubblica su
+`/.well-known/jwks.json`; il backend la usa per verificare i token, e non può quindi
+emetterne di propri.
 
 ## Modello utenti e ruoli
 
-### Ruoli Keycloak
+### Ruoli
 
-- **admin**: vede e gestisce i dati di tutti i soci. Può promuovere altri utenti ad admin. Viene creato tramite script init.
-- **viewer**: vede solo i propri dati (soci, incontri, voucher, movimenti). Viene assegnato automaticamente alla registrazione.
+Ogni account ha un **ruolo nel club** e, a parte, può avere il **privilegio di amministratore**.
+
+Ruoli:
+
+- **socio**: partecipa agli incontri e vede i propri dati (scheda, incontri, voucher, movimenti). È il
+  ruolo di ogni nuovo account.
+- **istruttore**: tiene incontri, che registra, modifica ed elimina dalla pagina Resoconto nelle sole
+  attività a cui è abilitato. Può a sua volta partecipare come socio agli incontri di un altro
+  istruttore: quelli restano nella pagina Incontri, in sola lettura. Vede inoltre l'elenco dei soci
+  ridotto al nominativo e i saldi dei voucher.
+
+Privilegio **admin**: amministra l'applicazione — account, ruoli, listino delle attività, abilitazioni,
+soci e voucher — ed è indipendente dal ruolo, quindi un istruttore può essere admin. Si concede e si
+toglie con la casella "Admin" nella card Utenti - Soci del pannello Admin; un admin non può toglierlo a sé
+stesso.
+
+Il ruolo sta dentro il token. Cambiarlo chiude tutte le sessioni aperte
+dell'interessato: finché il token vecchio non scade porterebbe ancora i permessi
+precedenti.
+
+### Attività e abilitazioni
+
+Le attività sono un listino a database (nome e costo proposto), gestito dal pannello Admin. Il costo è
+unico per attività, e viene proposto quando la si sceglie in un incontro: il costo effettivo resta
+sull'incontro, così un ritocco al listino non riscrive lo storico.
+
+A ogni istruttore si assegnano le attività che può svolgere. È un vincolo, non un aiuto
+all'inserimento: un istruttore che prova a registrare un incontro di un'attività non sua viene
+rifiutato dal backend, anche chiamando l'API direttamente.
+
+Un'attività con incontri collegati non è eliminabile — si disattiva: sparisce dalle scelte e resta
+leggibile sullo storico.
+
+### Incontri e resoconti
+
+Un account può comparire in un incontro in due vesti, che l'interfaccia tiene separate: la pagina **Incontri**
+mostra quelli a cui ha partecipato come socio, in sola lettura; la pagina **Resoconto** mostra a un istruttore
+quelli che ha tenuto, con la stessa tabella, i totali del periodo nella riga dei filtri, e la possibilità di
+registrarli e correggerli. L'admin, in Incontri, vede e gestisce tutti gli incontri; nella pagina **Resoconti**
+consulta in sola lettura quelli di un istruttore (scheda "Per istruttore") o di un socio (scheda "Per socio"),
+con gli stessi filtri e totali.
+
+Filtri, ordinamento e totali sono calcolati dal database sull'intero risultato filtrato: gli elenchi arrivano a
+blocchi, e un calcolo nel browser sulle sole righe caricate darebbe numeri falsi.
+
+### Voucher, tesseramento e fatturazione
+
+Un socio paga l'associazione in tre modi, tenuti distinti:
+
+- **Voucher prepagato**: il socio acquista credito (movimento di tipo `ricarica`, positivo) e lo
+  consuma (movimenti di tipo `addebito`, negativi). Gli addebiti nascono solo dagli incontri: vengono
+  generati insieme all'incontro, ne conservano il riferimento e non si inseriscono a mano. Un admin
+  registra a mano solo le ricariche, dal bottone "Ricarica" della pagina Voucher. Un voucher nuovo
+  nasce senza credito: dopo averlo associato al socio si apre subito la ricarica, con cui si registra
+  l'importo acquistato. Un voucher può anche nascere con un **saldo importato**, per portare in
+  Clubby credito venduto prima di usarlo: non è un acquisto, sta dietro una spunta nel form.
+
+  Nella pagina Voucher chi ha una scheda socio collegata, admin compresi, vede il proprio voucher in una
+  card in cima, con i suoi movimenti. Sotto, in tabella, i voucher degli altri soci: l'admin li gestisce
+  tutti, un istruttore ne vede i saldi ma non i movimenti, un socio non ha la tabella.
+- **Tesseramento**: ogni rinnovo registra una scadenza e la quota pagata, proposta dal valore
+  configurato nel pannello Admin. La quota non passa dal voucher, si paga a parte. La nuova scadenza
+  deve seguire sia la data del rinnovo sia la scadenza precedente, e i rinnovi restano nello storico.
+- **Incontri non coperti da voucher**: chi non ha un voucher paga l'incontro a parte.
+
+La pagina **Fatturazione** (solo admin) somma esattamente queste tre cose: ricariche, quote e incontri
+senza voucher, filtrabili per socio e per periodo. Restano fuori gli addebiti sul voucher — già
+fatturati con la ricarica che li copre, contarli di nuovo raddoppierebbe l'importo — e il saldo
+importato, che non è un incasso.
+
+#### Moduli opzionali
+
+Tesseramento e Fatturazione sono **moduli opzionali**, attivati per singolo ambiente dalle Variables
+`ENABLE_MODULE_TESSERAMENTO` e `ENABLE_MODULE_FATTURAZIONE` (vedi
+[Variables](#variables)). Valgono solo con il valore esatto `true`: una variabile mancante o scritta
+diversamente lascia il modulo spento.
+
+Con un modulo spento spariscono la voce di menu e la pagina, e le relative API rispondono `404` come
+qualunque percorso inesistente — il controllo sta nel backend, il frontend evita soltanto di mostrare
+sezioni che non funzionerebbero. Senza Tesseramento sparisce anche la configurazione della quota dal
+pannello Admin.
+
+I due moduli sono indipendenti: Fatturazione senza Tesseramento funziona (mancheranno le voci di quel
+tipo), e Tesseramento senza Fatturazione registra rinnovi e quote che però nessuna pagina riepiloga.
+Il database è sempre completo — niente migrazioni per accendere o spegnere un modulo, e lo storico si
+ritrova intatto alla riaccensione.
+
+### Dove vivono i dati delle persone
+
+L'anagrafica — nome, cognome, telefono — sta **solo** sulla scheda socio, nel database
+applicativo. L'authorizer custodisce credenziali e ruolo, e null'altro: l'unico dato anagrafico
+che conosce è l'email, perché è ciò con cui si accede. Una copia in entrambi i servizi sarebbe
+stata una doppia verità scrivibile, destinata a divergere.
+
+Ne discende che un account non collegato ad alcun socio **non ha un nominativo**: nel pannello
+admin compare con la sola email, ed è corretto — è tutto ciò che se ne sa.
 
 ### Registrazione
 
-1. Il socio clicca "Registrati" → viene reindirizzato a Keycloak (standard registration form)
-2. Keycloak crea l'utente nel proprio DB
-3. Dopo il login il frontend chiama `POST /api/auth/register` con nome e cognome
-4. Il backend assegna automaticamente il ruolo `viewer` e crea il record socio nel DB
-5. Il socio può ora accedere ai propri dati
+1. La persona si registra con **email e password**, nient'altro
+2. L'authorizer crea l'account come `socio`, senza privilegio admin, e apre subito una sessione
+3. Da quel momento la persona accede, ma **non vede alcun dato**: un avviso in interfaccia le
+   dice che il suo account non è ancora collegato a una scheda socio
+4. Un admin fa l'abbinamento dal pannello, e al primo accesso successivo la persona vede i propri
+   dati
+
+**Il collegamento è sempre manuale.** L'app non abbina mai nessuno da sola. C'è stato un aggancio
+automatico basato sull'email, ed è stato tolto per due motivi concreti: l'indirizzo di un socio lo
+digita un admin e nessuno lo verifica, quindi chi ne conoscesse uno poteva registrarsi con quello
+ed ereditare voucher e incontri di un altro; e due schede che condividono un indirizzo — due
+fratelli iscritti con l'email del genitore, tutt'altro che raro in un'associazione — rendevano
+l'abbinamento un'ipotesi invece di un fatto. Anche il nome e il cognome non basterebbero, fra
+omonimi, secondi nomi e refusi.
+
+Il collegamento è `socio.id_viewer`, che contiene l'id dell'account (lo stesso valore del claim
+`sub` dei suoi token).
+
+### Cambiare l'email di un socio
+
+Non si può, finché è collegato: quella è l'email del suo account. La via è registrare un account
+nuovo con l'indirizzo nuovo, poi dal pannello **"Scollega e disattiva"** sul socio e collegarlo al
+nuovo account. Le due azioni stanno in un bottone solo perché l'ordine conta: disattivare senza
+prima scollegare lascerebbe il socio legato a un'utenza che non può più accedere.
+
+Un account disattivato non viene eliminato: resta come traccia di chi ha operato in passato, e i
+riferimenti che lo citano negli incontri e nelle abilitazioni — che stanno in un altro database,
+dove nessuna foreign key può ripulirli — restano validi.
+
+Nome, cognome e telefono restano invece modificabili da un admin in qualunque momento: di quelli
+la scheda socio è l'unica fonte, non una copia.
 
 ### Admin principale
 
-- **In locale**: creato da `scripts/init-local-keycloak.sh` — credenziali: admin@clubby.local / Admin1234!
-- **In produzione**: creato dalla pipeline [Infra](#infra) (email e password temporanea forniti al lancio del workflow, nessuna credenziale hardcoded).
+Creato dall'authorizer al primo avvio, **solo se il database degli utenti è ancora
+vuoto**: su un'istanza già popolata il passaggio non tocca nulla. Deve cambiare la
+password al primo accesso.
 
-Un admin può promuovere qualsiasi utente viewer ad admin tramite `POST /api/admin/promuovi`.
+- **In locale**: email e password chieste da `scripts/init-local.sh` (default `admin@clubby.local` / `adminadmin`; la password deve avere almeno 10 caratteri)
+- **Su cluster**: email dalla variabile `INITIAL_ADMIN_EMAIL` dell'Environment, password temporanea generata dalla pipeline [Infra](#infra), nessuna credenziale scritta nel codice
 
-## API Endpoints
+Un admin può promuovere altri utenti tramite `POST /api/admin/promuovi`.
 
-Tutte le API richiedono un JWT Keycloak valido (Bearer token).
+### Sessione
 
-| Metodo | Path | Descrizione | Ruolo richiesto |
-|--------|------|-------------|-----------------|
-| POST | `/api/auth/register` | Registrazione post-login (crea socio + assegna viewer) | Qualsiasi JWT valido |
-| GET | `/api/soci` | Lista soci (admin: tutti, viewer: solo il proprio) | admin / viewer |
-| POST | `/api/soci` | Crea socio manualmente | admin |
-| GET | `/api/soci/:id` | Dettaglio socio | admin / viewer (solo il proprio) |
-| PUT | `/api/soci/:id` | Modifica socio | admin |
-| DELETE | `/api/soci/:id` | Elimina socio | admin |
-| GET | `/api/incontri` | Lista incontri **paginata** (admin: tutti, viewer: solo i propri) — vedi [Elenchi paginati](#elenchi-paginati) | admin / viewer |
-| GET | `/api/incontri/resoconto` | Incontri e costi aggregati per istruttore e attività (`?da=&a=`) | admin |
-| POST | `/api/incontri` | Crea incontro | admin |
-| GET | `/api/incontri/:id` | Dettaglio incontro | admin / viewer (solo il proprio) |
-| PUT | `/api/incontri/:id` | Modifica incontro | admin |
-| DELETE | `/api/incontri/:id` | Elimina incontro | admin |
-| GET | `/api/voucher` | Lista voucher (admin: tutti, viewer: solo i propri) | admin / viewer |
-| POST | `/api/voucher` | Crea voucher (un solo voucher per socio) | admin |
-| GET | `/api/voucher/:id/movimenti` | Movimenti voucher, **paginati** — vedi [Elenchi paginati](#elenchi-paginati) | admin / viewer (solo il proprio) |
-| POST | `/api/voucher/:id/movimenti` | Aggiungi movimento | admin |
-| GET | `/api/admin/users` | Lista utenti Registrati | admin |
-| POST | `/api/admin/associa-viewer` | Associa utente a socio (body: socio_id, keycloak_user_id) | admin |
-| DELETE | `/api/admin/associa-viewer/:socioId` | Disassocia viewer da socio | admin |
-| POST | `/api/admin/promuovi` | Promuovi utente ad admin (body: keycloak_user_id) | admin |
-| POST | `/api/admin/retrocedi` | Retrocedi admin a viewer (body: keycloak_user_id) | admin |
-| GET | `/api/version` | Versione del backend in esecuzione (pagina Info) | admin / viewer |
+Dopo l'accesso la sessione resta aperta finché la scheda del browser è aperta, fino a 30 giorni. Il token
+di accesso dura 15 minuti e l'app lo rinnova da sola con il refresh token: prima della scadenza, al ritorno
+sulla scheda dopo una pausa o una sospensione del computer, e al primo rifiuto per token scaduto. La
+sessione si chiude con il logout, chiudendo la scheda, o quando un admin disattiva l'account, ne cambia
+ruolo o privilegio, o ne azzera la password.
 
-### Elenchi paginati
+### Password dimenticata
 
-Incontri e movimenti crescono con l'attività dell'associazione (ogni incontro genera un movimento), quindi
-i due elenchi si leggono a blocchi invece di essere scaricati per intero. L'interfaccia mostra i primi
-risultati e li allunga con "Carica altri", indicando sempre a che punto si è del totale.
+Non c'è recupero self-service: il progetto non ha un servizio di posta. Un admin azzera
+la password dalla pagina Admin, ottiene una password temporanea da consegnare
+all'interessato, e questi la sostituisce al primo accesso.
 
-Parametri comuni: `limit` (default 25, massimo 200) e `offset`. La risposta è un oggetto invece di un array:
+## API
 
-```json
-{ "data": [ ... ], "total": 340, "limit": 25, "offset": 0 }
+Le API sono documentate con due specifiche OpenAPI, una per servizio:
+
+- [backend/docs/openapi.yaml](backend/docs/openapi.yaml) — soci, attività, istruttori, incontri,
+  voucher, tesseramenti, fatturazione, impostazioni e amministrazione
+- [authorizer/docs/openapi.yaml](authorizer/docs/openapi.yaml) — registrazione, accesso, sessioni,
+  gestione degli account e chiavi pubbliche
+
+Per ciascun endpoint riportano chi può chiamarlo, parametri, corpo, risposte ed errori. Gli endpoint
+dei [moduli opzionali](#moduli-opzionali) esistono solo dove quel modulo è attivo: altrove rispondono
+`404`, ed è segnalato sulla singola operazione.
+
+Per
+consultarle come pagina navigabile, si genera un HTML (da non committare):
+
+```bash
+npx @redocly/cli build-docs backend/docs/openapi.yaml -o api-backend.html
 ```
 
-`total` è il numero di righe che soddisfano il filtro, non quante ne sono state restituite: serve a sapere
-se c'è dell'altro da caricare.
+oppure si apre il file in [Swagger Editor](https://editor.swagger.io) o con un'estensione OpenAPI
+dell'editor. Chi modifica un endpoint aggiorna la specifica del servizio nello stesso cambiamento;
+per controllarla:
 
-`GET /api/incontri` accetta inoltre `socio_id`, `q` (ricerca su cognome, nome e attività), `attivita`,
-`da`/`a` (estremi inclusi, `YYYY-MM-DD`), `sort` (`socioNome`, `data_incontro`, `attivita`, `istruttore`,
-`costo`) e `dir` (`asc`/`desc`, default `desc` su `data_incontro`, cioè i più recenti per primi). Filtri e
-ordinamento sono applicati dal database e non dal browser: con i dati a blocchi, filtrare le sole righe già
-caricate darebbe risultati falsi.
-
-Il resoconto **non** usa questo elenco: `GET /api/incontri/resoconto` restituisce le righe già aggregate
-(`GROUP BY` istruttore e attività), perché un totale calcolato su una pagina sola sarebbe più basso del vero
-senza alcun segnale che manchi qualcosa.
+```bash
+npx @redocly/cli lint backend/docs/openapi.yaml authorizer/docs/openapi.yaml
+```
 
 ## Sviluppo locale
 
 ### Prerequisiti
 
 - Docker + Docker Compose
-- Node.js 22+
+- Node.js 24+
 - npm
-- `curl` e `jq` (per init-local-keycloak.sh)
+- `openssl` (per generare la chiave di firma dei token in `init-local.sh`)
 
 ### Avvio
 
-1. Avvia l'infrastruttura locale (PostgreSQL applicativo + PostgreSQL Keycloak + Keycloak):
+1. Avvia PostgreSQL. Al primo avvio crea entrambi i database — quello
+   dell'applicazione e quello degli account — con i rispettivi utenti:
    ```bash
    docker compose up -d
    ```
 
-2. Attendi che Keycloak sia pronto (circa 60-90 secondi, verificabile con `docker compose logs -f keycloak`), poi inizializza realm e utenti:
+2. Genera i file di configurazione:
    ```bash
-   bash scripts/init-local-keycloak.sh
+   bash scripts/init-local.sh
    ```
-   Lo script è **interattivo**: per ogni parametro (URL Keycloak, realm, utente/password admin Keycloak,
-   URL base API backend, nome tenant) mostra un valore predefinito tra parentesi quadre — premi Invio per
-   accettarlo, oppure digita un valore diverso. Va eseguito una sola volta dopo l'avvio dei container (o dopo
-   un reset dei volumi). Crea il realm `clubby`, i client, i ruoli e gli utenti di test, e scrive
-   automaticamente `backend/.env` e `frontend/.env.local`.
+   Lo script è **interattivo**: per ogni parametro (nome dell'associazione, URL dei
+   servizi, credenziali del primo amministratore) mostra un valore predefinito fra
+   parentesi quadre — premi Invio per accettarlo, o digita un valore diverso. Genera
+   anche la chiave RSA con cui l'authorizer firma i token e scrive `backend/.env`,
+   `authorizer/.env` e `frontend/.env.local`.
 
-3. Installa le dipendenze di backend e frontend:
+   In locale i [moduli opzionali](#moduli-opzionali) nascono **attivi**: lo script scrive
+   `ENABLE_MODULE_TESSERAMENTO` e `ENABLE_MODULE_FATTURAZIONE` in `backend/.env` e le corrispondenti
+   `VITE_ENABLE_MODULE_*` in `frontend/.env.local`. Per provare l'applicazione senza un modulo, metti
+   `false` in **entrambi** i file: se i due valori non coincidono, il frontend mostra una pagina che il
+   backend rifiuta, o nasconde un modulo che invece risponde.
+
+3. Installa le dipendenze dei tre moduli:
    ```bash
    npm run install:all
    ```
 
-4. Avvia backend e frontend insieme:
+4. Avvia i tre moduli insieme:
    ```bash
    npm run dev
    ```
-   In alternativa, per avviarli separatamente (es. in due terminali distinti): `npm run dev:backend` e `npm run dev:frontend`.
+   In alternativa, separatamente: `npm run dev:backend`, `npm run dev:authorizer`,
+   `npm run dev:frontend`.
 
-5. Apri http://localhost:5173
+5. Apri http://localhost:5173 e accedi con le credenziali scelte al punto 2. Al primo
+   accesso ti verrà chiesto di sostituire la password.
+
+L'amministratore iniziale viene creato solo se il database degli account è vuoto. Per
+ripartire da zero: `docker compose down -v` e poi di nuovo `docker compose up -d`.
 
 ### Gestione container
 
 | Comando | Descrizione |
 |---------|-------------|
-| `docker compose up -d` | Avvia Postgres + Keycloak in background |
+| `docker compose up -d` | Avvia PostgreSQL in background |
 | `docker compose down` | Ferma i container |
-| `docker compose down -v` | Reset completo (cancella anche i volumi/dati) |
-| `docker compose logs -f keycloak` | Log Keycloak |
-| `docker compose logs -f postgres` | Log PostgreSQL |
+| `docker compose down -v` | Reset completo (cancella anche i volumi e quindi i dati) |
+| `docker compose logs -f postgres` | Log di PostgreSQL |
 
 ### Avvio in debug
 
@@ -169,6 +305,17 @@ Avviare l'app con npm run dev, avviare debugger da launch vscode
       "skipFiles": ["<node_internals>/**"]
     },
     {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Authorizer",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "src/server.ts"],
+      "cwd": "${workspaceFolder}/authorizer",
+      "envFile": "${workspaceFolder}/authorizer/.env",
+      "sourceMaps": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
       "name": "Frontend (Chrome debug)",
       "type": "chrome",
       "request": "launch",
@@ -185,14 +332,46 @@ Avviare l'app con npm run dev, avviare debugger da launch vscode
 
 ### Credenziali di test
 
-| Utente | Password | Ruolo |
-|--------|----------|-------|
-| admin@clubby.local | Admin1234! | admin |
-| viewer@clubby.local | Viewer1234! | viewer |
+`scripts/seed-demo-data.sh` crea questi account, ciascuno collegato alla propria scheda socio, insieme
+a listino, abilitazioni, voucher e incontri di esempio. La password dell'admin è `INITIAL_ADMIN_PASSWORD`
+di `authorizer/.env`:
 
-### Keycloak Admin UI
+| Account | Password | Ruolo | Admin |
+|---------|----------|-------|-------|
+| istruttore1@clubby.local | da `authorizer/.env` | istruttore | sì |
+| istruttore2@clubby.local | clubby2026 | istruttore | no |
+| socio1@clubby.local | clubby2026 | socio | no |
+| socio2@clubby.local | clubby2026 | socio | no |
+| socio3@clubby.local | clubby2026 | socio | no |
 
-http://localhost:8080 → admin / admin
+Gli schemi SQL non contengono migrazioni: per applicare una modifica allo schema si riparte da un database
+vuoto (`docker compose down -v`, `docker compose up -d`) e si riesegue il seed.
+
+### Test delle API
+
+`tests/api/` verifica dall'esterno, con token veri, i permessi e i dati che ogni ruolo riceve: ruoli nel
+token, visibilità degli incontri e totali di Incontri, Resoconto e Resoconti, listino e soci per ruolo,
+regole di scrittura degli incontri e del voucher, privilegio admin e ruolo, rifiuto di corpi malformati e
+di route inesistenti. Richiede i servizi avviati
+(`npm run dev`) e il database raggiungibile:
+
+```bash
+npm run test:api
+```
+
+I test non dipendono dai dati presenti né dal seed demo: ogni file crea i propri account, soci, attività,
+voucher e incontri e li elimina alla fine, anche se un test fallisce o l'esecuzione viene interrotta.
+I dati di prova sono riconoscibili a colpo d'occhio — email sul dominio `clubby.test`, nomi di soci e
+attività che finiscono in `_test` (es. `mario_test rossi_test`, `educazione_test`) — e la pulizia elimina
+solo quelli. Se dovessero restarne dopo un'interruzione brusca, li rimuove l'esecuzione successiva oppure:
+
+```bash
+npm run test:api:pulizia
+```
+
+La pulizia e il primo admin di prova passano direttamente dai database, con i parametri `DB_*` di
+`backend/.env` e `authorizer/.env` (sostituibili con `TEST_APP_DB_URL` e `TEST_AUTH_DB_URL`); tutto il
+resto si crea dalle API. `API_URL` e `AUTH_URL` cambiano gli indirizzi dei servizi.
 
 ## Struttura progetto
 
@@ -200,64 +379,102 @@ http://localhost:8080 → admin / admin
 Clubby/
 ├── .github/
 │   └── workflows/
-│       ├── infra.yml               # Provisiona namespace + Postgres condiviso + Keycloak (manuale)
-│       ├── build-deploy.yml        # Build immagini + deploy in sviluppo (be/fe indipendenti)
+│       ├── infra.yml               # Provisiona i namespace + Postgres e i suoi database (manuale)
+│       ├── build-deploy.yml        # Build immagini + deploy in sviluppo (i 3 moduli indipendenti)
 │       ├── deploy-backend.yml      # Riutilizzabile (workflow_call): applica backend/k8s/*
 │       ├── deploy-frontend.yml     # Riutilizzabile (workflow_call): applica frontend/k8s/*
-│       ├── tag.yml                 # Crea/sposta i tag server-v*/client-v* + GitHub Release (manuale)
-│       ├── promote.yml             # Deploy in produzione di una versione già taggata (manuale)
+│       ├── deploy-authorizer.yml   # Riutilizzabile (workflow_call): applica authorizer/k8s/*
+│       ├── tag.yml                 # Crea/sposta i tag server-v*/client-v*/auth-v* + GitHub Release (manuale)
+│       ├── promote.yml             # Deploy di una versione già taggata nell'ambiente di un club (manuale)
 │       └── cleanup-build-tags.yml  # Ripulisce i tag <scope>-<branch>-* superati (manuale)
 ├── backend/
 │   ├── src/
 │   │   ├── handlers/       # Handler HTTP (soci, incontri, voucher, admin, auth, version)
 │   │   ├── service/        # Business logic
-│   │   ├── middleware/      # Auth (Keycloak JWT), response helpers, error classes
-│   │   ├── db/             # Database client (pg Pool) + schema SQL
+│   │   ├── middleware/     # Verifica dei token, response helpers, classi di errore
+│   │   ├── util/           # Paginazione degli elenchi (parametri e limiti comuni)
+│   │   ├── db/             # Client del database (pg Pool) + schema SQL
 │   │   └── server.ts       # Entry point HTTP (locale e produzione)
+│   ├── docs/openapi.yaml   # Specifica OpenAPI delle API del backend
 │   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-backend.yml
+│   ├── Dockerfile
+│   ├── package.json
+│   └── tsconfig.json
+├── authorizer/
+│   ├── src/
+│   │   ├── crypto/         # Hashing delle password (scrypt), firma dei token (RS256) e JWKS
+│   │   ├── service/        # Account, ruoli, sessioni, password
+│   │   ├── middleware/     # Verifica dei token, limitatore dei tentativi, classi di errore
+│   │   ├── db/             # Client del database degli account + schema SQL
+│   │   └── server.ts       # Entry point HTTP
+│   ├── docs/openapi.yaml   # Specifica OpenAPI delle API dell'authorizer
+│   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-authorizer.yml
 │   ├── Dockerfile
 │   ├── package.json
 │   └── tsconfig.json
 ├── frontend/
 │   ├── src/
-│   │   ├── auth/           # AuthContext (Keycloak OIDC + PKCE)
+│   │   ├── auth/           # AuthContext + client dell'authorizer (authApi.ts)
 │   │   ├── api/            # API client factory
-│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, ResocontoPage, AdminPage, InfoPage, LoginPage
-│   │   ├── components/     # Layout (navbar a hamburger), TableScroll, SearchSelect, DateRangeFilter, Modal, MarkdownEditor
-│   │   └── config.ts       # Runtime config (Keycloak URL, realm, client ID) + fetch /version.json
+│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, ResocontoPage, ResocontiAdminPage, TesseramentiPage, FatturazionePage, AdminPage, InfoPage, LoginPage, CambioPasswordPage
+│   │   ├── components/     # Layout, ElencoIncontri, CardCollassabile, Avviso, Modal, TableScroll, IntestazioneOrdinabile, CaricaAltri, TotaliFiltri, Etichetta, SearchSelect, DateRangeFilter, MarkdownEditor
+│   │   ├── styles/ui.ts    # Stili comuni (pulsanti, form, tabelle), inclusi da ogni pagina
+│   │   ├── utils/formato.ts # Formati di importi e date
+│   │   └── config.ts       # Configurazione runtime (URL dei servizi, tenant) + fetch /version.json
 │   ├── k8s/                # Manifest con placeholder ${VAR}, applicati da deploy-frontend.yml
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
 ├── k8s/
-│   └── templates/infra/    # Manifest ${VAR}, gestiti da Infra: namespace, Postgres condiviso, Keycloak
+│   └── templates/infra/    # Manifest ${VAR}, gestiti da Infra: i due namespace e Postgres
 ├── scripts/
-│   ├── init-local-keycloak.sh         # Setup Keycloak locale (interattivo, Docker Compose)
-│   ├── keycloak-realm-init.sh   # Init realm Keycloak in k8s (non interattivo, eseguito da Infra)
-│   └── setup-vps-k3s.sh         # Setup k3s + Traefik + cert-manager/Let's Encrypt sulla VPS
+│   ├── init-local.sh          # Genera i .env dei tre moduli e la chiave di firma (interattivo)
+│   ├── init-auth-db.sh        # Crea database e utente dell'authorizer al primo avvio del Postgres locale (docker-compose)
+│   ├── seed-demo-data.sh      # Popola dati e account di esempio
+│   └── setup-vps-k3s.sh       # Setup k3s + Traefik + cert-manager/Let's Encrypt sulla VPS
+├── tests/
+│   └── api/                # Test delle API con dati di prova propri (npm run test:api)
 ├── docker-compose.yml
-└── package.json            # Script "dev" per avviare backend + frontend insieme
+└── package.json            # Script "dev" per avviare i tre moduli insieme, "test:api" per i test
 ```
 
 ## Multi-tenant
 
-Ogni tenant (ASD) ha un ambiente interamente separato: proprio namespace Kubernetes, proprio deploy
-(backend + frontend), proprio database PostgreSQL e proprio realm Keycloak. L'isolamento è quindi a
-livello di infrastruttura/deploy, non applicativo: non esiste un meccanismo di `tenant_id` condiviso
-all'interno di un singolo database o realm.
+Ogni tenant (club) è un **Environment GitHub** a sé, e il nome dell'Environment decide tutto il resto:
 
-Configurazione del tenant tramite variabili d'ambiente:
-- `VITE_TENANT_NAME`: nome visualizzato del tenant (es. "ASD Roma")
-- `VITE_SELECT_ISTRUTTORI_VALUES`: istruttori del tenant (es. "Luca,Elisabetta,Marco"); da lasciare
-  vuota se l'associazione ha un solo istruttore, così il campo non viene mostrato e il Resoconto
-  presenta un unico prospetto
-- Ogni tenant ha il proprio realm Keycloak, database e deploy (nel proprio namespace Kubernetes)
+| Cosa | Nome | Esempio (Environment `romaasd`) |
+|---|---|---|
+| Namespace dell'applicazione | `clubby-<env>-app` | `clubby-romaasd-app` |
+| Database dell'applicazione, e il suo utente | `<env>-clubby` | `romaasd-clubby` |
+| Database degli account, e il suo utente | `<env>-auth` | `romaasd-auth` |
+| Cartelle dei manifest sulla VPS | `/opt/clubby/<env>/k8s`, `/opt/clubby/<env>/infra` | `/opt/clubby/romaasd/k8s` |
+
+Il nome dell'Environment deve essere usabile come nome di namespace: lettere minuscole, cifre e trattini,
+al massimo 52 caratteri. Va scelto una volta: cambiarlo equivale a creare un club nuovo, vuoto.
+
+L'**istanza Postgres** invece non è per club: è quella del namespace indicato dalla variabile
+`DB_NAMESPACE`, e più club possono indicare lo stesso. Tipicamente i club in produzione condividono
+un'istanza e `development` ne ha una sua. Sull'istanza ogni club ha i propri database e i propri utenti,
+senza accesso a quelli degli altri. L'isolamento è quindi a livello di deploy e di database, non
+applicativo: non esiste un `tenant_id` condiviso in un unico database.
+
+Le immagini Docker sono le stesse per tutti i club; ciò che li distingue arriva al deploy:
+- backend e authorizer ricevono database, indirizzi e credenziali dai ConfigMap e Secret del proprio
+  namespace;
+- il frontend legge all'avvio `/config.json`, generato dalle Variables dell'Environment: nome del club
+  (`TENANT_NAME`), colori (`THEME_*`) e logo (`LOGO_FILE`, uno dei file in `frontend/public/branding/`,
+  inclusi nell'immagine).
+
+Attività, costi e istruttori **non** sono variabili d'ambiente: sono dati del tenant, gestiti dal
+pannello Admin della sua istanza. Cambiarli non richiede una nuova build del frontend, e le
+abilitazioni degli istruttori devono comunque stare dove sta il controllo, non nel bundle del browser.
 
 ## Deploy (VPC / Kubernetes)
 
-- **Keycloak**: `KC_PROXY=edge` se dietro load balancer HTTPS, `KC_HOSTNAME=https://auth.tuodominio.com`
-- **Backend**: variabile d'ambiente `DB_HOST` punta al servizio Postgres nel cluster
-- **JWT verification**: il backend verifica il token JWT via JWKS di Keycloak (ingress opzionale)
+- **Backend e authorizer**: raggiungono Postgres con il nome completo del Service nel namespace
+  `DB_NAMESPACE`, che le pipeline ricavano da sole
+- **Authorizer**: hostname pubblico proprio (`AUTH_DOMAIN`), perché il browser vi accede direttamente
+- **Verifica dei token**: il backend scarica la chiave pubblica dall'authorizer e non possiede quella privata
 - **Secrets**: usare il secret manager del provider cloud scelto
 - **Database**: PostgreSQL 16 gestito (RDS, Cloud SQL, o self-hosted)
 
@@ -269,30 +486,33 @@ Vedi la tabella completa in [Variabili e secret da configurare su GitHub](#varia
 
 ### Scelte fatte
 
-- **Database**: PostgreSQL self-hosted come **istanza unica condivisa** tra app e Keycloak (due database
-  separati sullo stesso pod: `${DB_NAME}` e `keycloak`), non un SaaS esterno tipo Neon/Supabase né un
-  operator come CloudNativePG. Motivazione: Keycloak richiede comunque un DB relazionale nel cluster (non
-  supporta MongoDB); condividere una sola istanza invece di due separate risparmia risorse su una VPS
-  piccola con mole di dati ridotta (piccola ASD) — non serve HA multi-replica né un operator dedicato in
-  questa fase. Contrappeso accettato: un problema al pod Postgres impatta sia l'app che l'autenticazione.
-- **Persistenza**: un solo PersistentVolumeClaim (PVC) per l'istanza Postgres condivisa.
+- **Database**: PostgreSQL self-hosted come **istanza condivisa** nel namespace `DB_NAMESPACE`, su cui
+  ogni club ha due database e due utenti distinti (`<env>-clubby` per l'applicazione, `<env>-auth` per
+  gli account), non un SaaS esterno tipo Neon/Supabase né un operator come CloudNativePG. Un'istanza
+  per più club risparmia risorse su una VPS piccola con mole di dati ridotta (piccole ASD) — non serve
+  HA multi-replica né un operator dedicato in questa fase. Contrappeso accettato: un problema al pod
+  Postgres impatta tutti i club che la condividono. La separazione che conta è quella degli **utenti**
+  Postgres: ognuno può collegarsi solo al proprio database, quindi il backend di un club non legge né i
+  dati degli altri club né le credenziali degli account.
+- **Istanze separate dove serve**: `development` usa un `DB_NAMESPACE` diverso da quello dei club in
+  produzione, così un `DROP` sbagliato o un riavvio in sviluppo non tocca la produzione.
+- **Persistenza**: un solo PersistentVolumeClaim (PVC) per l'istanza Postgres.
 - **Backup**: CronJob Kubernetes che esegue `pg_dump` periodico verso storage esterno (es. bucket
   S3-compatible self-hosted, aws s3). Da definire in dettaglio in fase di implementazione.
-- **Multi-tenant**: un namespace Kubernetes per tenant, ciascuno con i propri pod (backend, frontend,
-  Postgres, Keycloak) e i propri Secret — coerente con quanto descritto in [Multi-tenant](#multi-tenant).
+- **Multi-tenant**: un namespace applicativo per club (backend, frontend, authorizer) e i suoi due
+  database sull'istanza condivisa, coerente con quanto descritto in [Multi-tenant](#multi-tenant).
 
 **Stato attuale**: due pipeline distinte, scope separato (vedi [Pipeline CI/CD](#pipeline-cicd-github-actions)):
-**Infra** provisiona namespace, Postgres condiviso e Keycloak (una tantum, o quando serve ricreare
-l'infrastruttura); **Build & Deploy** gestisce solo backend e frontend applicativi, assumendo che
-l'infrastruttura di base esista già nel namespace.
+**Infra** provisiona i namespace e Postgres coi suoi due database (una tantum, o quando serve ricreare
+l'infrastruttura); **Build & Deploy** gestisce i tre moduli applicativi, assumendo che
+l'infrastruttura di base esista già.
 
 ### Setup iniziale del cluster (VPS)
 
 **Nessuna pipeline esegue questo passaggio: va lanciato a mano, una volta sola**, sulla VPS di produzione,
 prima di qualsiasi altra pipeline (Infra compresa). È un bootstrap a livello di host (installa k3s stesso),
-diverso dai Job che girano *dentro* un cluster già esistente (come `keycloak-realm-init.sh`, eseguito da un
-Job Kubernetes orchestrato dalla pipeline Infra — vedi sotto): qui il cluster non esiste ancora, quindi non
-c'è modo di farlo girare "come Job", e richiede accesso root diretto alla VPS:
+diverso da tutto ciò che gira *dentro* un cluster già esistente: qui il cluster non esiste ancora,
+quindi non c'è modo di farlo girare come Job, e richiede accesso root diretto alla VPS:
 
 ```bash
 LETSENCRYPT_EMAIL=admin@tuodominio.com sudo -E bash scripts/setup-vps-k3s.sh
@@ -309,7 +529,7 @@ collaterali) e si occupa di:
    - `letsencrypt-staging` — per test, nessun limite di rate reale (certificati non fidati dai browser)
    - `letsencrypt` — produzione, usato dall'annotazione `cert-manager.io/cluster-issuer` nei template
      [backend/k8s/ingress.yaml](backend/k8s/ingress.yaml) e
-     [k8s/templates/infra/keycloak-ingress.yaml](k8s/templates/infra/keycloak-ingress.yaml)
+     [authorizer/k8s/ingress.yaml](authorizer/k8s/ingress.yaml)
 
 Entrambi risolvono la ACME challenge **HTTP-01** tramite Traefik (`ingressClassName: traefik`).
 
@@ -319,110 +539,134 @@ in automatico circa 2/3 della validità prima della scadenza (quindi tipicamente
 aggiornando il Secret TLS referenziato dall'Ingress senza downtime. L'unica condizione è che cert-manager
 resti in esecuzione nel cluster e che l'host risolva ancora pubblicamente verso la VPS (challenge HTTP-01).
 
-Dopo lo script, il passo successivo è lanciare la pipeline **[Infra](#infra)** (una
-tantum per namespace) per creare namespace, Postgres e Keycloak — solo dopo, **Build & Deploy** può
-funzionare.
+Dopo lo script, il passo successivo è lanciare la pipeline **[Infra](#infra)** (una tantum per
+ambiente) per creare i namespace e Postgres — solo dopo, **Build & Deploy** può funzionare.
 
-### Struttura architetturale per namespace (per tenant)
+### Struttura architetturale per namespace
+
+Un namespace applicativo per ambiente (development o club), e un namespace per ogni istanza Postgres,
+condivisibile da più ambienti.
 
 ```
-namespace-<tenant>/
-├── Deployment  backend        (immagine clubby-backend, legge Secret/ConfigMap per DB/Keycloak) [build-deploy]
-├── Deployment  frontend       (immagine clubby-frontend, statica dietro Ingress)                [build-deploy]
-├── Deployment  keycloak       (immagine Keycloak ufficiale)                                          [infra]
-├── Deployment  postgres       (istanza condivisa app+Keycloak, con PVC)                               [infra]
-├── Job         keycloak-realm-init (one-shot: crea realm/client/ruoli/primo admin)                    [infra]
-├── Service     backend, frontend                                                                      [build-deploy]
-├── Service     keycloak, postgres                                                                     [infra]
-├── Ingress     clubby-backend (path /api, possiede la richiesta TLS/cert-manager)                 [build-deploy]
-├── Ingress     clubby-frontend (path /, stesso host/secretName TLS del backend)                   [build-deploy]
-├── Ingress     clubby-keycloak (routing verso Keycloak, TLS)                                      [infra]
-├── Secret      clubby-secrets (DB_PASSWORD, KEYCLOAK_ADMIN_CLIENT_SECRET, per backend)            [build-deploy]
-├── Secret      clubby-infra-secrets (DB_PASSWORD, KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD)              [infra]
-├── Secret      ghcr-secret (imagePullSecrets: pull immagini private da ghcr.io)                        [build-deploy]
-└── ConfigMap   clubby-config (DB_HOST/PORT/NAME/USER, KEYCLOAK_URL/REALM/CLIENT_ID, PORT)         [build-deploy]
+clubby-<env>-app/                  es. clubby-development-app, clubby-romaasd-app
+├── Deployment  backend        (immagine clubby-backend)                                    [deploy]
+├── Deployment  frontend       (immagine clubby-frontend, statica dietro Ingress)           [deploy]
+├── Deployment  authorizer     (immagine clubby-authorizer)                                 [deploy]
+├── Service     backend, frontend, authorizer                                               [deploy]
+├── Ingress     clubby-backend (host dell'app, path /api, possiede la richiesta TLS)        [deploy]
+├── Ingress     clubby-frontend (stesso host, path /, stesso secretName TLS del backend)    [deploy]
+├── Ingress     clubby-authorizer (host proprio AUTH_DOMAIN, TLS separato)                    [deploy]
+├── Secret      clubby-secrets (DB_PASSWORD)                                                [deploy]
+├── Secret      clubby-auth-secrets (AUTH_DB_PASSWORD, chiave di firma, admin iniziale)     [deploy]
+├── Secret      ghcr-secret (imagePullSecrets: pull immagini private da ghcr.io)            [deploy]
+├── ConfigMap   clubby-config (DB_*, AUTH_ISSUER, AUTH_INTERNAL_URL, PORT)                  [deploy]
+├── ConfigMap   clubby-auth-config (DB_*, AUTH_ISSUER, CORS_ORIGIN, PORT)                   [deploy]
+└── ConfigMap   clubby-frontend-config (/version.json e /config.json del club)              [deploy]
+
+<DB_NAMESPACE>/                    es. postgres-dev, postgres-prod
+├── Deployment  postgres (istanza condivisa, creata solo se manca, con PVC)   [infra]
+├── Service     postgres                                                      [infra]
+├── Service     postgres-external (NodePort, solo se DB_NODE_PORT impostata)  [infra]
+├── PVC         postgres                                                      [infra]
+└── Secret      postgres-superuser (password del superutente, solo nel cluster) [infra]
+    sull'istanza, per ogni club: database <env>-clubby e <env>-auth, utenti omonimi   [infra]
 ```
 
-`[build-deploy]` = generato/applicato automaticamente dal workflow **Build & Deploy** (backend/frontend).
-`[infra]` = generato/applicato automaticamente dal workflow **Infra** (namespace, Postgres, Keycloak) — va
-lanciato prima, una tantum per namespace.
+`[deploy]` = applicato dai workflow di deploy, chiamati da **Build & Deploy** (development) e da
+**Promote** (club).
+`[infra]` = applicato dal workflow **Infra** — va lanciato prima, una tantum per ambiente.
+
+Le risorse nel namespace del database hanno nomi **neutri**, non legati a Clubby né a un club: l'istanza
+è un servizio condiviso. Specifici di un club sono solo i suoi database e i loro utenti.
+
+I moduli applicativi raggiungono Postgres attraverso il nome completo del Service,
+`postgres.<DB_NAMESPACE>.svc.cluster.local`: il nome breve funzionerebbe solo
+all'interno dello stesso namespace.
 
 ### Pipeline CI/CD (GitHub Actions)
 
-Sei workflow in [.github/workflows](.github/workflows), scope separato: **Infra** provisiona una tantum
-namespace/Postgres/Keycloak; **Build & Deploy** builda e deploya backend/frontend in sviluppo a ogni push;
-**Deploy Backend**/**Deploy Frontend** sono workflow riutilizzabili (nessun trigger proprio) che applicano
-davvero i manifest k8s, chiamati sia da `Build & Deploy` sia da `Promote`; **Tag** promuove manualmente un
-deploy a "versione reale" (senza deployare nulla); **Promote** deploya in produzione una versione già
-taggata (senza taggare nulla).
+Sette workflow in [.github/workflows](.github/workflows), scope separato: **Infra** provisiona una
+tantum namespace e Postgres; **Build & Deploy** builda e deploya i tre moduli in sviluppo a ogni push;
+**Deploy Backend**/**Deploy Frontend**/**Deploy Authorizer** sono workflow riutilizzabili (nessun
+trigger proprio) che applicano davvero i manifest k8s, chiamati sia da `Build & Deploy` sia da
+`Promote`; **Tag** promuove manualmente un deploy a "versione reale" (senza deployare nulla);
+**Promote** deploya una versione già taggata nell'ambiente di un club (senza taggare nulla).
 
-**GitHub Environments (`dev`/`prod`)**: `Build & Deploy` e `Tag` sono agganciati (job-level `environment:
-dev`) sempre e solo all'Environment `dev` del repo — ogni push builda/deploya sempre in sviluppo, mai in
-produzione. `Infra` invece accetta un input obbligatorio `env` (di tipo `environment`: il menu a tendina in
-GitHub mostra gli Environment realmente configurati sul repo) e aggancia il job all'Environment scelto
-(`environment: ${{ inputs.env }}`), perché va lanciato manualmente una tantum sia per provisionare `dev` che
-`prod`. `Promote` deploya sempre e solo sull'Environment `prod` (job-level `environment: production` dentro
-`Deploy Backend`/`Deploy Frontend`, chiamati con `environment: production`). Le **Variables/Secrets** vanno
-quindi configurate per-Environment (Settings → Environments → `dev` / `prod`, non più solo a livello di
-repository): ogni Environment ha i propri valori di `KUBE_NAMESPACE`/`APP_DOMAIN`/`KEYCLOAK_HOST`/`DB_*`/
-`SSH_*`/ecc. `Promote` riusa le immagini Docker già pushate su `ghcr.io` da `Build & Deploy` (già taggate per
-versione reale da `Tag`) — nessun rebuild.
+**GitHub Environments**: `Build & Deploy` e `Tag` sono agganciati (job-level `environment: development`)
+sempre e solo all'Environment `development` — ogni push builda e deploya in sviluppo, mai in un club.
+`Infra` e `Promote` ricevono invece l'Environment come input (di tipo `environment`: il menu a tendina in
+GitHub mostra gli Environment realmente configurati sul repo) e agganciano i job a quello scelto: `Infra`
+per preparare `development` o un club, `Promote` per portare una versione in un club (rifiuta
+`development`). Le **Variables/Secrets** vanno quindi configurate per Environment (Settings →
+Environments), uno per `development` e uno per ogni club.
+
+Namespace, nomi dei database e cartelle sulla VPS **non** sono Variables: li ricava dal nome
+dell'Environment l'action [`.github/actions/ambiente`](.github/actions/ambiente/action.yml), che valida il
+nome ed è usata da Infra e da tutti i workflow di deploy, così la convenzione è scritta in un punto solo.
+`Promote` riusa le immagini Docker già pushate su `ghcr.io` da `Build & Deploy` (già taggate per versione
+reale da `Tag`) — nessun rebuild.
 
 #### Infra
 
 Workflow: [infra.yml](.github/workflows/infra.yml).
 
-**Attivazione manuale** (`workflow_dispatch`, con tre input obbligatori: `env` — l'Environment GitHub target,
-`dev` o `prod` —, email e password temporanea del primo admin). Aggancia il job all'Environment scelto
-(`environment: ${{ inputs.env }}`), quindi legge le Variables/Secrets configurate su **quell'Environment**,
-non quelle di `dev` usate da `Build & Deploy`/`Tag`. Da lanciare una tantum per namespace/ambiente, prima del
-primo `Build & Deploy` (per `dev`) o prima della prima promozione (per `prod`), o quando serve ricreare
-l'infrastruttura di base. **Presuppone che `scripts/setup-vps-k3s.sh` sia già stato eseguito a mano sulla
-VPS** (k3s, Traefik e cert-manager devono esistere): questa pipeline parte da un cluster già funzionante, non
-lo crea. È idempotente (`kubectl apply`/`--dry-run=client -o yaml | kubectl apply -f -` ovunque), quindi
+**Attivazione manuale** (`workflow_dispatch`), con un solo input: `environment` — l'Environment GitHub su
+cui agire, `development` o un club. L'email del primo admin non si inserisce al lancio: è la Variable
+`INITIAL_ADMIN_EMAIL` dell'Environment, la stessa letta dal deploy dell'authorizer, e Infra si ferma se
+manca. Aggancia il job all'Environment scelto,
+quindi legge le Variables/Secrets configurate su **quell'Environment**. Da lanciare una tantum per
+ambiente, prima del primo deploy, o quando serve riallineare l'infrastruttura. **Presuppone che
+`scripts/setup-vps-k3s.sh` sia già stato eseguito a mano sulla VPS** (k3s, Traefik e cert-manager devono
+esistere): questa pipeline parte da un cluster già funzionante, non lo crea. È idempotente, quindi
 rieseguibile senza distruggere dati esistenti.
 
-1. Genera tre valori casuali (`openssl rand`): `DB_PASSWORD`, la password bootstrap dell'admin console di
-   Keycloak, e `KEYCLOAK_ADMIN_CLIENT_SECRET` — **a meno che non esistano già come Secrets
-   sull'Environment**, nel qual caso li riusa invece di rigenerarli (indispensabile per rilanciare Infra in
-   sicurezza dopo il primo provisioning, senza disallineare le credenziali da quelle già impostate su
-   Postgres/Keycloak). Mai committati, esistono solo per la durata della run se rigenerati.
-2. Renderizza i template [k8s/templates/infra](k8s/templates/infra) con `envsubst` e li copia sulla VPS via
-   SSH, insieme allo schema SQL dell'app ([backend/src/db/schema.sql](backend/src/db/schema.sql)) e allo
-   script [scripts/keycloak-realm-init.sh](scripts/keycloak-realm-init.sh).
-3. Via SSH: crea il namespace, un Secret con le credenziali generate, un ConfigMap con gli script SQL di
-   init Postgres (`CREATE DATABASE keycloak;` + lo schema applicativo, eseguiti automaticamente da Postgres
-   al primo avvio via `/docker-entrypoint-initdb.d`), applica Postgres e attende che sia pronto.
-4. Applica Keycloak (Deployment + Service + Ingress) e attende che sia pronto.
-5. Applica un **Job Kubernetes** one-shot che esegue `keycloak-realm-init.sh` **dentro il cluster** (non via
-   SSH dall'host della VPS): il Job gira come pod, quindi risolve il DNS interno (`*.svc.cluster.local`)
-   senza bisogno di port-forward o tunnel. Crea il realm, i client (SPA pubblico + backend confidential), i
-   ruoli `admin`/`viewer` e **un solo utente admin reale** (non credenziali di test hardcoded), con password
-   temporanea che Keycloak obbliga a cambiare al primo login.
-6. Stampa nel riepilogo della run (`GITHUB_STEP_SUMMARY`) i valori da copiare a mano nei GitHub
-   Secrets/Variables (`DB_PASSWORD`, `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD`, `KEYCLOAK_ADMIN_CLIENT_SECRET`,
-   ecc.) — **visibili in chiaro una sola volta**, non vengono salvati altrove: copiali subito. Questo step
-   gira **sempre** (`if: always()`), anche se un passo precedente fallisce (es. il Job di init Keycloak): i
-   secret generati/riusati a inizio run vengono comunque mostrati, così puoi copiarli nell'Environment prima
-   di rilanciare Infra — che li riuserà invece di generarne di nuovi.
+1. Genera i valori casuali del club (`openssl`): `DB_PASSWORD`, `AUTH_DB_PASSWORD`, la chiave privata RSA
+   `AUTH_JWT_PRIVATE_KEY` con cui l'authorizer firma i token e la password temporanea del primo admin —
+   **a meno che non esistano già come Secrets sull'Environment**, nel qual caso li riusa. È indispensabile
+   per rilanciare Infra in sicurezza: una chiave di firma nuova invaliderebbe tutti i token in
+   circolazione.
+2. Renderizza i template [k8s/templates/infra](k8s/templates/infra) con `envsubst` e li copia sulla VPS
+   via SSH, insieme agli schemi SQL dei due database.
+3. Via SSH:
+   - crea, se mancano, il namespace dell'applicazione (`clubby-<env>-app`) e quello dell'istanza
+     Postgres (`DB_NAMESPACE`);
+   - **crea l'istanza Postgres solo se in quel namespace non esiste**: il Secret con la password del
+     superutente (generata al momento, resta solo nel cluster e nessun club la conosce), il volume e il
+     Deployment. Se l'istanza esiste già — magari creata da un altro club — la riusa senza modificarla:
+     riapplicarla con i valori di questo ambiente potrebbe cambiarla per tutti (es. il volume);
+   - sull'istanza crea, se mancano, i database `<env>-clubby` e `<env>-auth` e i loro utenti omonimi, ne
+     riallinea le password ai Secrets dell'Environment e toglie a qualunque altro utente la possibilità
+     di collegarsi a quei database;
+   - applica gli schemi dei due database come loro proprietari. Gli schemi sono idempotenti: riapplicarli
+     su un database già popolato non tocca i dati.
 
-**Nota sull'URL di Keycloak**: `KEYCLOAK_URL` (`https://` + `KEYCLOAK_HOST`, costruito da entrambe le
-pipeline, non è una variabile GitHub a sé) deve puntare all'**URL pubblico HTTPS** di Keycloak (es.
-`https://auth.tuodominio.com`), non a un indirizzo interno del cluster — il backend valida il claim `iss` del
-JWT confrontandolo esattamente con questo valore ([backend/src/middleware/auth.ts](backend/src/middleware/auth.ts));
-poiché Keycloak emette token con issuer pari all'URL pubblico usato dal browser (`KC_HOSTNAME`, impostato dal
-template [keycloak-deployment.yaml](k8s/templates/infra/keycloak-deployment.yaml)), un `KEYCLOAK_HOST`
-sbagliato farebbe fallire sempre la verifica. Il frontend riceve lo stesso valore come `VITE_KEYCLOAK_URL`
-(derivato automaticamente nel job `build-frontend`).
+Database e utenti non li creano script di init di Postgres: quelli girano solo al primo avvio
+dell'istanza, e su un'istanza condivisa i club successivi non avrebbero mai i propri database.
+
+L'utente admin iniziale **non** viene creato qui: lo crea l'authorizer al suo primo avvio (durante
+`Build & Deploy`), leggendo `INITIAL_ADMIN_EMAIL`/`INITIAL_ADMIN_PASSWORD`, e solo se il database degli
+account è ancora vuoto.
+
+Il riepilogo della run (`GITHUB_STEP_SUMMARY`) stampa i valori da copiare a mano nei GitHub
+Secrets/Variables — **visibili in chiaro una sola volta**, non vengono salvati altrove: copiali subito.
+Lo step gira **sempre** (`if: always()`), anche se un passo precedente fallisce: i secret generati a
+inizio run vengono comunque mostrati, così puoi copiarli nell'Environment prima di rilanciare Infra, che
+li riuserà.
+
+**Nota sull'issuer**: `AUTH_ISSUER` (`https://` + `AUTH_DOMAIN`, costruito dalle pipeline, non è una
+variabile GitHub a sé) deve essere l'**URL pubblico HTTPS** dell'authorizer, non un indirizzo interno al
+cluster. L'authorizer lo scrive nel claim `iss` dei token e il backend lo confronta esattamente
+([backend/src/middleware/auth.ts](backend/src/middleware/auth.ts)): un `AUTH_DOMAIN` sbagliato farebbe
+fallire ogni verifica. Il backend raggiunge però l'authorizer sul Service interno
+(`AUTH_INTERNAL_URL`), che è cosa diversa e non deve coincidere.
 
 #### `Build & Deploy` ([build-deploy.yml](.github/workflows/build-deploy.yml))
 
 Si attiva su push su `main`, `feature/**`, `fix/**` (o manualmente). Tutti i branch deployano sullo
-**stesso namespace** (`KUBE_NAMESPACE` dell'Environment `dev`, a cui il workflow è sempre agganciato —
-`environment: development` su ogni job): ogni push su uno di questi branch sovrascrive il deploy corrente in
-sviluppo. La promozione controllata in produzione (Environment `prod`, provisionato da `Infra`) è prevista in
-una pipeline `Promote` dedicata futura, non ancora implementata — riuserà le immagini Docker già pushate su
-`ghcr.io` da questo workflow, senza rebuild.
+**stesso ambiente**, `development` (namespace `clubby-development-app`, a cui il workflow è sempre
+agganciato — `environment: development` su ogni job): ogni push su uno di questi branch sovrascrive il
+deploy corrente in sviluppo. I club si aggiornano con **Promote**, che riusa le immagini Docker già
+pushate su `ghcr.io` da questo workflow, senza rebuild.
 
 **Backend e frontend sono due scope completamente indipendenti**, ciascuno con i propri manifest k8s
 colocati nel proprio folder — `backend/k8s/` e `frontend/k8s/` (niente più un `k8s/templates/app/`
@@ -473,8 +717,8 @@ Job (per ciascuno scope: nomi mostrati per `backend`, `frontend` è identico):
    come base del nome dei tag Git di ciascuno scope).
 2. **build-backend** (condizionale, vedi sopra): la **compilazione avviene qui, nella pipeline** (`npm ci &&
    npm run build`), non nel Dockerfile — `backend/Dockerfile` si limita a impacchettare l'output già
-   compilato (`dist/`) in un'immagine Node runtime (per il frontend: build Vite + immagine nginx, variabili
-   `VITE_*` passate come env allo step `npm run build`, compilate nel bundle a build-time). Le immagini
+   compilato (`dist/`) in un'immagine Node runtime (per il frontend: build Vite + immagine nginx, senza
+   alcuna configurazione del club, che arriva al deploy in `/config.json`). Le immagini
    vengono pushate su GitHub Container Registry (`ghcr.io`) taggate **solo** con il tag di data
    (branch-scoped) e con `latest` — il tag di versione reale (`X.Y.Z`) viene assegnato in seguito dal
    workflow Tag, solo dopo la promozione.
@@ -486,8 +730,8 @@ Job (per ciascuno scope: nomi mostrati per `backend`, `frontend` è identico):
    con `environment: development` e il tag risolto al punto precedente — applica **solo** i manifest sotto
    `backend/k8s/` (`configmap.yaml`, `secret.yaml`, `deployment.yaml`, `service.yaml`, `ingress.yaml` —
    quest'ultimo possiede la richiesta TLS/cert-manager per l'host condiviso), poi `kubectl rollout status`
-   sul solo Deployment backend. Lo stesso identico workflow è chiamato anche da **Promote** per la
-   produzione (vedi sotto) — nessuna logica di deploy duplicata tra i due contesti.
+   sul solo Deployment backend. Lo stesso identico workflow è chiamato anche da **Promote** per i
+   club (vedi sotto) — nessuna logica di deploy duplicata tra i due contesti.
 5. **register-backend-tag**: solo dopo un deploy riuscito, crea/sposta il tag `backend-<branch>-*` (vedi
    sopra "Come avanza il tag").
 6. **cleanup-registry**: dopo almeno un deploy riuscito, ripulisce dal registry le immagini taggate solo con
@@ -536,7 +780,7 @@ Accetta quattro input:
 **Attivazione manuale** (`workflow_dispatch`, nessun input, tab Actions → Tag → Run workflow): non parte da
 solo dopo `Build & Deploy`. Anche questo workflow è sempre agganciato all'Environment `dev`
 (`environment: development`): assegna il tag di versione reale alle immagini già buildate in sviluppo, e crea
-la GitHub Release corrispondente. **Non deploya nulla** — il deploy in produzione di una versione già
+la GitHub Release corrispondente. **Non deploya nulla** — il deploy nei club di una versione già
 taggata qui è compito separato del workflow **Promote** (vedi sotto). Promuove sempre e solo **main**, per
 costruzione (vedi sotto) — coerente col fatto che `feature/**` e `fix/**` deployano sullo stesso namespace di
 sviluppo di `main` e non rappresentano una produzione separata.
@@ -591,34 +835,40 @@ Per rilasciare una nuova versione di un componente, alza a mano il campo `versio
 corrispondente prima del push su `main`: la pipeline la userà per il tag Git e per il tag Docker al momento
 della promozione.
 
-#### `Deploy Backend` / `Deploy Frontend` ([deploy-backend.yml](.github/workflows/deploy-backend.yml) / [deploy-frontend.yml](.github/workflows/deploy-frontend.yml))
+#### `Deploy Backend` / `Deploy Frontend` / `Deploy Authorizer` ([deploy-backend.yml](.github/workflows/deploy-backend.yml) / [deploy-frontend.yml](.github/workflows/deploy-frontend.yml) / [deploy-authorizer.yml](.github/workflows/deploy-authorizer.yml))
 
 **Solo `workflow_call`**: non compaiono nella tab Actions come workflow lanciabili direttamente — esistono
-solo per essere chiamati da `Build & Deploy` (sviluppo) e da `Promote` (produzione). Prendono in input
+solo per essere chiamati da `Build & Deploy` (development) e da `Promote` (club). Prendono in input
 `environment` (Environment GitHub da usare) e `image_tag` (tag dell'immagine da deployare — di data o
-versione reale, indifferentemente): renderizzano i manifest k8s del proprio scope con `envsubst` leggendo le
-Variables/Secrets **dell'Environment ricevuto in input**, li copiano sulla VPS via SSH, li applicano e
+versione reale, indifferentemente). Ricavano namespace, nomi dei database e cartella sulla VPS dal nome
+dell'Environment (action `ambiente`), renderizzano i manifest k8s del proprio scope con `envsubst` leggendo
+le Variables/Secrets **dell'Environment ricevuto in input**, li copiano sulla VPS via SSH, li applicano e
 verificano il rollout. Nessuna conoscenza di *perché* si sta deployando quel tag né di *chi* li ha chiamati —
 un cambiamento a come si deploya (nuovo step, nuovo manifest, nuova secret) si scrive una volta sola e vale
-sia per lo sviluppo sia per la produzione.
+per ogni ambiente.
+
+`Deploy Frontend` genera inoltre con `jq` la configurazione del club — nome, indirizzi di API e
+authorizer, colori e logo — e la mette nel ConfigMap del frontend, da cui nginx la serve su
+`/config.json`. Si ferma con un errore chiaro se mancano `APP_DOMAIN`, `AUTH_DOMAIN` o `TENANT_NAME`, o se
+`LOGO_FILE` non esiste in `frontend/public/branding/`.
 
 #### `Promote` ([promote.yml](.github/workflows/promote.yml))
 
-**Attivazione manuale**, con input `backend_version`/`frontend_version` (entrambi opzionali come stringa,
-es. `1.4.0` — ma **almeno uno richiesto**): puoi promuovere in produzione solo backend, solo frontend, o
-entrambi nella stessa run. **Non tagga nulla, non crea Release** — richiede che la versione indicata sia già
-stata creata da **Tag** in precedenza.
+**Attivazione manuale**, con input `environment` — l'Environment del club, dal menu a tendina — e
+`backend_version`/`frontend_version`/`authorizer_version` (opzionali come stringa, es. `1.4.0` — ma
+**almeno uno richiesto**): puoi promuovere un solo componente o più d'uno nella stessa run. La stessa
+versione si porta in più club lanciando Promote una volta per club. **Non tagga nulla, non crea Release** —
+richiede che la versione indicata sia già stata creata da **Tag** in precedenza.
 
-1. **validate**: per ciascuna versione indicata, verifica che il tag `server-v<versione>`/`client-v<versione>`
-   esista davvero nel repo — altrimenti fallisce subito con un `::error::` esplicito, invece di procedere con
-   un'immagine inesistente/sbagliata (un input testo libero, senza validazione, rischierebbe esattamente
-   questo su un semplice typo).
-2. **deploy-production-backend** / **deploy-production-frontend** (uno o entrambi, a seconda degli input
-   valorizzati): chiamano `deploy-backend.yml`/`deploy-frontend.yml` con `environment: production` e il tag
-   di versione validato — stesso identico workflow di deploy usato da `Build & Deploy` per lo sviluppo,
-   nessuna logica duplicata.
+1. **validate**: rifiuta `development` (lì deploya `Build & Deploy` a ogni push, e una promozione manuale
+   ne scavalcherebbe lo stato), poi per ciascuna versione indicata verifica che il tag
+   `server-v<versione>`/`client-v<versione>`/`auth-v<versione>` esista davvero nel repo — altrimenti
+   fallisce subito con un `::error::` esplicito, invece di procedere con un'immagine inesistente/sbagliata.
+2. **deploy-backend** / **deploy-frontend** / **deploy-authorizer** (a seconda degli input valorizzati):
+   chiamano i workflow riutilizzabili con l'ambiente scelto e il tag di versione validato — stesso identico
+   workflow di deploy usato da `Build & Deploy` per lo sviluppo, nessuna logica duplicata.
 
-Sicuro da rilanciare più volte con lo stesso input (es. per riallineare la produzione dopo un incidente):
+Sicuro da rilanciare più volte con lo stesso input (es. per riallineare un club dopo un incidente):
 non essendoci alcuno stato/tag da spostare, non ha effetti collaterali oltre al deploy stesso.
 
 ### Struttura dei manifest k8s
@@ -627,22 +877,32 @@ I manifest di backend/frontend sono **colocati nel folder del componente a cui a
 (`backend/k8s/`, `frontend/k8s/`), non più in un `k8s/templates/app/` condiviso: così un cambio ai manifest
 di un componente ricade sotto lo stesso prefisso di path (`backend/`/`frontend/`) usato da `Build & Deploy`
 per decidere cosa buildare/deployare (vedi sopra), senza bisogno di regole separate per "solo k8s".
-`k8s/templates/infra/` (usato solo da **Infra**, provisioning namespace/Postgres/Keycloak) resta invece
-centralizzato, dato che non appartiene né a backend né a frontend.
+`k8s/templates/infra/` (usato solo da **Infra**: namespace e Postgres) resta invece centralizzato, dato
+che non appartiene a nessuno dei tre moduli.
 
 ```
 backend/
 ├── k8s/                     # manifest con placeholder ${VAR}, applicati da deploy-backend
-│   ├── configmap.yaml        # variabili non sensibili (DB_HOST, KEYCLOAK_URL, ...)
-│   ├── secret.yaml           # DB_PASSWORD, KEYCLOAK_ADMIN_CLIENT_SECRET
+│   ├── configmap.yaml        # variabili non sensibili (DB_*, AUTH_ISSUER, AUTH_INTERNAL_URL, ...)
+│   ├── secret.yaml           # DB_PASSWORD
 │   ├── deployment.yaml
 │   ├── service.yaml
 │   └── ingress.yaml           # possiede la richiesta TLS/cert-manager (ClusterIssuer "letsencrypt")
 │                               # per l'host condiviso col frontend
 └── ...                       # codice del backend
 
+authorizer/
+├── k8s/                     # manifest con placeholder ${VAR}, applicati da deploy-authorizer
+│   ├── configmap.yaml        # DB_*, AUTH_ISSUER, CORS_ORIGIN, PORT
+│   ├── secret.yaml           # AUTH_DB_PASSWORD, chiave di firma, admin iniziale
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── ingress.yaml           # host proprio (AUTH_DOMAIN), certificato TLS separato
+└── ...                       # codice dell'authorizer
+
 frontend/
 ├── k8s/                     # manifest con placeholder ${VAR}, applicati da deploy-frontend
+│   ├── configmap.yaml        # /version.json e /config.json del club, serviti da nginx
 │   ├── deployment.yaml
 │   ├── service.yaml
 │   └── ingress.yaml           # stesso host/secretName TLS del backend, SENZA annotazione cert-manager
@@ -650,50 +910,50 @@ frontend/
 └── ...                       # codice del frontend
 
 k8s/
-└── templates/infra/          # applicati da Infra (namespace, Postgres condiviso, Keycloak)
-    ├── namespace.yaml
-    ├── postgres-pvc.yaml
+└── templates/infra/          # applicati da Infra (i due namespace e l'istanza Postgres)
+    ├── namespace.yaml            # namespace applicativo (clubby-<env>-app)
+    ├── postgres-namespace.yaml   # namespace dell'istanza Postgres (DB_NAMESPACE)
+    ├── postgres-pvc.yaml         # questo e il seguente: applicati solo se l'istanza non esiste
     ├── postgres-deployment.yaml
     ├── postgres-service.yaml
-    ├── keycloak-deployment.yaml
-    ├── keycloak-service.yaml
-    ├── keycloak-ingress.yaml
-    └── keycloak-init-job.yaml  # Job one-shot: esegue keycloak-realm-init.sh dentro al cluster
+    └── postgres-nodeport.yaml    # opzionale, solo se DB_NODE_PORT è impostata
 ```
 
 ### Variabili e secret da configurare su GitHub
 
-**Per Environment** (Repository → Settings → Environments → crea `development` e `production`, poi per
-ciascuno "Environment secrets"/"Environment variables"), non più a livello di repository: `Build & Deploy` e
-`Tag` leggono sempre l'Environment `development`; `Infra` legge l'Environment passato come input
-(`development` o `production`) al lancio. Le tabelle sotto vanno quindi configurate **due volte**, una per
-`development` e una per `production`, con valori diversi (hostname, namespace, credenziali VPS/DB di ciascun
-ambiente). Le **Secrets** sono cifrate e mai visibili nei log; le **Variables** sono in chiaro, per valori
-non sensibili.
+**Per Environment** (Repository → Settings → Environments), non a livello di repository: uno per
+`development` e uno per ogni club, ciascuno con i propri "Environment secrets"/"Environment variables".
+`Build & Deploy` e `Tag` leggono sempre l'Environment `development`; `Infra` e `Promote` quello scelto al
+lancio. Le tabelle sotto vanno quindi configurate **per ogni Environment**, con i valori di quell'ambiente
+(hostname, credenziali, nome del club). Le **Secrets** sono cifrate e mai visibili nei log; le **Variables**
+sono in chiaro, per valori non sensibili.
 
-Attenzione a non confondere due nomi che si somigliano: gli **Environment GitHub** si chiamano per esteso
-`development` e `production`, mentre i **namespace Kubernetes** usano i suffissi brevi `-dev` e `-prod`
-(es. `clubby-dev`, `clubby-prod`, e `postgres-dev`/`postgres-prod` per il database).
+Il **nome dell'Environment** conta: da lì derivano namespace, nomi dei database e cartelle sulla VPS (vedi
+[Multi-tenant](#multi-tenant)), che quindi non si configurano.
 
-Usati sia da **Infra** che da **Build & Deploy** salvo dove indicato. `DB_PASSWORD`,
-`KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` e `KEYCLOAK_ADMIN_CLIENT_SECRET` **non vanno inventati a mano**: la prima
-volta Infra li genera casualmente e li stampa nel riepilogo della sua run (vedi [Infra](#infra), incluso se
-la run fallisce dopo averli generati) — copiali nell'Environment corrispondente (`development` o
-`production`) subito dopo. **Importante**: se questi Secrets sono già presenti sull'Environment quando rilanci Infra, vengono
-**riusati così come sono** invece di rigenerarne di nuovi — fondamentale perché Postgres e Keycloak
-persistono i dati tra un run e l'altro (PVC), quindi una password rigenerata ogni volta smetterebbe di
-corrispondere a quella realmente impostata al primo avvio, rompendo i login su ogni run successivo al primo.
+La colonna "Usato da" indica chi li legge; "deploy" = i workflow di deploy, chiamati da **Build & Deploy**
+per `development` e da **Promote** per i club. Quelli obbligatori vengono controllati all'inizio di ogni
+workflow, che si ferma con l'elenco di ciò che manca. `DB_PASSWORD`, `AUTH_DB_PASSWORD`,
+`AUTH_JWT_PRIVATE_KEY` e `INITIAL_ADMIN_PASSWORD` **non vanno inventati a mano**: la prima volta Infra li
+genera e li stampa nel riepilogo della sua run (vedi [Infra](#infra), anche se la run fallisce dopo
+averli generati) — copiali nell'Environment corrispondente subito dopo.
+
+**Importante**: se questi Secrets sono già presenti sull'Environment quando rilanci Infra, vengono
+**riusati così come sono** invece di rigenerarne di nuovi. Una chiave di firma rigenerata invaliderebbe di
+colpo tutti i token e i refresh token in circolazione, disconnettendo ogni utente. Le password dei
+database vengono invece riallineate sugli utenti Postgres a ogni run di Infra.
 
 #### Secrets
 
-| Nome | Descrizione | Esempio |
-|------|-------------|---------|
-| `SSH_PRIVATE_KEY` | Chiave privata SSH (PEM) corrispondente a una chiave pubblica autorizzata sulla VPS | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
-| `DB_PASSWORD` | Password del database Postgres condiviso (app + Keycloak) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
-| `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Password dell'admin console Keycloak (bootstrap, distinto dall'admin applicativo) — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* |
-| `KEYCLOAK_ADMIN_CLIENT_SECRET` | Client secret del client confidential `clubby-backend` su Keycloak — **generato/riusato da Infra** | *(copiata dal riepilogo della run Infra)* |
-| `GHCR_PAT` | Personal Access Token GitHub con scope `read:packages`, usato da **Build & Deploy** per creare il Secret k8s `ghcr-secret` (`imagePullSecrets` di backend/frontend) — i package su `ghcr.io` sono privati di default, senza questo token i pod restano in `ImagePullBackOff`. **Non riusare il `GITHUB_TOKEN` automatico**: è valido solo per la durata della run, i pod devono poter fare pull in qualunque momento futuro. Genera il token da GitHub → Settings (personali) → Developer settings → Personal access tokens → Tokens (classic) → scope `read:packages` | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* |
-| `WORKFLOW_PAT` | **Secret di repository, non per Environment** (unico in questa tabella). Personal Access Token con permesso "Workflows: Read and write" (scope `workflow` sui token classic), usato dal solo workflow **Tag**. Serve perché Tag tagga un commit "vecchio" — l'ultimo `<scope>-main-*` deployato, non la punta attuale di `main` — e il `GITHUB_TOKEN` di default rifiuta il push di un tag quando il contenuto di `.github/workflows/` in quel commit non è identico a quello dell'ultimo commit di un branch, condizione quasi certa una volta che i workflow evolvono. **Non riusare `GHCR_PAT`**: quello finisce in un Secret k8s persistito sul cluster, e dargli anche scope `workflow` permetterebbe di modificare le pipeline CI/CD a chiunque legga quel Secret | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* |
+| Nome | Descrizione | Esempio | Usato da |
+|------|-------------|---------|----------|
+| `SSH_PRIVATE_KEY` | Chiave privata SSH (PEM) corrispondente a una chiave pubblica autorizzata sulla VPS | `-----BEGIN OPENSSH PRIVATE KEY-----...` | Infra, deploy |
+| `GHCR_PAT` | Personal Access Token GitHub con scope `read:packages`, usato per creare nel namespace dell'app il Secret k8s `ghcr-secret` (`imagePullSecrets` di backend, frontend e authorizer) — i package su `ghcr.io` sono privati di default, senza questo token i pod restano in `ImagePullBackOff`. **Non generato da Infra**, **non riusare il `GITHUB_TOKEN` automatico**: è valido solo per la durata della run, i pod devono poter fare pull in qualunque momento futuro. Genera il token da GitHub → Settings (personali) → Developer settings → Personal access tokens → Tokens (classic) → scope `read:packages` | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* | deploy |
+| `DB_PASSWORD` | Password dell'utente Postgres `<env>-clubby` — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* | Infra, deploy del backend |
+| `AUTH_DB_PASSWORD` | Password dell'utente Postgres `<env>-auth` — **generata/riusata da Infra**, non a mano | *(copiata dal riepilogo della run Infra)* | Infra, deploy dell'authorizer |
+| `AUTH_JWT_PRIVATE_KEY` | Chiave privata RSA (PEM, a capo come `\n` letterali) con cui l'authorizer firma i token — **generata/riusata da Infra**. Cambiarla invalida tutti i token e i refresh token esistenti | *(copiata dal riepilogo della run Infra)* | Infra, deploy dell'authorizer |
+| `INITIAL_ADMIN_PASSWORD` | Password temporanea del primo amministratore — **generata/riusata da Infra**, non scelta a mano: va comunque sostituita al primo accesso. Usata dall'authorizer solo se il database degli account è vuoto, ma il deploy la richiede sempre | *(copiata dal riepilogo della run Infra)* | Infra, deploy dell'authorizer |
+| `WORKFLOW_PAT` | **Secret di repository, non per Environment** (unico in questa tabella). Personal Access Token con permesso "Workflows: Read and write" (scope `workflow` sui token classic). Serve perché Tag tagga un commit "vecchio" — l'ultimo `<scope>-main-*` deployato, non la punta attuale di `main` — e il `GITHUB_TOKEN` di default rifiuta il push di un tag quando il contenuto di `.github/workflows/` in quel commit non è identico a quello dell'ultimo commit di un branch, condizione quasi certa una volta che i workflow evolvono. **Non riusare `GHCR_PAT`**: quello finisce in un Secret k8s persistito sul cluster, e dargli anche scope `workflow` permetterebbe di modificare le pipeline CI/CD a chiunque legga quel Secret | *(token generato a mano, es. `ghp_xxxxxxxxxxxx`)* | Tag |
 
 #### Variables
 
@@ -701,41 +961,40 @@ corrispondere a quella realmente impostata al primo avvio, rompendo i login su o
 
 | Nome | Descrizione | Esempio | Usata da |
 |------|-------------|---------|----------|
-| `SSH_HOST` | Indirizzo della VPS su cui gira il cluster k8s | `203.0.113.10` | Infra, Build & Deploy |
-| `SSH_USER` | Utente SSH per connettersi alla VPS | `deploy` | Infra, Build & Deploy |
-| `KUBE_NAMESPACE` | Namespace Kubernetes target — deve essere diverso tra `dev` e `prod` anche se condividono la stessa VPC/cluster | `clubby-prod` | Infra, Build & Deploy |
-| `APP_DOMAIN` | Hostname pubblico dell'app (usato nell'Ingress per frontend **e** backend sullo stesso host, routing per path: `/api` → backend, `/` → frontend; anche base per `VITE_API_BASE_URL` e per i redirect URI SPA creati da Infra) | `app.clubby.example.com` | Infra, Build & Deploy |
-| `VITE_TENANT_NAME` | Nome tenant visualizzato in UI, compilato nel bundle frontend | `ASD Roma` | Build & Deploy |
-| `KEYCLOAK_HOST` | Hostname pubblico di Keycloak (bare host) — usato sia nell'Ingress di Infra sia per costruire `KEYCLOAK_URL` (`https://` + questo valore); non punta al DNS interno del cluster, il backend valida il claim `iss` del JWT confrontandolo esattamente con `https://KEYCLOAK_HOST` (vedi nota sull'issuer JWT sopra) | `auth.clubby.example.com` | Infra, Build & Deploy |
-| `DB_HOST` | Host del Postgres condiviso raggiungibile dal cluster (nome del Service creato da Infra, include il namespace) | `clubby-postgres.clubby-prod.svc.cluster.local` | Build & Deploy |
-| `VITE_ACTIVITY_SELECT_VALUES_MAPPING` | Mapping JSON attività→costo di default per il form "Nuovo incontro", compilato nel bundle frontend | `{"Dog Dance":20,"Mantrailing":20,"K9 Cross Training":25,"Educazione singolo":20,"Passeggiata":25,"Piscina":25}` | Build & Deploy |
+| `SSH_HOST` | Indirizzo della VPS su cui gira il cluster k8s | `203.0.113.10` | Infra, deploy |
+| `SSH_USER` | Utente SSH per connettersi alla VPS | `deploy` | Infra, deploy |
+| `DB_NAMESPACE` | Namespace dell'istanza Postgres da usare. Più club possono indicare lo stesso e condividerla; se l'istanza non esiste la crea Infra. Da questo valore le pipeline ricavano anche l'indirizzo del database | `postgres-prod` | Infra, deploy di backend e authorizer |
+| `APP_DOMAIN` | Hostname pubblico dell'app (Ingress di frontend **e** backend sullo stesso host, routing per path: `/api` → backend, `/` → frontend; anche base dell'indirizzo delle API in `/config.json`) | `romaasd.clubby.example.com` | deploy |
+| `AUTH_DOMAIN` | Hostname pubblico dell'authorizer (bare host). Il browser vi accede direttamente, e questo valore diventa l'issuer dei token (`https://` + questo valore): il backend lo confronta esattamente col claim `iss`, quindi un valore sbagliato fa fallire ogni verifica | `auth.romaasd.clubby.example.com` | deploy |
+| `TENANT_NAME` | Nome del club mostrato nell'app, servito al browser in `/config.json` | `ASD Roma` | deploy del frontend |
+| `INITIAL_ADMIN_EMAIL` | Email del primo amministratore, creato dall'authorizer solo se il database degli account è vuoto. Va impostata prima di lanciare Infra, che la verifica e la riporta nel riepilogo accanto alla password temporanea generata | `admin@tuodominio.it` | Infra, deploy dell'authorizer |
 
 ##### Opzionali (default applicato se non impostate)
 
 | Nome | Descrizione | Esempio | Default | Usata da |
 |------|-------------|---------|---------|----------|
-| `VITE_SELECT_ISTRUTTORI_VALUES` | Istruttori selezionabili nel form "Nuovo incontro" (lista separata da virgole, il primo è preselezionato), compilata nel bundle frontend. Non impostarla è una scelta valida: il campo "Istruttore" non appare né nel form né nella tabella incontri, e il Resoconto mostra un unico prospetto senza raggruppamenti — il caso dell'associazione con un solo istruttore | `Luca,Elisabetta,Marco` | *(vuota: campo non mostrato)* | Build & Deploy |
-| `SSH_PORT` | Porta SSH della VPS | `22` | `22` | Infra, Build & Deploy |
-| `DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Build & Deploy — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubby/k8s` | `/opt/clubby/k8s` | Build & Deploy |
-| `INFRA_DEPLOY_PATH` | Percorso remoto sulla VPS dove copiare i manifest di Infra (diverso da `DEPLOY_PATH` per non mischiarli) — **deve differire** da quello di `prod` se condividono la VPS | `/opt/clubby/infra` | `/opt/clubby/infra` | Infra |
-| `BACKEND_PORT` | Porta interna su cui ascolta il backend (Deployment + ConfigMap `PORT`) | `3000` | `3000` | Build & Deploy |
-| `POSTGRES_STORAGE_SIZE` | Dimensione del PVC per l'istanza Postgres condivisa | `5Gi` | `5Gi` | Infra |
-| `DB_PORT` | Porta Postgres | `5432` | `5432` | Build & Deploy |
-| `DB_NODE_PORT` | Porta `NodePort` su cui esporre Postgres sull'IP pubblico della VPS, per collegarsi da un client locale (DBeaver, ecc.) — feature opt-in, **nessun default**: se non impostata il Service `NodePort` non viene creato (o viene rimosso se era stato creato in precedenza). Vedi sezione "Connessione al DB da un client locale" valori possibili 30000-32767 | `30432` | `-` (disattivato) | Infra |
-| `DB_NAME` | Nome del database applicativo (il database `keycloak` è fisso, creato da Infra) | `clubby` | `clubby` | Infra, Build & Deploy |
-| `DB_USER` | Utente Postgres applicativo (condiviso anche da Keycloak) | `clubby` | `clubby` | Infra, Build & Deploy |
-| `KEYCLOAK_BOOTSTRAP_ADMIN` | Username dell'admin console Keycloak (bootstrap, non l'admin applicativo) | `admin` | `admin` | Infra |
-| `KEYCLOAK_START_MODE` | Comando di avvio di Keycloak (`args` del container): `start-dev` per sviluppo, `start` (build ottimizzata) per produzione — impostare `start-dev` solo sull'Environment `dev` | `start` | `start` | Infra |
-| `KEYCLOAK_REALM` | Realm Keycloak del tenant | `clubby` | `clubby` | Infra, Build & Deploy |
-| `KEYCLOAK_ADMIN_CLIENT_ID` | Client ID del client confidential backend | `clubby-backend` | `clubby-backend` | Build & Deploy |
-| `KEYCLOAK_CLIENT_ID` | Client ID pubblico SPA (compilato nel frontend come `VITE_KEYCLOAK_CLIENT_ID`) | `clubby-spa` | `clubby-spa` | Build & Deploy |
-| `VITE_THEME_PRIMARY` | Colore primario (bottoni, link attivi) | `#FF6B4A` | `#FF6B4A` | Build & Deploy |
-| `VITE_THEME_PRIMARY_TEXT` | Colore del testo sopra il colore primario | `#ffffff` | `#ffffff` | Build & Deploy |
-| `VITE_THEME_DANGER` | Colore per importi negativi/azioni distruttive | `#dc2626` | `#dc2626` | Build & Deploy |
-| `VITE_THEME_SUCCESS` | Colore per importi positivi/conferme | `#16a34a` | `#16a34a` | Build & Deploy |
-| `VITE_THEME_NAV_BG` | Colore di sfondo della barra di navigazione | `#2E2A26` | `#2E2A26` | Build & Deploy |
-| `VITE_THEME_NAV_TEXT` | Colore del testo/voci di menu sulla barra di navigazione, da abbinare a `VITE_THEME_NAV_BG` per restare leggibile | `#F5C36B` | `#F5C36B` | Build & Deploy |
-| `LOGO_FILE` | Nome del file SVG in `frontend/branding/` da usare come logo/favicon del tenant. **Non** ha prefisso `VITE_*`: non è letta dal browser ma da `scripts/apply-logo.mjs`, eseguito automaticamente da npm come hook `prebuild` prima di `vite build` | `asd1.svg` | `-` (resta il logo di default) | Build & Deploy |
+| `SSH_PORT` | Porta SSH della VPS | `22` | `22` | Infra, deploy |
+| `BACKEND_PORT` | Porta interna su cui ascolta il backend (Deployment + ConfigMap `PORT`) | `3000` | `3000` | deploy del backend |
+| `AUTH_PORT` | Porta interna su cui ascolta l'authorizer (Deployment + ConfigMap `PORT`) | `3001` | `3001` | deploy dell'authorizer |
+| `POSTGRES_STORAGE_SIZE` | Dimensione del PVC dell'istanza Postgres. Usata **solo quando Infra crea l'istanza**: su un'istanza esistente, condivisa con altri club, non viene riapplicata | `5Gi` | `5Gi` | Infra |
+| `DB_PORT` | Porta Postgres | `5432` | `5432` | deploy di backend e authorizer |
+| `DB_NODE_PORT` | Porta `NodePort` su cui esporre l'istanza Postgres sull'IP pubblico della VPS, per collegarsi da un client locale (DBeaver, ecc.) — feature opt-in, **nessun default**. Vale per tutta l'istanza, quindi per tutti i club che la condividono, e non viene mai rimossa in automatico (vedi "Connessione al DB da un client locale"). Valori possibili 30000-32767, unici nel cluster | `30432` | `-` (disattivato) | Infra |
+| `THEME_PRIMARY` | Colore primario (bottoni, link attivi) | `#FF6B4A` | `#FF6B4A` | deploy del frontend |
+| `THEME_PRIMARY_TEXT` | Colore del testo sopra il colore primario | `#ffffff` | `#ffffff` | deploy del frontend |
+| `THEME_DANGER` | Colore per importi negativi/azioni distruttive | `#dc2626` | `#dc2626` | deploy del frontend |
+| `THEME_SUCCESS` | Colore per importi positivi/conferme | `#16a34a` | `#16a34a` | deploy del frontend |
+| `THEME_NAV_BG` | Colore di sfondo della barra di navigazione | `#2E2A26` | `#2E2A26` | deploy del frontend |
+| `THEME_NAV_TEXT` | Colore del testo/voci di menu sulla barra di navigazione, da abbinare a `THEME_NAV_BG` per restare leggibile | `#F5C36B` | `#F5C36B` | deploy del frontend |
+| `LOGO_FILE` | Nome del file SVG in `frontend/public/branding/` da usare come logo e favicon del club. Il file deve essere nel repository (e quindi nell'immagine): il deploy si ferma se non esiste | `romaasd.svg` | `-` (resta il logo di default) | deploy del frontend |
+| `ENABLE_MODULE_TESSERAMENTO` | Attiva il modulo Tesseramento: pagina Tesseramenti, quota nel pannello Admin e API `/api/tesseramenti`. Attivo **solo** con il valore esatto `true` | `true` | `-` (modulo spento) | deploy di backend e frontend |
+| `ENABLE_MODULE_FATTURAZIONE` | Attiva il modulo Fatturazione: pagina Fatturazione e API `/api/fatturazione`. Attivo **solo** con il valore esatto `true` | `true` | `-` (modulo spento) | deploy di backend e frontend |
+
+I colori e il logo non richiedono una nuova build: cambiano al successivo deploy del frontend.
+
+Lo stesso vale per i moduli opzionali: si accendono e si spengono cambiando la Variable e rifacendo il
+deploy dei due moduli interessati (backend **e** frontend — il backend decide cosa serve, il frontend cosa
+mostrare). Il database resta completo in ogni caso: spegnere un modulo non cancella nulla e riaccenderlo
+ritrova tutto lo storico.
 
 Nessun secret aggiuntivo serve per il registry immagini: le pipeline si autenticano su `ghcr.io` con il
 `GITHUB_TOKEN` automatico di Actions (permesso `packages: write`, già configurato nei workflow).
@@ -750,22 +1009,28 @@ Due modi per collegarti da un client locale:
 Da terminale locale:
 ```bash
 ssh -i ~/.ssh/k9_deploy 5432:localhost:5432 deploy@<IP_VPS> \
-  'export KUBECONFIG=/home/deploy/.kube/config && kubectl port-forward -n <namespace> svc/clubby-postgres 5432:5432'
+  'export KUBECONFIG=/home/deploy/.kube/config && kubectl port-forward -n <namespace> svc/postgres 5432:5432'
 ```
-(sostituisci `<IP_VPS>` e `<namespace>`, es. `clubby-dev`; sostituisci `deploy` se il tuo `SSH_USER` è
-diverso). Lascia il terminale aperto finché usi il client — il tunnel resta attivo finché la sessione SSH è
-connessa.
+(sostituisci `<IP_VPS>` e `<namespace>` con il `DB_NAMESPACE` dell'istanza, es. `postgres-prod`;
+sostituisci `deploy` se il tuo `SSH_USER` è diverso). Lascia il terminale aperto finché usi il client — il
+tunnel resta attivo finché la sessione SSH è connessa.
 
-Poi in DBeaver: host `localhost`, porta `5432`, database/utente/password = `DB_NAME`/`DB_USER`/`DB_PASSWORD`
-dell'Environment (default `clubby`/`clubby`; la password è quella generata da Infra, vedi tabella
-sopra).
+Poi in DBeaver: host `localhost`, porta `5432`, database e utente `<env>-clubby` (o `<env>-auth` per gli
+account), password `DB_PASSWORD` (o `AUTH_DB_PASSWORD`) dell'Environment del club. Ogni utente vede solo il
+proprio database.
 
 #### 2. `NodePort` (esposizione pubblica sull'IP della VPS, opt-in)
 
 Imposta `DB_NODE_PORT` (es. `30432`) sull'Environment desiderato e rilancia **Infra**: crea un Service
 `NodePort` aggiuntivo (`k8s/templates/infra/postgres-nodeport.yaml`), raggiungibile su
-`<IP_VPS>:<DB_NODE_PORT>`. Se in seguito rimuovi/svuoti `DB_NODE_PORT` e rilanci Infra, il Service viene
-eliminato automaticamente.
+`<IP_VPS>:<DB_NODE_PORT>`. Il Service espone l'intera istanza, quindi i database di tutti i club che la
+condividono (ciascuno protetto dalla password del proprio utente). Non viene mai rimosso in automatico:
+su un'istanza condivisa, un club senza `DB_NODE_PORT` toglierebbe l'accesso configurato da un altro.
+Per rimuoverlo:
+
+```bash
+kubectl delete service postgres-external -n <DB_NAMESPACE>
+```
 
 ⚠️ **Attenzione**: un `NodePort` espone Postgres su tutte le interfacce della VPS, protetto solo dalla
 password del DB. Se lo attivi, filtra la porta via firewall (es. Hetzner Cloud Firewall) al tuo IP
@@ -780,8 +1045,8 @@ In DBeaver: host `<IP_VPS>` (o un DNS che punta allo stesso IP, es. `db-dev.club
 docker run --rm -it \
   -v "$(pwd)/scripts:/scripts" \
   -e DB_HOST=<IP_VPS> -e DB_PORT=<...> -e DB_PASSWORD=<...> \
-  -e KEYCLOAK_URL=https://auth-dev.clubby.click -e KEYCLOAK_ADMIN_USER=<...> -e KEYCLOAK_ADMIN_PASSWORD=<...> \
-  postgres:16-alpine \
+  -e AUTH_INTERNAL_URL=https://auth-dev.clubby.click -e AUTH_DB_PASSWORD=<...> \
+  postgres:18.3-alpine \
   sh -c "apk add --no-cache bash curl jq && bash /scripts/seed-demo-data.sh"
 ```
 
@@ -791,18 +1056,18 @@ npm run version -- [frontend|backend] [major|minor|patch]
 
 ## TODO
 
-- [ ] Configurare il DNS di `APP_DOMAIN`/`KEYCLOAK_HOST` verso l'IP pubblico della VPS
+- [ ] Configurare il DNS di `APP_DOMAIN` e `AUTH_DOMAIN` verso l'IP pubblico della VPS
       (necessario perché cert-manager possa risolvere la challenge HTTP-01 ed emettere i certificati)
 - [ ] Verificare l'emissione dei certificati partendo dal `ClusterIssuer` `letsencrypt-staging` prima di
       passare a `letsencrypt` (produzione), per non consumare il rate limit reale di Let's Encrypt
-- [ ] Lanciare la pipeline **Infra** e copiare i valori generati (`DB_PASSWORD`,
-      `KEYCLOAK_ADMIN_CLIENT_SECRET`, ecc.) nei GitHub Secrets/Variables prima del primo Build & Deploy
+- [ ] Lanciare la pipeline **Infra** e copiare i valori generati (`DB_PASSWORD`, `AUTH_DB_PASSWORD`,
+      `AUTH_JWT_PRIVATE_KEY`) nei GitHub Secrets prima del primo Build & Deploy
 - [ ] Prova pipeline (Build & Deploy, poi Tag)
 - [ ] Implementare api Test
-- [ ] Definire in dettaglio la strategia di backup di Postgres (CronJob `pg_dump` + storage esterno)
-- [ ] Hardening Keycloak in produzione: la modalità di avvio è già parametrica (`KEYCLOAK_START_MODE`, vedi
-      [k8s/templates/infra/keycloak-deployment.yaml](k8s/templates/infra/keycloak-deployment.yaml)) — resta
-      da impostare `KEYCLOAK_START_MODE=start` sull'Environment `prod` e verificare che Keycloak si avvii e
-      funzioni correttamente in modalità `start` (build ottimizzata, non di sviluppo) dietro Traefik
-- [ ] Pipeline di promozione in produzione eseguibile solo da main(namespace/ambiente separato da quello di sviluppo condiviso da
-      `main`/`feature/**`/`fix/**`)
+- [ ] Definire in dettaglio la strategia di backup di Postgres (CronJob `pg_dump` + storage esterno) —
+      include il database degli account, la cui perdita significherebbe rifare tutte le registrazioni
+- [ ] Valutare l'invio di email (SMTP): abiliterebbe la verifica dell'indirizzo alla registrazione e il
+      reset self-service della password, oggi possibile solo tramite un admin
+- [ ] Rotazione della chiave di firma dei token: il formato JWKS con `kid` la supporta già (il `kid`
+      deriva dal contenuto della chiave), ma manca la procedura per servire due chiavi durante la
+      transizione senza disconnettere tutti

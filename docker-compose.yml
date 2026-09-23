@@ -1,8 +1,6 @@
 # Infrastruttura per lo sviluppo locale
 # Avvio:      docker compose up -d
-# Poi:        cd backend && npm run dev
-#             cd authorizer && npm run dev
-#             cd frontend && npm run dev
+# Poi:        npm run dev
 #
 # Un'unica istanza Postgres con due database separati — clubby (applicativo) e
 # clubby_auth (credenziali) — con utenti distinti, come in produzione: il
@@ -11,7 +9,7 @@
 services:
 
   postgres:
-    image: postgres:16.3-alpine3.20
+    image: postgres:18.3-alpine
     container_name: clubby-postgres
     environment:
       POSTGRES_DB: clubby
@@ -20,7 +18,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       # Gli script in questa cartella vengono eseguiti in ordine alfabetico da
       # Postgres al PRIMO avvio, cioè solo su un volume dati vuoto: dopo un
       # `docker compose down -v` ripartono, altrimenti no.

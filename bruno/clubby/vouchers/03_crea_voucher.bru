@@ -17,8 +17,7 @@ auth:bearer {
 body:json {
   {
     "socio_id": "{{socio_id}}",
-    "saldo_iniziale": 100.00,
-    "note": "Voucher prepagato 10 sedute"
+    "ricarica": 100.00
   }
 }
 
@@ -30,7 +29,13 @@ script:post-response {
 }
 
 docs {
-  Solo admin. Crea un voucher prepagato per il socio.
-  saldo_iniziale deve essere >= 0.
+  Solo admin. Attiva il voucher prepagato di un socio (uno per socio).
+
+  ricarica (facoltativa, > 0): credito acquistato, registrato come primo
+  movimento di tipo ricarica e conteggiato in Fatturazione.
+
+  saldo_iniziale (facoltativo, default 0): solo per importare il credito di un
+  voucher già in uso prima di Clubby. Non è una ricarica e non viene fatturato.
+
   Salva automaticamente voucher_id per le richieste successive.
 }

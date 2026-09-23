@@ -1,0 +1,36 @@
+meta {
+  name: Rinnova tesseramento
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/tesseramenti
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "socio_id": "{{socio_id}}",
+    "data_rinnovo": "2026-09-15",
+    "scadenza": "2027-09-15",
+    "importo": 40.00
+  }
+}
+
+docs {
+  Solo admin. Registra un rinnovo del tesseramento.
+
+  scadenza (obbligatoria, YYYY-MM-DD): deve seguire la data del rinnovo e la
+  scadenza precedente del socio, altrimenti 400.
+  data_rinnovo (facoltativa): default oggi.
+  importo (facoltativo, >= 0): default la quota configurata in
+  /api/impostazioni.
+
+  La quota non viene scalata dal voucher: compare in Fatturazione.
+}

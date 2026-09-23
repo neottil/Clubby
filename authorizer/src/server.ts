@@ -1,9 +1,9 @@
 /**
  * Clubby Authorizer — servizio di autenticazione.
  *
- * Sostituisce Keycloak: registrazione, accesso, ruoli, gestione delle
- * password ed emissione dei token che il backend applicativo verifica tramite
- * l'endpoint JWKS pubblicato qui.
+ * Si occupa di registrazione, accesso, ruoli e gestione delle password, ed
+ * emette i token che il backend applicativo verifica tramite l'endpoint JWKS
+ * pubblicato qui.
  *
  * Avvio locale:  npm run dev
  * Avvio prod:    npm start   (node dist/server.js dopo build)
@@ -16,8 +16,8 @@ import './env.js';
 import http from 'http';
 import {
   registra, login, rinnova, logout, cambiaPassword, resetPasswordDaAdmin,
-  listaUtenti, getUtente, cambiaRuolo, cambiaAttivo, creaAdminIniziale,
-  pulisciTokenScaduti,
+  listaUtenti, listaIstruttori, getUtente, cambiaRuolo, cambiaAdmin, cambiaAttivo, creaAdminIniziale,
+  pulisciTokenScaduti, type Ruolo,
 } from './service/utenti.service.js';
 import { contestoDa, richiediAdmin, richiediPasswordDefinitiva } from './middleware/auth.js';
 import { consumaTentativo, azzeraTentativi } from './middleware/rateLimit.js';
@@ -52,11 +52,18 @@ function clientIp(req: http.IncomingMessage): string {
 
 function corpo(body: string): Record<string, unknown> {
   if (!body) return {};
+  let valore: unknown;
   try {
-    return JSON.parse(body);
+    valore = JSON.parse(body);
   } catch {
     throw new BadRequestError('Corpo della richiesta non è JSON valido');
   }
+  // null, un numero o un elenco sono JSON valido, ma leggerne i campi
+  // fallirebbe più avanti con un 500.
+  if (valore === null || typeof valore !== 'object' || Array.isArray(valore)) {
+    throw new BadRequestError('Il corpo della richiesta deve essere un oggetto JSON');
+  }
+  return valore as Record<string, unknown>;
 }
 
 async function instrada(
@@ -91,9 +98,6 @@ async function instrada(
     const sessione = await registra({
       email: dati.email as string,
       password: dati.password as string,
-      nome: dati.nome as string,
-      cognome: dati.cognome as string,
-      telefono: dati.telefono as string | undefined,
     });
     azzeraTentativi(`register:${ip}`);
     return created(sessione);
@@ -128,6 +132,15 @@ async function instrada(
     return ok(await getUtente(contesto.utenteId));
   }
 
+  // Elenco degli istruttori: accessibile a qualsiasi utente autenticato, non
+  // solo agli admin — serve a chiunque apra la pagina Incontri per vedere chi
+  // ha tenuto un incontro. Espone id ed email: il nominativo non è qui, lo
+  // aggiunge il backend leggendo la scheda socio collegata.
+  if (metodo === 'GET' && percorso === '/utenti/istruttori') {
+    await auth();
+    return ok(await listaIstruttori());
+  }
+
   if (metodo === 'POST' && percorso === '/auth/cambia-password') {
     const contesto = await auth();
     const dati = corpo(body);
@@ -155,7 +168,14 @@ async function instrada(
     const ruoloMatch = percorso.match(/^\/admin\/utenti\/([^/]+)\/ruolo$/);
     if (metodo === 'POST' && ruoloMatch) {
       const dati = corpo(body);
-      return ok(await cambiaRuolo(ruoloMatch[1], dati.ruolo as 'admin' | 'viewer', contesto.utenteId));
+      return ok(await cambiaRuolo(ruoloMatch[1], dati.ruolo as Ruolo));
+    }
+
+    // Privilegio di amministrazione, indipendente dal ruolo nel club.
+    const adminMatch = percorso.match(/^\/admin\/utenti\/([^/]+)\/admin$/);
+    if (metodo === 'POST' && adminMatch) {
+      const dati = corpo(body);
+      return ok(await cambiaAdmin(adminMatch[1], dati.admin === true, contesto.utenteId));
     }
 
     const attivoMatch = percorso.match(/^\/admin\/utenti\/([^/]+)\/attivo$/);
@@ -216,18 +236,27 @@ const server = http.createServer(async (req, res) => {
 });
 
 /**
- * Crea il primo amministratore all'avvio, se l'istanza è ancora vuota e le
- * credenziali sono state fornite. È il modo in cui nasce l'admin iniziale
- * senza che nessuna password resti scritta nel codice: le variabili le
- * fornisce il workflow Infra al primo deploy.
+ * Crea il primo amministratore all'avvio, se l'istanza è ancora vuota e i
+ * dati sono stati forniti. È il modo in cui nasce l'admin iniziale senza che
+ * nessuna password resti scritta nel codice.
+ *
+ * La password NON viene generata qui: la produce chi provisiona l'ambiente
+ * (il workflow Infra, o scripts/init-local.sh in locale) e la mostra nel
+ * proprio riepilogo. Generarla qui la renderebbe leggibile solo nel log del
+ * pod, che è il posto peggiore in cui far comparire una credenziale e il più
+ * scomodo da consultare.
  */
 async function avvioIniziale(): Promise<void> {
   const email = process.env.INITIAL_ADMIN_EMAIL;
   const password = process.env.INITIAL_ADMIN_PASSWORD;
-  if (!email || !password) return;
+
+  if (!email || !password) {
+    console.log('[authorizer] INITIAL_ADMIN_EMAIL/PASSWORD non impostate: nessun admin iniziale da creare.');
+    return;
+  }
 
   try {
-    const creato = await creaAdminIniziale(email, password);
+    const creato = await creaAdminIniziale({ email, password });
     console.log(creato
       ? `[authorizer] Admin iniziale creato: ${email} (dovrà cambiare la password al primo accesso)`
       : '[authorizer] Utenti già presenti: admin iniziale non creato.');

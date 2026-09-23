@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import PasswordInput from '../components/PasswordInput';
+import Avviso from '../components/Avviso';
 import { theme } from '../theme';
+
+/** Stessa soglia applicata dall'authorizer, vedi crypto/password.ts. */
+const LUNGHEZZA_MINIMA_PASSWORD = 10;
 
 /**
  * Cambio password obbligatorio, mostrato al posto dell'applicazione quando
@@ -39,30 +44,25 @@ export default function CambioPasswordPage() {
           Stai usando una password temporanea. Scegline una tua per continuare.
         </p>
 
-        {errore && <div style={styles.errore}>{errore}</div>}
+        {errore && <Avviso tipo='errore' messaggio={errore} onChiudi={() => setErrore('')} />}
 
         <label style={styles.label}>
           Password temporanea
-          <input
-            style={styles.input} type='password' autoComplete='current-password'
-            value={attuale} onChange={e => setAttuale(e.target.value)}
-          />
+          <PasswordInput value={attuale} onChange={setAttuale} autoComplete='current-password' />
         </label>
         <label style={styles.label}>
           Nuova password
-          <input
-            style={styles.input} type='password' autoComplete='new-password'
-            value={nuova} onChange={e => setNuova(e.target.value)}
-          />
+          <PasswordInput value={nuova} onChange={setNuova} autoComplete='new-password' />
         </label>
         <label style={styles.label}>
           Conferma nuova password
-          <input
-            style={styles.input} type='password' autoComplete='new-password'
-            value={conferma} onChange={e => setConferma(e.target.value)}
-          />
+          <PasswordInput value={conferma} onChange={setConferma} autoComplete='new-password' />
         </label>
-        <p style={styles.aiuto}>Almeno 10 caratteri.</p>
+        {/* Come nel form di registrazione, il promemoria sparisce quando il
+            requisito è soddisfatto invece di restare lì a rimproverare. */}
+        {nuova.length < LUNGHEZZA_MINIMA_PASSWORD && (
+          <p style={styles.aiuto}>Almeno {LUNGHEZZA_MINIMA_PASSWORD} caratteri.</p>
+        )}
 
         <button
           style={styles.button}

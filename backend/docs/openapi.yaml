@@ -1,0 +1,1978 @@
+openapi: 3.1.0
+info:
+  title: Clubby Backend
+  version: 1.0.0
+  description: |
+    API applicative di Clubby: soci, attività, istruttori, incontri, voucher,
+    tesseramenti, fatturazione e amministrazione.
+
+    **Autenticazione**: ogni endpoint sotto `/api` richiede un access token emesso
+    dall'authorizer (`Authorization: Bearer <token>`), verificato con le chiavi
+    pubbliche del suo JWKS. Gli account e i token sono documentati in
+    `authorizer/docs/openapi.yaml`.
+
+    **Chi può fare cosa**: ruolo nel club (`socio` o `istruttore`) e privilegio
+    `admin` sono indipendenti e arrivano nel claim `roles` del token.
+    - *admin*: tutto;
+    - *istruttore*: registra e modifica gli incontri che tiene, nelle attività a cui
+      è abilitato; vede i nominativi dei soci e i saldi dei voucher;
+    - *socio*: vede solo i propri dati, attraverso la scheda socio collegata al suo
+      account. Senza scheda collegata riceve elenchi vuoti.
+
+    **Importi**: i valori letti da colonne decimali del database (costi, importi,
+    saldi dei singoli oggetti) arrivano come stringhe con due decimali, es. `"25.00"`.
+    Sono invece numeri JSON il costo del listino (`costo_default`), la quota nelle
+    impostazioni e i totali degli elenchi paginati. In ingresso gli importi sono
+    numeri.
+
+    **Date**: le date di calendario sono stringhe `YYYY-MM-DD`; gli istanti
+    (`created_at`, `updated_at`) sono date-time ISO in UTC.
+
+    **Elenchi paginati** (incontri, movimenti, fatturazione): parametri `limit`
+    (default 25, massimo 200) e `offset`. `total` è il numero di righe che
+    soddisfano il filtro, non quelle restituite; i totali di importo coprono
+    l'intero risultato filtrato. Nella risposta `limit` riporta il valore
+    richiesto, oppure il numero di righe restituite se non è stato indicato.
+
+    **Errori**: sempre nella forma `{ "error": "messaggio" }`. Un corpo che non è un
+    oggetto JSON valido produce un 400.
+servers:
+  - url: http://localhost:3000
+    description: Sviluppo locale
+  - url: https://{appDomain}
+    description: Cluster (variabile APP_DOMAIN dell'Environment)
+    variables:
+      appDomain:
+        default: app.tuodominio.it
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Account
+  - name: Soci
+  - name: Attività
+  - name: Istruttori
+  - name: Incontri
+  - name: Voucher
+  - name: Tesseramenti
+    description: |
+      **Modulo opzionale.** Presenti solo dove la variabile `ENABLE_MODULE_TESSERAMENTO`
+      dell'ambiente vale `true`; altrove rispondono `404` come un percorso inesistente,
+      qualunque sia il ruolo di chi chiama.
+  - name: Fatturazione
+    description: |
+      **Modulo opzionale.** Presenti solo dove la variabile `ENABLE_MODULE_FATTURAZIONE`
+      dell'ambiente vale `true`; altrove rispondono `404` come un percorso inesistente,
+      qualunque sia il ruolo di chi chiama.
+  - name: Impostazioni
+  - name: Amministrazione
+    description: |
+      Gli endpoint sugli account sono inoltrati all'authorizer con il token dell'admin
+      che chiama: si applicano i controlli dell'authorizer sull'identità reale e i suoi
+      errori tornano con lo stesso codice. `utente_id` accetta sia l'id dell'account sia
+      la sua email.
+  - name: Servizio
+
+paths:
+  /api/auth/socio:
+    get:
+      tags: [Account]
+      summary: Scheda socio di chi chiama
+      description: Sola lettura. Il collegamento fra account e socio lo fa sempre un admin.
+      responses:
+        '200':
+          description: Scheda socio collegata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Socio'
+        '204':
+          description: L'account non è ancora collegato a una scheda socio
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+
+  /api/version:
+    get:
+      tags: [Servizio]
+      summary: Versione del backend in esecuzione
+      responses:
+        '200':
+          description: Tag dell'immagine deployata, `dev` in locale
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version:
+                    type: string
+                    example: 1.4.0
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+
+  /health:
+    get:
+      tags: [Servizio]
+      summary: Sonda di liveness
+      security: []
+      responses:
+        '200':
+          description: Servizio in esecuzione
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # ---------------------------------------------------------------------------
+  /api/soci:
+    get:
+      tags: [Soci]
+      summary: Elenco dei soci
+      description: |
+        - admin: tutti i soci, scheda completa;
+        - istruttore: tutti i soci, solo id e nominativo;
+        - socio: un elenco con la sola propria scheda, vuoto se non collegato.
+
+        Senza `limit`/`offset`: l'elenco completo in ordine di cognome e nome (per i menu
+        di scelta). Con `limit` o `offset`: una pagina, con ricerca e ordinamento applicati
+        dal database. L'istruttore cerca e ordina solo per cognome e nome.
+      parameters:
+        - $ref: '#/components/parameters/Q'
+        - name: sort
+          in: query
+          description: Solo con paginazione
+          schema:
+            type: string
+            enum: [cognome, nome, email, telefono, data_iscrizione]
+            default: cognome
+        - $ref: '#/components/parameters/Dir'
+        - name: senza_account
+          in: query
+          description: Solo con paginazione e solo admin; le schede non collegate ad alcun account
+          schema:
+            type: string
+            enum: ['1']
+        - $ref: '#/components/parameters/LimitElenco'
+        - $ref: '#/components/parameters/OffsetElenco'
+      responses:
+        '200':
+          description: Soci, completi o a pagina
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      anyOf:
+                        - $ref: '#/components/schemas/Socio'
+                        - $ref: '#/components/schemas/SocioRidotto'
+                  - allOf:
+                      - $ref: '#/components/schemas/PaginaBase'
+                      - type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              anyOf:
+                                - $ref: '#/components/schemas/Socio'
+                                - $ref: '#/components/schemas/SocioRidotto'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+    post:
+      tags: [Soci]
+      summary: Crea un socio
+      description: Solo admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuovoSocio'
+      responses:
+        '201':
+          description: Socio creato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Socio'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+
+  /api/soci/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Soci]
+      summary: Dettaglio di un socio
+      description: Admin, oppure il socio stesso.
+      responses:
+        '200':
+          description: Scheda socio
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Socio'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+    put:
+      tags: [Soci]
+      summary: Modifica un socio
+      description: |
+        Solo admin. Si aggiornano solo i campi presenti. L'email di un socio collegato
+        a un account non è modificabile: è quella con cui la persona accede.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModificaSocio'
+      responses:
+        '200':
+          description: Socio aggiornato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Socio'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+    delete:
+      tags: [Soci]
+      summary: Elimina un socio
+      description: Solo admin. Elimina anche incontri, voucher e tesseramenti del socio.
+      responses:
+        '204':
+          description: Socio eliminato
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  # ---------------------------------------------------------------------------
+  /api/attivita:
+    get:
+      tags: [Attività]
+      summary: Listino delle attività
+      description: |
+        - istruttore (non admin): solo le attività attive a cui è abilitato;
+        - admin: le attività attive, oppure tutte con `tutte=1`;
+        - socio: le attività attive.
+
+        In ordine di nome.
+      parameters:
+        - name: tutte
+          in: query
+          description: Con `1` include le attività disattivate. Considerato solo per gli admin.
+          schema:
+            type: string
+            enum: ['1']
+      responses:
+        '200':
+          description: Attività
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Attivita'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+    post:
+      tags: [Attività]
+      summary: Crea un'attività
+      description: Solo admin. Il nome è unico senza distinzione di maiuscole.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nome]
+              properties:
+                nome:
+                  type: string
+                costo_default:
+                  type: number
+                  minimum: 0
+                  default: 0
+                attiva:
+                  type: boolean
+                  default: true
+      responses:
+        '201':
+          description: Attività creata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attivita'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '409':
+          $ref: '#/components/responses/Conflitto'
+
+  /api/attivita/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [Attività]
+      summary: Modifica un'attività
+      description: Solo admin. Si aggiornano solo i campi presenti.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                nome:
+                  type: string
+                costo_default:
+                  type: number
+                  minimum: 0
+                attiva:
+                  type: boolean
+      responses:
+        '200':
+          description: Attività aggiornata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attivita'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+        '409':
+          $ref: '#/components/responses/Conflitto'
+    delete:
+      tags: [Attività]
+      summary: Elimina un'attività
+      description: Solo admin. Rifiutato se l'attività ha incontri collegati; in quel caso si può disattivarla.
+      responses:
+        '204':
+          description: Attività eliminata
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+        '409':
+          description: L'attività ha incontri collegati
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  # ---------------------------------------------------------------------------
+  /api/istruttori:
+    get:
+      tags: [Istruttori]
+      summary: Istruttori attivi
+      description: |
+        Account istruttore attivi, con il nominativo della scheda socio collegata
+        (`null` se non collegata). Per gli admin ogni riga include anche `attivita_ids`.
+      responses:
+        '200':
+          description: Istruttori, in ordine di email
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Istruttore'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '503':
+          $ref: '#/components/responses/AuthorizerIrraggiungibile'
+
+  /api/istruttori/{id}/attivita:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Id dell'account istruttore
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Istruttori]
+      summary: Abilitazioni di un istruttore
+      description: Solo admin.
+      responses:
+        '200':
+          description: Id delle attività abilitate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Abilitazioni'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+    put:
+      tags: [Istruttori]
+      summary: Sostituisce le abilitazioni di un istruttore
+      description: Solo admin. L'elenco inviato sostituisce per intero quello attuale.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Abilitazioni'
+      responses:
+        '200':
+          description: Abilitazioni salvate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Abilitazioni'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          description: Una delle attività indicate non esiste
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  # ---------------------------------------------------------------------------
+  /api/incontri:
+    get:
+      tags: [Incontri]
+      summary: Elenco paginato degli incontri
+      description: |
+        Quali incontri si ricevono:
+        - `ambito=istruttore`: quelli tenuti da chi chiama (vuoto se non è istruttore);
+        - `ambito=socio`: quelli a cui chi chiama ha partecipato come socio;
+        - senza `ambito`: tutti per un admin (filtrabili con `socio_id` e
+          `istruttore_id`), altrimenti come `ambito=socio`.
+
+        Per chi non è admin `socio_id` e `istruttore_id` sono ignorati. Filtri e
+        ordinamento sono applicati dal database; `totale_costo` somma l'intero
+        risultato filtrato.
+      parameters:
+        - name: ambito
+          in: query
+          schema:
+            type: string
+            enum: [socio, istruttore]
+        - name: socio_id
+          in: query
+          description: Solo admin, senza ambito
+          schema:
+            type: string
+            format: uuid
+        - name: istruttore_id
+          in: query
+          description: Solo admin, senza ambito
+          schema:
+            type: string
+            format: uuid
+        - name: q
+          in: query
+          description: |
+            Ricerca parola per parola: ogni parola deve comparire nel cognome, nel nome o
+            nell'attività, in qualunque ordine (es. "rossi mar" trova Mario Rossi)
+          schema:
+            type: string
+        - name: attivita_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Da'
+        - $ref: '#/components/parameters/A'
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [socioNome, data_incontro, attivita, istruttore, costo]
+            default: data_incontro
+        - name: dir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Pagina di incontri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaIncontri'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+    post:
+      tags: [Incontri]
+      summary: Registra un incontro
+      description: |
+        Admin o istruttore. Per un istruttore l'istruttore dell'incontro è sempre chi
+        chiama (`istruttore_id` inviato è ignorato) e deve essere abilitato all'attività.
+
+        Se il socio ha un voucher, nella stessa transazione viene creato un addebito pari
+        al costo, datato come l'incontro. L'addebito è rifiutato, e con lui l'incontro,
+        se il saldo del voucher è già negativo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuovoIncontro'
+      responses:
+        '201':
+          description: Incontro creato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incontro'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          description: Socio o attività non trovati
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  /api/incontri/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Incontri]
+      summary: Dettaglio di un incontro
+      description: Admin, il socio che vi ha partecipato o l'istruttore che lo ha tenuto.
+      responses:
+        '200':
+          description: Incontro
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incontro'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+    put:
+      tags: [Incontri]
+      summary: Modifica un incontro
+      description: |
+        Admin, oppure l'istruttore che lo ha tenuto, che non può cambiare `istruttore_id`
+        e può scegliere solo attività a cui è abilitato. Il socio non è modificabile.
+
+        Il movimento di addebito collegato segue le modifiche: importo se cambia il costo,
+        data e descrizione se cambiano data o attività.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModificaIncontro'
+      responses:
+        '200':
+          description: Incontro aggiornato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incontro'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+    delete:
+      tags: [Incontri]
+      summary: Elimina un incontro
+      description: Admin, oppure l'istruttore che lo ha tenuto. Elimina anche il movimento di addebito collegato.
+      responses:
+        '204':
+          description: Incontro eliminato
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  # ---------------------------------------------------------------------------
+  /api/voucher:
+    get:
+      tags: [Voucher]
+      summary: Elenco dei voucher con saldo
+      description: |
+        - admin e istruttore: tutti i voucher, filtrabili con `socio_id`;
+        - socio: solo il proprio (vuoto se non collegato), `socio_id` ignorato.
+
+        Senza `limit`/`offset`: l'elenco completo, dal più recente. Con `limit` o `offset`:
+        una pagina, dove ogni riga porta anche il nominativo del socio, con ricerca (sul
+        nominativo) e ordinamento applicati dal database.
+      parameters:
+        - name: socio_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: escludi_socio_id
+          in: query
+          description: Solo con paginazione; tutti i voucher tranne quello di questo socio
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Q'
+        - name: sort
+          in: query
+          description: Solo con paginazione
+          schema:
+            type: string
+            enum: [socioNome, data_creazione, saldo_iniziale, saldo_residuo]
+            default: socioNome
+        - $ref: '#/components/parameters/Dir'
+        - $ref: '#/components/parameters/LimitElenco'
+        - $ref: '#/components/parameters/OffsetElenco'
+      responses:
+        '200':
+          description: Voucher, completi o a pagina
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/Voucher'
+                  - allOf:
+                      - $ref: '#/components/schemas/PaginaBase'
+                      - type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              allOf:
+                                - $ref: '#/components/schemas/Voucher'
+                                - type: object
+                                  required: [nome, cognome]
+                                  properties:
+                                    nome:
+                                      type: string
+                                    cognome:
+                                      type: string
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+    post:
+      tags: [Voucher]
+      summary: Attiva il voucher di un socio
+      description: |
+        Solo admin, un voucher per socio. `ricarica` è il credito acquistato: diventa la
+        prima ricarica ("Acquisto voucher") e viene fatturata. `saldo_iniziale` è il
+        credito importato da un voucher già in uso prima di Clubby: non è una ricarica e
+        non viene fatturato.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuovoVoucher'
+      responses:
+        '201':
+          description: Voucher attivato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Voucher'
+        '400':
+          description: Dati non validi, oppure il socio ha già un voucher
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          description: Socio non trovato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  /api/voucher/{id}/movimenti:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Voucher]
+      summary: Movimenti di un voucher
+      description: Admin, oppure il socio titolare. Paginati, dal più recente.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Pagina di movimenti
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaMovimenti'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+    post:
+      tags: [Voucher]
+      summary: Registra una ricarica
+      description: |
+        Solo admin; datata `data_movimento`, oppure oggi. Registra credito acquistato dal socio: importo positivo,
+        conteggiato in Fatturazione. Gli addebiti non si inseriscono da qui: nascono solo
+        dagli incontri, e un `tipo` diverso da `ricarica` è rifiutato con 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuovoMovimento'
+      responses:
+        '201':
+          description: Movimento registrato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Movimento'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /api/voucher/{id}/ultima-ricarica:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Voucher]
+      summary: Ultima ricarica di un voucher
+      description: |
+        Admin, oppure il socio titolare — stesso confine dei movimenti: è una riga dello
+        storico contabile, non un saldo, quindi un istruttore non la vede.
+
+        Endpoint a sé e non due campi negli elenchi dei voucher: serve solo alla scheda del
+        proprio voucher, e negli elenchi verrebbe calcolato per ogni riga di ogni pagina.
+      responses:
+        '200':
+          description: Ultima ricarica
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UltimaRicarica'
+        '204':
+          description: Il voucher non ha ancora ricevuto ricariche
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  # ---------------------------------------------------------------------------
+  /api/tesseramenti:
+    get:
+      tags: [Tesseramenti]
+      summary: Situazione dei tesseramenti
+      description: |
+        Solo admin. Ogni socio con l'ultimo rinnovo.
+
+        Senza `limit`/`offset`: l'elenco completo in ordine di cognome e nome. Con `limit` o
+        `offset`: una pagina, con lo `stato` di ogni socio calcolato dal database (in scadenza
+        = entro 30 giorni), ricerca, filtro per stato e ordinamento, più `conteggi`: quanti
+        soci ci sono in ogni stato, su tutti i soci e non sulla pagina. Ordinando per stato,
+        prima gli scaduti, poi quelli in scadenza, gli attivi e i mai tesserati.
+      parameters:
+        - $ref: '#/components/parameters/Q'
+        - name: stato
+          in: query
+          description: Solo con paginazione
+          schema:
+            $ref: '#/components/schemas/StatoTesseramento'
+        - name: sort
+          in: query
+          description: Solo con paginazione
+          schema:
+            type: string
+            enum: [socioNome, ultimo_rinnovo, scadenza, stato, rinnovi]
+            default: socioNome
+        - $ref: '#/components/parameters/Dir'
+        - $ref: '#/components/parameters/LimitElenco'
+        - $ref: '#/components/parameters/OffsetElenco'
+      responses:
+        '200':
+          description: Situazione per socio, completa o a pagina
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/SituazioneTesseramento'
+                  - allOf:
+                      - $ref: '#/components/schemas/PaginaBase'
+                      - type: object
+                        required: [conteggi]
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              allOf:
+                                - $ref: '#/components/schemas/SituazioneTesseramento'
+                                - type: object
+                                  required: [stato]
+                                  properties:
+                                    stato:
+                                      $ref: '#/components/schemas/StatoTesseramento'
+                          conteggi:
+                            type: object
+                            required: [attivo, in_scadenza, scaduto, mai]
+                            properties:
+                              attivo:
+                                type: integer
+                              in_scadenza:
+                                type: integer
+                              scaduto:
+                                type: integer
+                              mai:
+                                type: integer
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+    post:
+      tags: [Tesseramenti]
+      summary: Registra un rinnovo
+      description: |
+        Solo admin. La nuova scadenza deve seguire la data del rinnovo e l'eventuale
+        scadenza precedente. Senza `importo` si usa la quota delle impostazioni.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuovoRinnovo'
+      responses:
+        '201':
+          description: Rinnovo registrato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tesseramento'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          description: Socio non trovato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  /api/tesseramenti/{socioId}:
+    parameters:
+      - name: socioId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Tesseramenti]
+      summary: Storico dei rinnovi di un socio
+      description: Solo admin. In ordine di scadenza, dalla più recente.
+      responses:
+        '200':
+          description: Rinnovi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tesseramento'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  # ---------------------------------------------------------------------------
+  /api/fatturazione:
+    get:
+      tags: [Fatturazione]
+      summary: Voci fatturate
+      description: |
+        Solo admin. Tre fonti: ricariche dei voucher, quote dei tesseramenti e incontri
+        non coperti da un voucher. Addebiti e saldi iniziali dei voucher sono esclusi.
+
+        Prima i tesseramenti, poi tutto il resto dalla data più recente.
+        `totale_importo` somma l'intero risultato filtrato.
+      parameters:
+        - name: socio_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Da'
+        - $ref: '#/components/parameters/A'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Pagina di voci
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaFatturazione'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+
+  # ---------------------------------------------------------------------------
+  /api/impostazioni:
+    get:
+      tags: [Impostazioni]
+      summary: Parametri dell'associazione
+      description: Solo admin.
+      responses:
+        '200':
+          description: Impostazioni
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Impostazioni'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+    put:
+      tags: [Impostazioni]
+      summary: Modifica i parametri dell'associazione
+      description: Solo admin. Si aggiornano solo i campi presenti.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Impostazioni'
+      responses:
+        '200':
+          description: Impostazioni aggiornate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Impostazioni'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+
+  # ---------------------------------------------------------------------------
+  /api/admin/users:
+    get:
+      tags: [Amministrazione]
+      summary: Account con il socio collegato
+      description: |
+        Solo admin. Account dell'authorizer, arricchiti con i dati della scheda socio collegata.
+
+        Senza `limit`/`offset`: l'elenco completo, in ordine di email. Con `limit` o `offset`:
+        una pagina, con in cima gli account non collegati e poi gli altri per nominativo, più
+        `da_collegare` (account attivi senza scheda, su tutti gli account). La paginazione è
+        fatta dal backend dopo aver unito account e soci, che stanno in due database diversi.
+      parameters:
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/LimitElenco'
+        - $ref: '#/components/parameters/OffsetElenco'
+      responses:
+        '200':
+          description: Account, completi o a pagina
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/UtenteAmministrabile'
+                  - allOf:
+                      - $ref: '#/components/schemas/PaginaBase'
+                      - type: object
+                        required: [da_collegare]
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/UtenteAmministrabile'
+                          da_collegare:
+                            type: integer
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '503':
+          $ref: '#/components/responses/AuthorizerIrraggiungibile'
+
+  /api/admin/associa-viewer:
+    post:
+      tags: [Amministrazione]
+      summary: Collega un account a un socio
+      description: |
+        Solo admin. Copia sul socio l'email dell'account. Rifiutato se l'account è già
+        collegato a un altro socio.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [socio_id, utente_id]
+              properties:
+                socio_id:
+                  type: string
+                  format: uuid
+                utente_id:
+                  $ref: '#/components/schemas/RiferimentoUtente'
+      responses:
+        '200':
+          $ref: '#/components/responses/Messaggio'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          description: Account o socio non trovati
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  /api/admin/associa-viewer/{socioId}:
+    delete:
+      tags: [Amministrazione]
+      summary: Scollega l'account da un socio
+      description: Solo admin. Lo stato dell'account non cambia.
+      parameters:
+        - name: socioId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Account scollegato
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /api/admin/ruolo:
+    post:
+      tags: [Amministrazione]
+      summary: Assegna il ruolo nel club
+      description: Solo admin. Chiude le sessioni dell'interessato.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [utente_id, ruolo]
+              properties:
+                utente_id:
+                  $ref: '#/components/schemas/RiferimentoUtente'
+                ruolo:
+                  type: string
+                  enum: [socio, istruttore]
+      responses:
+        '200':
+          $ref: '#/components/responses/Messaggio'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /api/admin/amministratore:
+    post:
+      tags: [Amministrazione]
+      summary: Concede o toglie il privilegio admin
+      description: Solo admin, non su sé stessi. Qualunque valore di `admin` diverso da `true` toglie il privilegio.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [utente_id, admin]
+              properties:
+                utente_id:
+                  $ref: '#/components/schemas/RiferimentoUtente'
+                admin:
+                  type: boolean
+      responses:
+        '200':
+          $ref: '#/components/responses/Messaggio'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /api/admin/promuovi:
+    post:
+      tags: [Amministrazione]
+      summary: Concede il privilegio admin
+      description: Scorciatoia di `/api/admin/amministratore` con `admin` a true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorpoUtente'
+      responses:
+        '200':
+          $ref: '#/components/responses/Messaggio'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /api/admin/retrocedi:
+    post:
+      tags: [Amministrazione]
+      summary: Toglie il privilegio admin
+      description: Scorciatoia di `/api/admin/amministratore` con `admin` a false; non su sé stessi.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorpoUtente'
+      responses:
+        '200':
+          $ref: '#/components/responses/Messaggio'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /api/admin/attivo:
+    post:
+      tags: [Amministrazione]
+      summary: Attiva o disattiva un account
+      description: |
+        Solo admin, non su sé stessi. La disattivazione chiude le sessioni; il
+        collegamento alla scheda socio resta. Qualunque valore di `attivo` diverso da
+        `true` disattiva.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [utente_id, attivo]
+              properties:
+                utente_id:
+                  $ref: '#/components/schemas/RiferimentoUtente'
+                attivo:
+                  type: boolean
+      responses:
+        '200':
+          $ref: '#/components/responses/Messaggio'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /api/admin/reset-password:
+    post:
+      tags: [Amministrazione]
+      summary: Azzera la password di un account
+      description: |
+        Solo admin. Restituisce una password temporanea, visibile solo in questa
+        risposta, da sostituire al primo accesso.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorpoUtente'
+      responses:
+        '200':
+          description: Password temporanea
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [password_temporanea]
+                properties:
+                  password_temporanea:
+                    type: string
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token emesso dall'authorizer.
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Da:
+      name: da
+      in: query
+      description: Data iniziale inclusa
+      schema:
+        type: string
+        format: date
+    A:
+      name: a
+      in: query
+      description: Data finale inclusa
+      schema:
+        type: string
+        format: date
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 25
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    LimitElenco:
+      name: limit
+      in: query
+      description: Con limit o offset la risposta è una pagina; senza, l'elenco completo
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 25
+    OffsetElenco:
+      name: offset
+      in: query
+      description: Con limit o offset la risposta è una pagina; senza, l'elenco completo
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Q:
+      name: q
+      in: query
+      description: Ricerca parola per parola, in qualunque ordine (solo con paginazione, tranne dove indicato)
+      schema:
+        type: string
+    Dir:
+      name: dir
+      in: query
+      description: Solo con paginazione
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+
+  responses:
+    RichiestaNonValida:
+      description: Dati mancanti o non validi
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    NonAutenticato:
+      description: Token mancante, non valido o scaduto
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    AccessoNegato:
+      description: Chi chiama non ha i permessi per questa operazione
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    NonTrovato:
+      description: Risorsa non trovata
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    Conflitto:
+      description: Esiste già un elemento con lo stesso nome
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    AuthorizerIrraggiungibile:
+      description: Il servizio di autenticazione non risponde
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Errore'
+    Messaggio:
+      description: Operazione eseguita
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [message]
+            properties:
+              message:
+                type: string
+
+  schemas:
+    Errore:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+      example:
+        error: Accesso riservato agli amministratori
+
+    Importo:
+      type: string
+      pattern: '^-?\d+\.\d{2}$'
+      description: Importo decimale serializzato come stringa
+      example: '25.00'
+
+    PaginaBase:
+      type: object
+      description: Campi comuni degli elenchi a pagine
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items: {}
+        total:
+          type: integer
+          description: Righe che soddisfano i filtri, non quelle restituite
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    StatoTesseramento:
+      type: string
+      enum: [attivo, in_scadenza, scaduto, mai]
+
+    RiferimentoUtente:
+      type: string
+      description: Id dell'account oppure la sua email
+      example: mario.rossi@example.com
+
+    CorpoUtente:
+      type: object
+      required: [utente_id]
+      properties:
+        utente_id:
+          $ref: '#/components/schemas/RiferimentoUtente'
+
+    Socio:
+      type: object
+      required: [id, nome, cognome, email, telefono, data_iscrizione, id_viewer, note, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        cognome:
+          type: string
+        email:
+          type: [string, 'null']
+        telefono:
+          type: [string, 'null']
+        data_iscrizione:
+          type: string
+          format: date
+        id_viewer:
+          type: [string, 'null']
+          format: uuid
+          description: Id dell'account collegato
+        note:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SocioRidotto:
+      type: object
+      description: Socio come lo vede un istruttore
+      required: [id, nome, cognome]
+      properties:
+        id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        cognome:
+          type: string
+
+    NuovoSocio:
+      type: object
+      required: [nome, cognome]
+      properties:
+        nome:
+          type: string
+        cognome:
+          type: string
+        email:
+          type: string
+        telefono:
+          type: string
+        data_iscrizione:
+          type: string
+          format: date
+          description: Omessa = oggi
+        note:
+          type: string
+
+    ModificaSocio:
+      type: object
+      minProperties: 1
+      properties:
+        nome:
+          type: string
+        cognome:
+          type: string
+        email:
+          type: string
+        telefono:
+          type: string
+        note:
+          type: string
+
+    Attivita:
+      type: object
+      required: [id, nome, costo_default, attiva, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        costo_default:
+          type: number
+          description: Costo proposto quando si registra un incontro
+        attiva:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Istruttore:
+      type: object
+      required: [id, email, nome, cognome]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id dell'account
+        email:
+          type: string
+        nome:
+          type: [string, 'null']
+        cognome:
+          type: [string, 'null']
+        attivita_ids:
+          type: array
+          description: Solo per gli admin
+          items:
+            type: string
+            format: uuid
+
+    Abilitazioni:
+      type: object
+      required: [attivita_ids]
+      properties:
+        attivita_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    Incontro:
+      type: object
+      required: [id, socio_id, data_incontro, attivita_id, istruttore_id, costo, note, note_markdown, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        socio_id:
+          type: string
+          format: uuid
+        data_incontro:
+          type: string
+          format: date
+        attivita_id:
+          type: string
+          format: uuid
+        attivita:
+          type: string
+          description: Nome dell'attività
+        istruttore_id:
+          type: [string, 'null']
+          format: uuid
+          description: Account dell'istruttore che lo ha tenuto
+        costo:
+          $ref: '#/components/schemas/Importo'
+        note:
+          type: [string, 'null']
+        note_markdown:
+          type: boolean
+          description: Le note sono in Markdown
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RigaIncontro:
+      description: Incontro in un elenco, con il nominativo del socio
+      allOf:
+        - $ref: '#/components/schemas/Incontro'
+        - type: object
+          required: [nome, cognome, attivita]
+          properties:
+            nome:
+              type: string
+            cognome:
+              type: string
+
+    NuovoIncontro:
+      type: object
+      required: [socio_id, data_incontro, attivita_id, costo]
+      properties:
+        socio_id:
+          type: string
+          format: uuid
+        data_incontro:
+          type: string
+          format: date
+        attivita_id:
+          type: string
+          format: uuid
+        istruttore_id:
+          type: [string, 'null']
+          format: uuid
+          description: Considerato solo per gli admin
+        costo:
+          type: number
+          minimum: 0
+        note:
+          type: string
+        note_markdown:
+          type: boolean
+          default: false
+
+    ModificaIncontro:
+      type: object
+      minProperties: 1
+      properties:
+        data_incontro:
+          type: string
+          format: date
+        attivita_id:
+          type: string
+          format: uuid
+        istruttore_id:
+          type: [string, 'null']
+          format: uuid
+          description: Considerato solo per gli admin
+        costo:
+          type: number
+          minimum: 0
+        note:
+          type: string
+        note_markdown:
+          type: boolean
+
+    PaginaIncontri:
+      type: object
+      required: [data, total, totale_costo, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RigaIncontro'
+        total:
+          type: integer
+        totale_costo:
+          type: number
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    Voucher:
+      type: object
+      required: [id, socio_id, data_creazione, saldo_iniziale, saldo_residuo, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        socio_id:
+          type: string
+          format: uuid
+        data_creazione:
+          type: string
+          format: date
+        saldo_iniziale:
+          $ref: '#/components/schemas/Importo'
+        saldo_residuo:
+          $ref: '#/components/schemas/Importo'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UltimaRicarica:
+      type: object
+      required: [data_movimento, importo]
+      properties:
+        data_movimento:
+          type: string
+          format: date
+        importo:
+          $ref: '#/components/schemas/Importo'
+
+    NuovoVoucher:
+      type: object
+      required: [socio_id]
+      properties:
+        socio_id:
+          type: string
+          format: uuid
+        ricarica:
+          type: number
+          exclusiveMinimum: 0
+          description: Credito acquistato
+        saldo_iniziale:
+          type: number
+          minimum: 0
+          default: 0
+          description: Credito importato da un voucher precedente a Clubby
+
+    Movimento:
+      type: object
+      required: [id, voucher_id, incontro_id, tipo, data_movimento, importo, descrizione, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        voucher_id:
+          type: string
+          format: uuid
+        incontro_id:
+          type: [string, 'null']
+          format: uuid
+          description: Incontro che ha generato l'addebito
+        tipo:
+          type: string
+          enum: [ricarica, addebito]
+        data_movimento:
+          type: string
+          format: date
+        importo:
+          $ref: '#/components/schemas/Importo'
+        descrizione:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+
+    NuovoMovimento:
+      type: object
+      required: [importo]
+      properties:
+        importo:
+          type: number
+          exclusiveMinimum: 0
+        descrizione:
+          type: string
+        data_movimento:
+          type: string
+          format: date
+          description: Data della ricarica; omessa = oggi
+        tipo:
+          type: string
+          enum: [ricarica]
+          description: Facoltativo; l'unico valore ammesso è `ricarica`
+
+    PaginaMovimenti:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Movimento'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    Tesseramento:
+      type: object
+      required: [id, socio_id, data_rinnovo, scadenza, importo, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        socio_id:
+          type: string
+          format: uuid
+        data_rinnovo:
+          type: string
+          format: date
+        scadenza:
+          type: string
+          format: date
+        importo:
+          $ref: '#/components/schemas/Importo'
+        created_at:
+          type: string
+          format: date-time
+
+    SituazioneTesseramento:
+      type: object
+      required: [socio_id, nome, cognome, ultimo_rinnovo, scadenza, rinnovi]
+      properties:
+        socio_id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        cognome:
+          type: string
+        ultimo_rinnovo:
+          type: [string, 'null']
+          format: date
+          description: null se il socio non è mai stato tesserato
+        scadenza:
+          type: [string, 'null']
+          format: date
+        rinnovi:
+          type: integer
+
+    NuovoRinnovo:
+      type: object
+      required: [socio_id, scadenza]
+      properties:
+        socio_id:
+          type: string
+          format: uuid
+        scadenza:
+          type: string
+          format: date
+        data_rinnovo:
+          type: string
+          format: date
+          description: Omessa = oggi
+        importo:
+          type: number
+          minimum: 0
+          description: Omesso = quota delle impostazioni
+
+    VoceFatturazione:
+      type: object
+      required: [id, tipo, data, socio_id, nome, cognome, descrizione, importo]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id della riga d'origine (movimento, tesseramento o incontro)
+        tipo:
+          type: string
+          enum: [ricarica, tesseramento, incontro]
+        data:
+          type: string
+          format: date
+        socio_id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        cognome:
+          type: string
+        descrizione:
+          type: string
+        importo:
+          $ref: '#/components/schemas/Importo'
+
+    PaginaFatturazione:
+      type: object
+      required: [data, total, totale_importo, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/VoceFatturazione'
+        total:
+          type: integer
+        totale_importo:
+          type: number
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    Impostazioni:
+      type: object
+      properties:
+        quota_tesseramento:
+          type: number
+          minimum: 0
+          description: Quota proposta a ogni rinnovo del tesseramento
+
+    UtenteAmministrabile:
+      type: object
+      required: [id, email, ruolo, admin, attivo, cambio_password_richiesto, ultimo_accesso, created_at, socio_id, nome, cognome, telefono]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        ruolo:
+          type: string
+          enum: [socio, istruttore]
+        admin:
+          type: boolean
+        attivo:
+          type: boolean
+        cambio_password_richiesto:
+          type: boolean
+        ultimo_accesso:
+          type: [string, 'null']
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        socio_id:
+          type: [string, 'null']
+          format: uuid
+          description: Scheda socio collegata
+        nome:
+          type: [string, 'null']
+        cognome:
+          type: [string, 'null']
+        telefono:
+          type: [string, 'null']

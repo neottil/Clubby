@@ -5,8 +5,7 @@
  * poter *verificare* i token ma non *emetterli*. Con una chiave condivisa,
  * chiunque comprometta il backend potrebbe fabbricare un token da admin; con
  * RS256 il backend riceve solo la chiave pubblica, esposta su
- * /.well-known/jwks.json — la stessa forma che aveva Keycloak, quindi la
- * verifica lato backend resta identica a prima nella sostanza.
+ * /.well-known/jwks.json nel formato standard JWKS.
  *
  * Due tipi di token:
  * - access token, JWT firmato, vita breve, non revocabile (lo si aspetta
@@ -53,9 +52,12 @@ function inizializzaChiavi(): void {
 
   if (pem?.trim()) {
     // Le chiavi passate via variabile d'ambiente arrivano spesso con "\n"
-    // letterali al posto degli a capo (è il modo più semplice di metterle in
-    // un .env su una riga sola): ripristinarli qui evita un errore di parsing
-    // che altrimenti sembrerebbe una chiave malformata.
+    // letterali al posto degli a capo: ripristinarli qui evita un errore di
+    // parsing che altrimenti sembrerebbe una chiave malformata.
+    //
+    // Ridondante per il .env locale, dove ci pensa già dotenv, ma necessario
+    // in cluster: lì la chiave arriva da un Secret come variabile d'ambiente
+    // vera, e nessuno la espande prima di noi.
     chiavePrivata = createPrivateKey(pem.replace(/\\n/g, '\n'));
     chiavePubblica = createPublicKey(chiavePrivata);
   } else {
@@ -85,11 +87,15 @@ async function calcolaKid(): Promise<string> {
     .slice(0, 32);
 }
 
+/**
+ * Contenuto dell'access token. Niente nome e cognome: l'anagrafica appartiene
+ * al socio, nel database applicativo, e metterne una copia nel token
+ * significherebbe distribuirne una versione che resta ferma fino alla scadenza
+ * anche dopo una correzione.
+ */
 export interface ClaimsUtente {
   sub: string;
   email: string;
-  nome: string;
-  cognome: string;
   roles: string[];
   /** True finché l'utente non ha sostituito una password temporanea. */
   cambio_password_richiesto: boolean;

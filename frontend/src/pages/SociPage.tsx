@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient } from '../api/client';
-import { useTableSort } from '../hooks/useTableSort';
+import { createApiClient, DIMENSIONE_PAGINA } from '../api/client';
+import { useElencoPaginato } from '../hooks/useElencoPaginato';
+import { useOrdinamento } from '../hooks/useOrdinamento';
+import { useValoreDifferito } from '../hooks/useValoreDifferito';
 import TableScroll from '../components/TableScroll';
-import { theme } from '../theme';
+import Avviso from '../components/Avviso';
+import CaricaAltri from '../components/CaricaAltri';
+import IntestazioneOrdinabile from '../components/IntestazioneOrdinabile';
+import { dataIso } from '../utils/formato';
+import { ui } from '../styles/ui';
 
 interface Socio {
   id: string;
@@ -22,8 +28,6 @@ export default function SociPage() {
   const { token, user } = useAuth();
   const api = createApiClient(token);
 
-  const [soci, setSoci]           = useState<Socio[]>([]);
-  const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');
   const [showForm, setShowForm]   = useState(false);
   const [editId, setEditId]       = useState<string | null>(null);
@@ -31,18 +35,15 @@ export default function SociPage() {
   const [saving, setSaving]       = useState(false);
   const [filter, setFilter]       = useState('');
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      setSoci(await api.getSoci());
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { load(); }, []);
+  // Elenco a pagine: ricerca e ordinamento li applica il backend, perché il
+  // browser ha solo le righe caricate.
+  const filtroCercato = useValoreDifferito(filter);
+  const { sortKey, sortDir, toggleSort, direzione } = useOrdinamento('cognome');
+  const elenco = useElencoPaginato<Socio>(
+    offset => api.getSociPagina({ q: filtroCercato || undefined, sort: sortKey, dir: sortDir, limit: DIMENSIONE_PAGINA, offset }),
+    [filtroCercato, sortKey, sortDir],
+    setError,
+  );
 
   const openCreate = () => { setForm(emptyForm); setEditId(null); setShowForm(true); };
   const openEdit   = (s: Socio) => {
@@ -60,7 +61,7 @@ export default function SociPage() {
         await api.createSocio(form);
       }
       setShowForm(false);
-      load();
+      elenco.ricarica();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -72,23 +73,22 @@ export default function SociPage() {
     if (!confirm('Eliminare questo socio?')) return;
     try {
       await api.deleteSocio(id);
-      load();
+      elenco.ricarica();
     } catch (e: any) {
       setError(e.message);
     }
   };
 
-  const filtered = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return soci;
-    return soci.filter(s =>
-      `${s.cognome} ${s.nome} ${s.email ?? ''} ${s.telefono ?? ''}`.toLowerCase().includes(q)
-    );
-  }, [soci, filter]);
+  // Un istruttore riceve dal backend il solo nominativo: recapiti e data di
+  // iscrizione non arrivano proprio, e mostrarne le colonne significherebbe
+  // tre trattini per riga.
+  const anagraficaVisibile = !!user?.isAdmin || !user?.isIstruttore;
+  const colonne: [keyof Socio, string][] = anagraficaVisibile
+    ? [['cognome', 'Cognome'], ['nome', 'Nome'], ['email', 'Email'],
+       ['telefono', 'Telefono'], ['data_iscrizione', 'Iscritto dal']]
+    : [['cognome', 'Cognome'], ['nome', 'Nome']];
 
-  const { sorted, toggleSort, sortIndicator } = useTableSort(filtered, { initialKey: 'cognome' });
-
-  if (loading) return <div style={styles.loading}>Caricamento...</div>;
+  if (!elenco.caricato && !error) return <div style={styles.loading}>Caricamento...</div>;
 
   return (
     <div style={styles.page}>
@@ -99,11 +99,11 @@ export default function SociPage() {
         )}
       </div>
 
-      {error && <div style={styles.error}>{error}</div>}
+      {error && <Avviso tipo='errore' messaggio={error} onChiudi={() => setError('')} />}
 
       <input
         style={styles.filterInput}
-        placeholder='Cerca per cognome, nome, email o telefono...'
+        placeholder={anagraficaVisibile ? 'Cerca per cognome, nome, email o telefono...' : 'Cerca per cognome o nome...'}
         value={filter}
         onChange={e => setFilter(e.target.value)}
       />
@@ -139,28 +139,27 @@ export default function SociPage() {
       )}
 
       <TableScroll>
-        <table style={styles.table}>
+        <table style={{ ...styles.table, opacity: elenco.loading ? 0.55 : 1 }} aria-busy={elenco.loading}>
           <thead>
             <tr>
-              {([
-                ['cognome', 'Cognome'], ['nome', 'Nome'], ['email', 'Email'],
-                ['telefono', 'Telefono'], ['data_iscrizione', 'Iscritto dal'],
-              ] as const).map(([key, label]) => (
-                <th key={key} style={styles.thSortable} onClick={() => toggleSort(key)}>
-                  {label}{sortIndicator(key)}
-                </th>
+              {colonne.map(([key, label]) => (
+                <IntestazioneOrdinabile key={key} etichetta={label} direzione={direzione(key)} onOrdina={() => toggleSort(key)} />
               ))}
               {user?.isAdmin && <th style={styles.th}>Azioni</th>}
             </tr>
           </thead>
           <tbody>
-            {sorted.map(s => (
+            {elenco.righe.map(s => (
               <tr key={s.id} style={styles.tr}>
                 <td style={styles.td}>{s.cognome}</td>
                 <td style={styles.td}>{s.nome}</td>
-                <td style={styles.td}>{s.email ?? '—'}</td>
-                <td style={styles.td}>{s.telefono ?? '—'}</td>
-                <td style={styles.td}>{String(s.data_iscrizione).split('T')[0]}</td>
+                {anagraficaVisibile && (
+                  <>
+                    <td style={styles.td}>{s.email ?? '—'}</td>
+                    <td style={styles.td}>{s.telefono ?? '—'}</td>
+                    <td style={styles.td}>{dataIso(s.data_iscrizione)}</td>
+                  </>
+                )}
                 {user?.isAdmin && (
                   <td style={styles.td}>
                     <button style={styles.btnSmall} onClick={() => openEdit(s)}>Modifica</button>
@@ -173,41 +172,21 @@ export default function SociPage() {
         </table>
       </TableScroll>
 
-      {sorted.length === 0 && !loading && (
+      {elenco.righe.length === 0 && !elenco.loading && (
         <p style={styles.empty}>{filter ? 'Nessun socio corrisponde alla ricerca.' : 'Nessun socio presente.'}</p>
       )}
+      <CaricaAltri caricati={elenco.righe.length} totale={elenco.totale} inCaricamento={elenco.loadingMore} onCaricaAltri={elenco.caricaAltri} />
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { padding: 32 },
+  ...ui,
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
   title: { margin: 0, fontSize: 22, fontWeight: 700 },
-  loading: { padding: 48, textAlign: 'center', color: '#666' },
-  error: { background: '#fee', color: theme.danger, padding: '10px 16px', borderRadius: 8, marginBottom: 16 },
-  btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600 },
-  btnSecondary: { background: '#e5e7eb', color: '#333', border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600 },
-  btnSmall: { background: '#e5e7eb', border: 'none', borderRadius: 6, padding: '8px 14px', minHeight: 40, cursor: 'pointer', fontSize: 13, marginRight: 6 },
-  btnDanger: { background: '#fee', color: theme.danger },
-  formCard: { background: '#fff', borderRadius: 12, padding: 24, marginBottom: 24, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' },
   formTitle: { margin: '0 0 16px', fontSize: 16, fontWeight: 700 },
-  field: { marginBottom: 14 },
-  label: { display: 'block', fontSize: 13, color: '#555', marginBottom: 4, fontWeight: 500 },
-  input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
-  textarea: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, minHeight: 80, boxSizing: 'border-box' },
-  formActions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 },
   filterInput: {
     width: '100%', maxWidth: 360, padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd',
     fontSize: 14, boxSizing: 'border-box', marginBottom: 16, display: 'block',
   },
-  table: { width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' },
-  th: { padding: '12px 16px', textAlign: 'left', background: '#f1f5f9', fontSize: 13, fontWeight: 600, color: '#555', borderBottom: '1px solid #e5e7eb' },
-  thSortable: {
-    padding: '12px 16px', textAlign: 'left', background: '#f1f5f9', fontSize: 13, fontWeight: 600, color: '#555',
-    borderBottom: '1px solid #e5e7eb', cursor: 'pointer', userSelect: 'none',
-  },
-  tr: { borderBottom: '1px solid #f1f5f9' },
-  td: { padding: '11px 16px', fontSize: 14, color: '#333' },
-  empty: { textAlign: 'center', color: '#999', marginTop: 32 },
 };

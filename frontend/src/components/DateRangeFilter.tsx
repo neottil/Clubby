@@ -1,4 +1,5 @@
 import { theme } from '../theme';
+import { dataIso } from '../utils/formato';
 
 interface DateRangeFilterProps {
   from: string;
@@ -65,10 +66,20 @@ export default function DateRangeFilter({ from, to, onFromChange, onToChange }: 
  * (lo stesso motivo per cui le colonne a db sono DATE).
  */
 export function isInDateRange(data: string, from: string, to: string): boolean {
-  const giorno = String(data).split('T')[0];
+  const giorno = dataIso(data);
   if (from && giorno < from) return false;
   if (to && giorno > to) return false;
   return true;
+}
+
+/**
+ * La data da passare al backend, o undefined finché non è completa. Mentre si
+ * digita l'anno il campo produce date valide ma assurde ("0002-09-15", poi
+ * "0020-09-15"...): interrogare il database a ogni cifra svuoterebbe la tabella
+ * per un attimo a ogni tasto.
+ */
+export function dataCompleta(valore: string): string | undefined {
+  return /^[1-9]\d{3}-\d{2}-\d{2}$/.test(valore) ? valore : undefined;
 }
 
 const styles: Record<string, React.CSSProperties> = {

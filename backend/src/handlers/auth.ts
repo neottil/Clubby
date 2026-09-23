@@ -1,63 +1,45 @@
 /**
- * Handler: POST /api/auth/register
- * Ruoli: qualsiasi JWT valido (registrazione autonoma post-login)
+ * Handler: GET /api/auth/socio
+ * Ruoli: qualsiasi token valido
  *
- * Dopo la registrazione o il primo accesso sull'authorizer, il frontend
- * chiama questo endpoint per creare il record socio corrispondente e legarlo
- * all'account (socio.id_viewer = `sub` del token).
+ * Dice a chi chiama qual è la sua scheda socio, se ne ha una. Sola lettura:
+ * non crea nulla e non collega nulla.
  *
- * Il ruolo non viene toccato qui: gli account nascono già come viewer
- * nell'authorizer, che è l'unico proprietario dei ruoli.
+ * Il collegamento fra account e socio è **sempre** un'operazione manuale di un
+ * amministratore. C'è stato un aggancio automatico basato sull'email, ed è
+ * stato tolto: l'indirizzo di un socio lo digita un admin e nessuno lo
+ * verifica, quindi chi ne conoscesse uno poteva registrarsi con quello ed
+ * ereditare voucher e incontri di un altro. E due schede che condividono un
+ * indirizzo — due fratelli iscritti con l'email del genitore, tutt'altro che
+ * raro — rendevano l'abbinamento un'ipotesi, non un fatto.
+ *
+ * Il frontend la usa per sapere se mostrare l'avviso "account non ancora
+ * collegato".
  */
 
 import {
   type RequestEvent,
   type ResponseResult,
   getAuthContext,
-  BadRequestError,
+  NotFoundError,
 } from '../middleware/auth.js';
-import { ok, created, errorResponse } from '../middleware/response.js';
-import { getSocioByViewerId, createSocio } from '../service/soci.service.js';
-import { associaViewer } from '../service/soci.service.js';
+import { ok, noContent, errorResponse } from '../middleware/response.js';
+import { getSocioByViewerId } from '../service/soci.service.js';
 
 export const handler = async (
   event: RequestEvent
 ): Promise<ResponseResult> => {
   try {
     const auth = getAuthContext(event);
-    const method = event.requestContext.http.method;
 
-    // Solo POST è supportato
-    if (method !== 'POST') {
-      return errorResponse({ statusCode: 404, message: 'Route non trovata' });
+    if (event.requestContext.http.method !== 'GET') {
+      return errorResponse(new NotFoundError('Route non trovata'));
     }
 
-    // Controlla se esiste già un socio associato a questo utente (idempotente)
-    const existing = await getSocioByViewerId(auth.userId);
-    if (existing) {
-      return ok(existing);
-    }
-
-    // Parsing body
-    const body = JSON.parse(event.body ?? '{}');
-    if (!body.nome?.trim() || !body.cognome?.trim()) {
-      throw new BadRequestError('nome e cognome sono obbligatori');
-    }
-
-    const email = body.email?.trim() || auth.email || null;
-
-    // 1. Crea il record socio nel DB
-    const socio = await createSocio({
-      nome: body.nome.trim(),
-      cognome: body.cognome.trim(),
-      email,
-      telefono: body.telefono?.trim() || undefined,
-    });
-
-    // 2. Lega il socio all'account (imposta id_viewer col `sub` del token)
-    const socioConViewer = await associaViewer(socio.id, auth.userId);
-
-    return created(socioConViewer);
+    const socio = await getSocioByViewerId(auth.userId);
+    // 204 e non un errore: non avere ancora una scheda collegata è uno stato
+    // normale, in attesa che un admin faccia l'abbinamento.
+    return socio ? ok(socio) : noContent();
   } catch (error) {
     return errorResponse(error);
   }

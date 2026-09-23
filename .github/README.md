@@ -36,9 +36,13 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 |---|---|---|
 | [`infra.yml`](workflows/infra.yml) | Manuale (`workflow_dispatch`) | Provisiona/aggiorna infrastruttura condivisa e a lunga vita: namespace k8s, database, identity provider. Da lanciare una tantum per ambiente. |
 | [`build-deploy.yml`](workflows/build-deploy.yml) | Push su branch di sviluppo, o manuale (input `force_all`) | Builda le immagini Docker cambiate e le deploya in **sviluppo**, in modo condizionale e indipendente per componente. Con `force_all` ribuilda e rideploya tutto, ignorando il diff. |
-| [`deploy-backend.yml`](workflows/deploy-backend.yml) / [`deploy-frontend.yml`](workflows/deploy-frontend.yml) | Solo `workflow_call` (riutilizzabile) | Applica i manifest k8s di un componente, verifica il rollout. Chiamati sia da `build-deploy.yml` (sviluppo) sia da `promote.yml` (produzione). |
+| [`deploy-backend.yml`](workflows/deploy-backend.yml) / [`deploy-frontend.yml`](workflows/deploy-frontend.yml) / [`deploy-authorizer.yml`](workflows/deploy-authorizer.yml) | Solo `workflow_call` (riutilizzabile) | Applica i manifest k8s di un componente, verifica il rollout. Chiamati sia da `build-deploy.yml` (sviluppo) sia da `promote.yml` (club). |
 | [`tag.yml`](workflows/tag.yml) | Manuale | Promuove lo stato attualmente deployato a versione "reale" (tag Git, ri-tag Docker, GitHub Release), senza rebuild. **Non deploya nulla.** |
-| [`promote.yml`](workflows/promote.yml) | Manuale (con input `<scope>_version`) | Deploya in **produzione** la versione indicata (già taggata da `tag.yml`). **Non tagga né rilascia nulla.** |
+| [`promote.yml`](workflows/promote.yml) | Manuale (con input `environment` e `<scope>_version`) | Deploya la versione indicata (già taggata da `tag.yml`) nell'**ambiente scelto**, cioè in un club. **Non tagga né rilascia nulla.** |
+
+Namespace, nomi dei database e cartelle sulla VPS di un ambiente non sono Variables: li ricava dal nome
+dell'Environment la composite action [`actions/ambiente`](actions/ambiente/action.yml), usata da Infra e
+da tutti i workflow di deploy.
 | [`cleanup-build-tags.yml`](workflows/cleanup-build-tags.yml) | Manuale, o automatico dopo `tag.yml` | Ripulisce i tag Git e le immagini Docker superate di un branch. |
 
 Separazione di responsabilità: **Infra** gestisce ciò che ha un ciclo di vita lungo e stato persistente
@@ -53,12 +57,13 @@ comportare un deploy involontario in produzione.
 ### 1. GitHub Environments come "ambiente target"
 
 Ogni [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)
-(`dev`, `prod`, ...) ha il proprio set di Variables/Secrets. Un job vi si aggancia con:
+(qui `development` e uno per club, es. `romaasd`) ha il proprio set di Variables/Secrets. Un job vi si
+aggancia con:
 
 ```yaml
 jobs:
   mio_job:
-    environment: dev          # fisso: questo job usa sempre le Variables/Secrets di "dev"
+    environment: development  # fisso: questo job usa sempre le Variables/Secrets di "development"
 ```
 
 oppure, per un workflow che deve poter agire su ambienti diversi a seconda di chi lo lancia:
@@ -67,20 +72,23 @@ oppure, per un workflow che deve poter agire su ambienti diversi a seconda di ch
 on:
   workflow_dispatch:
     inputs:
-      env:
+      environment:
         type: environment      # GitHub mostra un menu a tendina con gli Environment REALMENTE
         required: true          # configurati sul repo (niente elenco `choice` scritto a mano
                                  # che può disallinearsi)
 jobs:
   mio_job:
-    environment: ${{ inputs.env }}
+    environment: ${{ inputs.environment }}
 ```
 
 Non serve creare l'Environment a mano in anticipo: **GitHub lo crea automaticamente, vuoto**, al primo run
-che lo referenzia — va solo popolato di Variables/Secrets dopo.
+che lo referenzia — va solo popolato di Variables/Secrets dopo. Con un input di tipo `environment`
+invece l'Environment deve già esistere, altrimenti non compare nel menu. In entrambi i casi un Environment
+vuoto non dà errore da solo: una variabile mancante vale stringa vuota. Per questo ogni workflow di questo
+repo controlla come primo passo le Variables/Secrets obbligatorie e si ferma con l'elenco di quelle mancanti.
 
 Vantaggi rispetto a Variables/Secrets a livello di repository: isolamento netto tra ambienti (impossibile
-leggere per errore un DB_HOST di prod da un job agganciato a dev), e possibilità di aggiungere in futuro
+leggere per errore la password del database di un club da un job agganciato a `development`), e possibilità di aggiungere in futuro
 protection rule (reviewer richiesti, branch permessi) senza toccare i workflow.
 
 ### 2. Build/deploy condizionali via tag Git
@@ -169,13 +177,13 @@ deploy-backend:
 ```
 
 ```yaml
-# promote.yml — produzione, versione reale ricevuta come input
-deploy-production-backend:
+# promote.yml — ambiente e versione reale ricevuti come input
+deploy-backend:
   needs: validate
   if: inputs.backend_version != ''
   uses: ./.github/workflows/deploy-backend.yml
   with:
-    environment: production
+    environment: ${{ inputs.environment }}
     image_tag: ${{ needs.validate.outputs.backend_image_tag }}
   secrets: inherit
 ```
@@ -205,8 +213,8 @@ ambiente di produzione fisicamente separato la promozione a versione reale e il 
   (`docker buildx imagetools create --tag <img>:X.Y.Z <img>:<data-tag-esistente>`), crea/aggiorna una GitHub
   Release per quella versione. **Non deploya nulla.**
 - **`promote.yml`** — riceve la versione da deployare come **input esplicito** (non un `run_id`/lookup di
-  run specifica) e fa **solo** il deploy, chiamando il workflow riutilizzabile (pattern 4) con
-  `environment: production`. **Non decide nulla, non tagga nulla.**
+  run specifica), insieme all'ambiente di destinazione, e fa **solo** il deploy, chiamando il workflow
+  riutilizzabile (pattern 4) con quell'ambiente. **Non decide nulla, non tagga nulla.**
 
 I due possono succedere in momenti diversi (tagga oggi, promuovi la settimana prossima) e `promote.yml` può
 essere rilanciato in ogni momento con la stessa versione per risincronizzare la produzione, senza dover
@@ -364,17 +372,30 @@ Problemi reali incontrati costruendo questi workflow, non ovvi in anticipo:
   ConfigMap). Corollario k8s: quel file va montato come **directory**, non con `subPath`, altrimenti kubelet
   non lo aggiorna più quando il ConfigMap cambia.
 
+- **Un flag che accende una funzionalità non sta in un ConfigMap letto con `envFrom`.** Le variabili
+  prese da `envFrom` non si aggiornano in un container già avviato, e un deploy che cambia solo il
+  ConfigMap lascia la spec del Deployment identica: nessun rollout, quindi il pod continua a girare con
+  il valore vecchio, e il flag sembra ignorato. I flag dei moduli opzionali
+  (`ENABLE_MODULE_TESSERAMENTO`, `ENABLE_MODULE_FATTURAZIONE`) sono perciò scritti come `env:` nel
+  Deployment: cambiarli cambia la spec e il rollout parte da solo. Corollario: lo stesso flag serve a
+  due scope diversi (backend per rifiutare le API, frontend per non mostrare le pagine) e viene letto
+  dalla **stessa** Variable dell'Environment in entrambi i workflow di deploy — un solo posto da
+  cambiare, nessun rischio di disallineamento fra ciò che si vede e ciò che risponde.
+
 ## Workflow, uno per uno
 
 ### `infra.yml`
 
-**Trigger**: manuale, con input `env` (tipo `environment` — menu a tendina sugli Environment realmente
-configurati), più eventuali parametri di bootstrap (qui: email/password del primo utente admin).
+**Trigger**: manuale, con input `environment` (tipo `environment` — menu a tendina sugli Environment
+realmente configurati). I dati di bootstrap (qui: email del primo utente admin) stanno fra le Variables
+dell'Environment e non negli input: chiesti al lancio andrebbero riscritti a ogni run, e potrebbero non
+coincidere con quelli letti dai deploy.
 
-**Cosa fa**: applica in modo idempotente (`kubectl apply`, mai `create` puro) l'infrastruttura di base:
-namespace, database condiviso, identity provider, più uno o più Job k8s one-shot per l'inizializzazione
-applicativa (qui: creazione realm/client/ruoli OIDC). Genera/riusa i segreti necessari (pattern 7) e li
-stampa nel riepilogo della run (con `if: always()`, anche in caso di fallimento parziale).
+**Cosa fa**: applica in modo idempotente l'infrastruttura di un ambiente: il namespace dell'applicazione,
+l'istanza Postgres del namespace `DB_NAMESPACE` **solo se non esiste** (può essere condivisa da più club,
+e un ambiente non deve poterla riconfigurare per tutti), e sull'istanza i database e gli utenti del club
+con i loro schemi. Genera/riusa i segreti necessari (pattern 7) e li stampa nel riepilogo della run (con
+`if: always()`, anche in caso di fallimento parziale).
 
 **Assunzioni**: presuppone che il cluster k8s di base (qui: k3s + Traefik + cert-manager) sia già stato
 provisionato **manualmente una volta** sulla VPS (script separato, non-CI, eseguito da un operatore con
@@ -418,12 +439,12 @@ rebuild. **Non deploya.** Se almeno uno scope è stato promosso, triggera `clean
 
 ### `promote.yml`
 
-**Trigger**: manuale, con input `backend_version`/`frontend_version` (entrambi opzionali, ma almeno uno
-richiesto).
+**Trigger**: manuale, con input `environment` (il club) e `backend_version`/`frontend_version`/
+`authorizer_version` (opzionali, ma almeno uno richiesto).
 
-**Cosa fa**: vedi pattern 5. Valida che i tag di versione esistano, poi deploya in produzione tramite
-`deploy-backend.yml`/`deploy-frontend.yml`. **Non tagga, non crea Release.** Sicuro da rilanciare più volte
-con lo stesso input.
+**Cosa fa**: vedi pattern 5. Rifiuta `development` (gestito da `build-deploy.yml`), valida che i tag di
+versione esistano, poi deploya nell'ambiente scelto tramite i workflow riutilizzabili. **Non tagga, non
+crea Release.** Sicuro da rilanciare più volte con lo stesso input.
 
 ### `cleanup-build-tags.yml`
 

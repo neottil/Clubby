@@ -48,13 +48,15 @@ async function chiama<T>(percorso: string, options: RequestInit = {}, token?: st
   return res.json();
 }
 
+/**
+ * Account come lo espone l'authorizer: credenziali e ruolo. Il nominativo non
+ * è qui — appartiene alla scheda socio, servita dal backend applicativo.
+ */
 export interface UtenteAuth {
   id: string;
   email: string;
-  nome: string;
-  cognome: string;
-  telefono: string | null;
-  ruolo: 'admin' | 'viewer';
+  ruolo: 'socio' | 'istruttore';
+  admin: boolean;
   attivo: boolean;
   cambio_password_richiesto: boolean;
 }
@@ -66,10 +68,12 @@ export interface Sessione {
   utente: UtenteAuth;
 }
 
+/**
+ * Registrarsi richiede solo le credenziali: nome, cognome e telefono sono
+ * della scheda socio, che l'associazione censisce. Se ne esiste già una con
+ * questa email, il collegamento avviene da solo.
+ */
 export interface DatiRegistrazione {
-  nome: string;
-  cognome: string;
-  telefono: string;
   email: string;
   password: string;
 }

@@ -24,13 +24,22 @@ CREATE TABLE IF NOT EXISTS utente (
   -- Password codificata come "scrypt$N$r$p$salt$hash" (vedi crypto/password.ts).
   -- Mai in chiaro, e mai restituita da nessun endpoint.
   password_hash    TEXT NOT NULL,
-  nome             VARCHAR(100) NOT NULL,
-  cognome          VARCHAR(100) NOT NULL,
-  telefono         VARCHAR(50),
-  -- Ruolo applicativo, unico per utente: sostituisce i realm roles di
-  -- Keycloak. Il vincolo CHECK evita che un valore diverso da questi due
-  -- finisca nei JWT e venga interpretato come "non admin" per sbaglio.
-  ruolo            VARCHAR(20) NOT NULL DEFAULT 'viewer' CHECK (ruolo IN ('admin', 'viewer')),
+  -- Nome, cognome e telefono NON stanno qui: l'anagrafica delle persone vive
+  -- nel database applicativo, sulla riga del socio, ed è quella l'unica fonte.
+  -- Tenerne una copia anche qui significava due verità scrivibili per gli
+  -- stessi fatti, destinate a divergere. Questo servizio custodisce le
+  -- credenziali e il ruolo, nient'altro.
+  -- Ruolo nel club, uno per account:
+  --   socio      partecipa agli incontri
+  --   istruttore tiene incontri, e può a sua volta partecipare come socio a
+  --              quelli di un altro istruttore
+  -- Il vincolo CHECK evita che un valore sconosciuto finisca nei token e venga
+  -- interpretato in modo imprevisto.
+  ruolo            VARCHAR(20) NOT NULL DEFAULT 'socio' CHECK (ruolo IN ('socio', 'istruttore')),
+  -- Privilegio di amministrare l'applicazione (account, listino, abilitazioni,
+  -- configurazione). È indipendente dal ruolo nel club: chi amministra può
+  -- essere tanto un socio quanto un istruttore.
+  admin           BOOLEAN NOT NULL DEFAULT FALSE,
   attivo           BOOLEAN NOT NULL DEFAULT TRUE,
   -- Impostato quando un admin azzera la password: l'utente entra con quella
   -- temporanea ma non può fare altro finché non la cambia.
@@ -40,10 +49,14 @@ CREATE TABLE IF NOT EXISTS utente (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Il login cerca sempre per email: senza indice sarebbe una scansione della
--- tabella a ogni tentativo (il vincolo UNIQUE ne crea già uno, questo è per
--- la ricerca dell'elenco admin ordinato).
-CREATE INDEX IF NOT EXISTS idx_utente_cognome_nome ON utente(cognome, nome);
+-- Il login cerca per email, e il vincolo UNIQUE fornisce già l'indice che
+-- serve. L'elenco per il pannello admin ordina per email, che usa lo stesso
+-- indice: nessun indice aggiuntivo necessario.
+
+-- L'elenco degli istruttori viene letto a ogni apertura del form "Nuovo
+-- incontro" e dal Resoconto: senza indice sarebbe una scansione completa
+-- della tabella utenti ogni volta.
+CREATE INDEX IF NOT EXISTS idx_utente_istruttori ON utente(ruolo) WHERE ruolo = 'istruttore';
 
 -- ============================================================
 -- Tabella: refresh_token

@@ -22,5 +22,9 @@ body:json {
 }
 
 docs {
-  Solo admin. Campi modificabili: data_incontro, costo, note.
+  Admin e istruttori, ma un istruttore può intervenire solo sugli incontri che
+  ha tenuto lui (altrimenti 403) e non può cambiarne l'attribuzione.
+
+  Campi modificabili: data_incontro, attivita_id, istruttore_id, costo, note,
+  note_markdown.
 }

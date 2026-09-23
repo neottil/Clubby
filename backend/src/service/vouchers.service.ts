@@ -1,4 +1,6 @@
-import { query, type QueryFn } from '../db/client.js';
+import { query, withTransaction, type QueryFn } from '../db/client.js';
+import { limiteEOffset, direzione } from '../util/paginazione.js';
+import { condizioniRicerca } from '../util/ricerca.js';
 import { NotFoundError, BadRequestError } from '../middleware/auth.js';
 import { getSocioById } from './soci.service.js';
 
@@ -12,10 +14,20 @@ export interface Voucher {
   updated_at: string;
 }
 
+/**
+ * Natura di un movimento (vedi la colonna in schema.sql):
+ *   ricarica   credito acquistato dal socio (positivo), fatturato
+ *   addebito   consumo del credito (negativo): l'incontro che lo ha generato,
+ *              se c'è, sta in incontro_id. Non viene fatturato, perché è già
+ *              coperto dalla ricarica che lo paga.
+ */
+export type TipoMovimento = 'ricarica' | 'addebito';
+
 export interface MovimentoVoucher {
   id: string;
   voucher_id: string;
   incontro_id: string | null;
+  tipo: TipoMovimento;
   data_movimento: string;
   importo: number;
   descrizione: string | null;
@@ -24,13 +36,26 @@ export interface MovimentoVoucher {
 
 export interface CreateVoucherInput {
   socio_id: string;
-  saldo_iniziale: number;
+  /**
+   * Credito importato da un voucher già in uso prima di Clubby, per la sola
+   * configurazione iniziale. Omesso = 0. Non è una ricarica e non viene
+   * fatturato.
+   */
+  saldo_iniziale?: number;
+  /** Credito acquistato attivando il voucher: registrato come prima ricarica. */
+  ricarica?: number;
 }
 
 export interface CreateMovimentoInput {
   importo: number;
   descrizione?: string;
   incontro_id?: string;
+  /**
+   * Omesso: un importo positivo è una ricarica, uno negativo un addebito.
+   * Indicarlo serve a far rifiutare un importo del segno sbagliato invece di
+   * registrarlo come il tipo opposto a quello inteso.
+   */
+  tipo?: TipoMovimento;
   // Data di calendario "YYYY-MM-DD" (la colonna è una DATE).
   // Omessa = oggi (ricariche e correzioni manuali, che avvengono nel momento
   // in cui l'admin le inserisce). L'addebito generato da un incontro la
@@ -65,6 +90,81 @@ export async function listVouchers(socioId?: string): Promise<Voucher[]> {
   const params = socioId ? { socioId } : {};
   const result = await query(sql, params);
   return result.rows.map(toVoucher);
+}
+
+/** Voucher in un elenco, con il nominativo del socio: ricerca e ordinamento lo usano. */
+export interface RigaVoucher extends Voucher {
+  nome: string;
+  cognome: string;
+}
+
+export interface ListVouchersOptions {
+  /** Solo il voucher di questo socio. */
+  socioId?: string;
+  /** Tutti tranne quello di questo socio (il proprio, mostrato a parte). */
+  escludiSocioId?: string;
+  /** Ricerca parola per parola su cognome e nome del socio. */
+  q?: string;
+  sort?: string;
+  dir?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// Whitelist delle colonne ordinabili, come per incontri e soci.
+const ORDINAMENTO_VOUCHER: Record<string, string[]> = {
+  socioNome:      ['cognome', 'nome'],
+  data_creazione: ['data_creazione'],
+  saldo_iniziale: ['saldo_iniziale'],
+  saldo_residuo:  ['saldo_residuo'],
+};
+
+/** Elenco paginato dei voucher, con saldo e socio, filtrato e ordinato dal database. */
+export async function listVouchersPaginati(
+  options: ListVouchersOptions = {}
+): Promise<{ rows: RigaVoucher[]; total: number }> {
+  const { limit, offset } = limiteEOffset(options);
+  const params: Record<string, unknown> = { limit, offset };
+
+  const where = condizioniRicerca(options.q, ['cognome', 'nome'], params);
+  if (options.socioId) {
+    where.push('socio_id = :socioId');
+    params.socioId = options.socioId;
+  }
+  if (options.escludiSocioId) {
+    where.push('socio_id <> :escludiSocioId');
+    params.escludiSocioId = options.escludiSocioId;
+  }
+
+  const colonne = ORDINAMENTO_VOUCHER[options.sort ?? ''] ?? ORDINAMENTO_VOUCHER.socioNome;
+  const dir = direzione(options.dir);
+  const orderBy = [...colonne.map(c => `${c} ${dir}`), 'id'].join(', ');
+
+  // Il saldo è un aggregato: calcolato in una CTE, così filtro, ordinamento e
+  // conteggio lavorano su righe già complete, come su una tabella.
+  const result = await query(
+    `WITH v AS (
+       SELECT b.*, s.nome, s.cognome,
+              (b.saldo_iniziale + COALESCE(SUM(m.importo), 0)) AS saldo_residuo
+       FROM voucher b
+       JOIN socio s ON s.id = b.socio_id
+       LEFT JOIN movimento_voucher m ON m.voucher_id = b.id
+       GROUP BY b.id, s.id
+     )
+     SELECT *, COUNT(*) OVER() AS total_count
+     FROM v
+     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+     ORDER BY ${orderBy}
+     LIMIT :limit OFFSET :offset`,
+    params
+  );
+
+  const total = result.rows.length > 0 ? Number(result.rows[0].total_count) : 0;
+  const rows = result.rows.map(row => {
+    const { total_count: _n, ...voucher } = row as Record<string, unknown>;
+    return voucher as unknown as RigaVoucher;
+  });
+  return { rows, total };
 }
 
 export async function getVoucherById(id: string, q: QueryFn = query): Promise<Voucher> {
@@ -104,10 +204,19 @@ export async function getVoucherBySocioId(
   return result.rows.length > 0 ? toVoucher(result.rows[0]) : null;
 }
 
+/**
+ * Attiva il voucher di un socio. Il credito acquistato (`ricarica`) entra come
+ * primo movimento di ricarica nella stessa transazione: o nascono entrambi o
+ * nessuno dei due.
+ */
 export async function createVoucher(input: CreateVoucherInput): Promise<Voucher> {
   if (!input.socio_id) throw new BadRequestError('socio_id è obbligatorio');
-  if (input.saldo_iniziale === undefined || input.saldo_iniziale < 0) {
+  const saldoIniziale = input.saldo_iniziale ?? 0;
+  if (!Number.isFinite(Number(saldoIniziale)) || Number(saldoIniziale) < 0) {
     throw new BadRequestError('saldo_iniziale deve essere >= 0');
+  }
+  if (input.ricarica !== undefined && input.ricarica !== null && !(Number(input.ricarica) > 0)) {
+    throw new BadRequestError('ricarica deve essere un importo positivo');
   }
 
   await getSocioById(input.socio_id);
@@ -120,25 +229,31 @@ export async function createVoucher(input: CreateVoucherInput): Promise<Voucher>
     throw new BadRequestError('Il socio ha già un voucher');
   }
 
-  const result = await query(
-    `INSERT INTO voucher (socio_id, saldo_iniziale)
-     VALUES (:socio_id, :saldo_iniziale)
-     RETURNING *, saldo_iniziale AS saldo_residuo`,
-    {
-      socio_id: input.socio_id,
-      saldo_iniziale: input.saldo_iniziale,
-    }
-  );
+  return withTransaction(async (q) => {
+    const result = await q(
+      `INSERT INTO voucher (socio_id, saldo_iniziale)
+       VALUES (:socio_id, :saldo_iniziale)
+       RETURNING id`,
+      { socio_id: input.socio_id, saldo_iniziale: saldoIniziale }
+    );
+    const id = result.rows[0].id as string;
 
-  return toVoucher(result.rows[0]);
+    if (input.ricarica) {
+      await createMovimento(id, {
+        importo: Number(input.ricarica),
+        tipo: 'ricarica',
+        descrizione: 'Acquisto voucher',
+      }, q);
+    }
+
+    return getVoucherById(id, q);
+  });
 }
 
 // ---------------------------------------------------------------
 // Movimenti
 // ---------------------------------------------------------------
 
-const DEFAULT_LIMIT_MOVIMENTI = 25;
-const MAX_LIMIT_MOVIMENTI = 200;
 
 /**
  * Movimenti di un voucher, dal più recente, a pagine: un socio accumula un
@@ -154,8 +269,7 @@ export async function listMovimenti(
 ): Promise<{ rows: MovimentoVoucher[]; total: number }> {
   await getVoucherById(voucherId);
 
-  const limit  = Math.min(Math.max(1, options.limit ?? DEFAULT_LIMIT_MOVIMENTI), MAX_LIMIT_MOVIMENTI);
-  const offset = Math.max(0, options.offset ?? 0);
+  const { limit, offset } = limiteEOffset(options);
 
   const result = await query(
     // Nessuna JOIN con incontro: l'attività è già dentro descrizione
@@ -182,6 +296,36 @@ export async function listMovimenti(
   return { rows, total };
 }
 
+/** Quando e quanto è stata l'ultima ricarica di un voucher. */
+export interface UltimaRicarica {
+  data_movimento: string;
+  importo: number;
+}
+
+/**
+ * L'ultima ricarica di un voucher, o null se non ne ha ancora ricevuta
+ * nessuna.
+ *
+ * Query a sé, e non due colonne in più negli elenchi dei voucher: è un dato
+ * che serve a una sola scheda dell'interfaccia, e portarlo in giro in ogni
+ * SELECT lo farebbe calcolare per ogni riga di ogni pagina, senza che nessuno
+ * lo guardi.
+ *
+ * created_at come spareggio, come in listMovimenti: data_movimento è una DATE,
+ * quindi due ricariche dello stesso giorno avrebbero un ordine arbitrario.
+ */
+export async function getUltimaRicarica(voucherId: string): Promise<UltimaRicarica | null> {
+  const result = await query(
+    `SELECT data_movimento, importo
+     FROM movimento_voucher
+     WHERE voucher_id = :voucherId AND tipo = 'ricarica'
+     ORDER BY data_movimento DESC, created_at DESC
+     LIMIT 1`,
+    { voucherId }
+  );
+  return result.rows.length > 0 ? (result.rows[0] as unknown as UltimaRicarica) : null;
+}
+
 /**
  * Cerca il movimento generato automaticamente da un incontro (al più uno,
  * garantito dall'indice unico su incontro_id).
@@ -197,6 +341,27 @@ export async function getMovimentoByIncontroId(
   return result.rows.length > 0 ? toMovimento(result.rows[0]) : null;
 }
 
+/**
+ * Tipo di un nuovo movimento, coerente con il segno dell'importo. Il tipo non
+ * cambia più dopo: correggere l'importo di un addebito o di una ricarica ne
+ * lascia la natura invariata.
+ */
+function tipoMovimento(input: CreateMovimentoInput): TipoMovimento {
+  const importo = Number(input.importo);
+  const tipo = input.tipo ?? (importo > 0 ? 'ricarica' : 'addebito');
+
+  if (tipo !== 'ricarica' && tipo !== 'addebito') {
+    throw new BadRequestError("tipo deve essere 'ricarica' o 'addebito'");
+  }
+  if (tipo === 'ricarica' && importo <= 0) {
+    throw new BadRequestError('Una ricarica deve avere un importo positivo');
+  }
+  if (tipo === 'addebito' && importo >= 0) {
+    throw new BadRequestError('Un addebito deve avere un importo negativo');
+  }
+  return tipo;
+}
+
 export async function createMovimento(
   voucherId: string,
   input: CreateMovimentoInput,
@@ -204,9 +369,10 @@ export async function createMovimento(
 ): Promise<MovimentoVoucher> {
   const voucher = await getVoucherById(voucherId, q);
 
-  if (input.importo === undefined) {
+  if (input.importo === undefined || input.importo === null || !Number.isFinite(Number(input.importo))) {
     throw new BadRequestError('importo è obbligatorio');
   }
+  const tipo = tipoMovimento(input);
 
   // Un addebito che porta il saldo sotto zero è permesso (l'admin conferma
   // dall'interfaccia): si blocca solo se il saldo è GIÀ negativo prima di
@@ -222,11 +388,12 @@ export async function createMovimento(
     // CAST(... AS DATE) e non "::date": il convertitore di parametri con nome
     // (db/client.ts) sostituisce ogni ":parola", quindi interpreterebbe
     // "::date" come un secondo parametro chiamato "date".
-    `INSERT INTO movimento_voucher (voucher_id, importo, descrizione, incontro_id, data_movimento)
-     VALUES (:voucherId, :importo, :descrizione, :incontroId, COALESCE(CAST(:dataMovimento AS DATE), CURRENT_DATE))
+    `INSERT INTO movimento_voucher (voucher_id, tipo, importo, descrizione, incontro_id, data_movimento)
+     VALUES (:voucherId, :tipo, :importo, :descrizione, :incontroId, COALESCE(CAST(:dataMovimento AS DATE), CURRENT_DATE))
      RETURNING *`,
     {
       voucherId,
+      tipo,
       importo: input.importo,
       descrizione: input.descrizione ?? null,
       incontroId: input.incontro_id ?? null,

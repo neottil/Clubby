@@ -2,21 +2,26 @@
 # utile per collegarsi da un client locale (DBeaver, ecc.) senza passare da
 # un tunnel SSH + kubectl port-forward (vedi README per entrambi i metodi).
 # Applicato dal workflow Infra SOLO se la variabile DB_NODE_PORT è impostata
-# (nessun default): se assente, questo Service viene rimosso/non creato.
+# (nessun default). Non viene mai rimosso in automatico: l'istanza può essere
+# condivisa da più club, e un club senza la variabile toglierebbe l'accesso
+# configurato da un altro. Per rimuoverlo:
+#   kubectl delete service postgres-external -n <DB_NAMESPACE>
 #
-# ATTENZIONE: un NodePort espone Postgres su ${KUBE_NAMESPACE} sull'IP
+# ATTENZIONE: da questa porta si raggiunge l'intera istanza, cioè i database
+# di TUTTI i club che la condividono, compresi quelli degli account.
+# Un NodePort espone Postgres sull'IP
 # pubblico della VPS, su tutte le interfacce, protetto solo dalla password
 # del DB. Filtra la porta via firewall (es. Hetzner Cloud Firewall) al tuo
 # IP, non lasciarla aperta a tutto internet.
 apiVersion: v1
 kind: Service
 metadata:
-  name: clubby-postgres-external
-  namespace: ${KUBE_NAMESPACE}
+  name: postgres-external
+  namespace: ${DB_NAMESPACE}
 spec:
   type: NodePort
   selector:
-    app: clubby-postgres
+    app: postgres
   ports:
     - port: 5432
       targetPort: 5432

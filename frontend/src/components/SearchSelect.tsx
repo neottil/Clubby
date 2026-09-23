@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { corrispondeRicerca } from '../utils/ricerca';
 
 /**
  * Select con ricerca testuale: un input che filtra le opzioni mentre si
@@ -67,9 +68,7 @@ export default function SearchSelect<T>({
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  const filtered = entries.filter(e =>
-    e.label.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = entries.filter(e => corrispondeRicerca(e.label, query));
 
   // Aperto mostra ciò che si sta digitando, chiuso l'etichetta selezionata.
   const displayValue = open ? query : selected?.label ?? '';

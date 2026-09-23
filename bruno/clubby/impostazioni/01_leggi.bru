@@ -1,0 +1,19 @@
+meta {
+  name: Leggi impostazioni
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/impostazioni
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Parametri dell'associazione: { quota_tesseramento }.
+}

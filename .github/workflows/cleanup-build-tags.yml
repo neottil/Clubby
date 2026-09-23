@@ -31,7 +31,7 @@ on:
     inputs:
       scope:
         description: >-
-          Scope da ripulire: "backend", "frontend", o vuoto per entrambi
+          Scope da ripulire: "backend", "frontend", "authorizer", o vuoto per tutti
           (default). Usa questo per limitare la pulizia a un solo scope — es.
           il trigger automatico da Tag lo imposta quando ha promosso un solo
           scope in quella run; per una pulizia manuale di un branch
@@ -76,13 +76,13 @@ jobs:
         run: |
           case "${{ inputs.scope }}" in
             '')
-              echo "list=backend frontend" >> "$GITHUB_OUTPUT"
+              echo "list=backend frontend authorizer" >> "$GITHUB_OUTPUT"
               ;;
-            backend|frontend)
+            backend|frontend|authorizer)
               echo "list=${{ inputs.scope }}" >> "$GITHUB_OUTPUT"
               ;;
             *)
-              echo "ERRORE: scope non valido '${{ inputs.scope }}' (valori ammessi: backend, frontend, o vuoto per entrambi)." >&2
+              echo "ERRORE: scope non valido '${{ inputs.scope }}' (valori ammessi: backend, frontend, authorizer, o vuoto per tutti)." >&2
               exit 1
               ;;
           esac

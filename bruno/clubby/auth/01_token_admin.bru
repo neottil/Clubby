@@ -1,21 +1,20 @@
 meta {
-  name: Ottieni token admin
+  name: Accesso admin
   type: http
   seq: 1
 }
 
 post {
-  url: {{keycloak_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/token
-  body: formUrlEncoded
+  url: {{auth_url}}/auth/login
+  body: json
   auth: none
 }
 
-body:form-urlencoded {
-  grant_type: password
-  client_id: {{keycloak_client_id}}
-  username: admin@clubby.local
-  password: Admin1234!
-  scope: openid
+body:json {
+  {
+    "email": "admin@clubby.local",
+    "password": "Admin12345!"
+  }
 }
 
 script:post-response {
@@ -29,9 +28,13 @@ script:post-response {
 }
 
 docs {
-  Ottieni un access token per l'utente admin usando il direct grant.
-  Il token viene salvato automaticamente nella variabile token_admin.
-  
-  Nota: direct grant (password) deve essere abilitato sul client Keycloak
-  oppure usa il flusso PKCE dal browser.
+  Accesso con email e password: salva automaticamente access token e refresh
+  token nelle variabili token_admin e refresh_token_admin.
+
+  L'access token dura 15 minuti. Quando scade usa "Rinnova sessione admin"
+  invece di rifare l'accesso.
+
+  Se l'account ha ancora una password temporanea, la risposta contiene
+  cambio_password_richiesto: true e le operazioni di amministrazione vengono
+  rifiutate finché non viene impostata una password definitiva.
 }

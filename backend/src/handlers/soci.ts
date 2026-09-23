@@ -9,10 +9,15 @@ import {
   getAuthContext,
   requireAdmin,
   requireAdminOrSelf,
+  NotFoundError,
 } from '../middleware/auth.js';
 import { ok, created, noContent, errorResponse } from '../middleware/response.js';
+import { corpoJson } from '../util/corpo.js';
+import { intParam, paginazioneRichiesta } from '../util/paginazione.js';
 import {
   listSoci,
+  listSociRidotto,
+  listSociPaginati,
   getSocioById,
   getSocioByViewerId,
   createSocio,
@@ -33,15 +38,44 @@ export const handler = async (
     // GET /api/soci
     // -----------------------------------------------------------
     if (method === 'GET' && !socioId) {
-      if (auth.role === 'admin') {
+      const qs = event.queryStringParameters;
+
+      // Con limit/offset: elenco a pagine, filtrato e ordinato dal database,
+      // nella forma di incontri e fatturazione. Senza: l'elenco completo, che
+      // serve ai menu di scelta dei soci.
+      if (paginazioneRichiesta(qs)) {
+        const limit  = intParam(qs?.limit);
+        const offset = intParam(qs?.offset);
+        const pagina = (rows: unknown[], total: number) =>
+          ok({ data: rows, total, limit: limit ?? rows.length, offset: offset ?? 0 });
+
+        if (auth.isAdmin || auth.isIstruttore) {
+          const { rows, total } = await listSociPaginati({
+            q: qs?.q, sort: qs?.sort, dir: qs?.dir, limit, offset,
+            // Le schede libere interessano solo a chi fa i collegamenti.
+            senzaAccount: auth.isAdmin && qs?.senza_account === '1',
+            ridotto: !auth.isAdmin,
+          });
+          return pagina(rows, total);
+        }
+        const socio = await getSocioByViewerId(auth.userId);
+        return pagina(socio ? [socio] : [], socio ? 1 : 0);
+      }
+
+      if (auth.isAdmin) {
         // Admin: restituisce tutti i soci
         const soci = await listSoci();
         return ok(soci);
-      } else {
-        // Viewer: restituisce solo il proprio socio
-        const socio = await getSocioByViewerId(auth.userId);
-        return ok(socio ? [socio] : []);
       }
+      if (auth.isIstruttore) {
+        // Istruttore: tutti i soci, ma solo il nominativo — gli serve per
+        // scegliere chi ha partecipato all'incontro, non per consultarne
+        // recapiti e anagrafica.
+        return ok(await listSociRidotto());
+      }
+      // Viewer: restituisce solo il proprio socio
+      const socio = await getSocioByViewerId(auth.userId);
+      return ok(socio ? [socio] : []);
     }
 
     // -----------------------------------------------------------
@@ -56,9 +90,9 @@ export const handler = async (
     // -----------------------------------------------------------
     // POST /api/soci
     // -----------------------------------------------------------
-    if (method === 'POST') {
+    if (method === 'POST' && !socioId) {
       requireAdmin(auth);
-      const body = JSON.parse(event.body ?? '{}');
+      const body = corpoJson(event);
       const socio = await createSocio(body);
       return created(socio);
     }
@@ -68,7 +102,7 @@ export const handler = async (
     // -----------------------------------------------------------
     if (method === 'PUT' && socioId) {
       requireAdmin(auth);
-      const body = JSON.parse(event.body ?? '{}');
+      const body = corpoJson(event);
       const socio = await updateSocio(socioId, body);
       return ok(socio);
     }
@@ -82,7 +116,7 @@ export const handler = async (
       return noContent();
     }
 
-    return errorResponse({ statusCode: 404, message: 'Route non trovata' });
+    return errorResponse(new NotFoundError('Route non trovata'));
   } catch (error) {
     return errorResponse(error);
   }

@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openwa-ingress
+  namespace: openwa
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - openwa.clubby.click
+      secretName: openwa-tls
+  rules:
+    - host: openwa.clubby.click
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: openwa-service
+                port:
+                  number: 2785

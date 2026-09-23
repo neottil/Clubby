@@ -1,32 +1,45 @@
 name: Promote
 
-# Attivazione MANUALE, con la versione da deployare come INPUT ESPLICITO
-# (backend_version/frontend_version, es. "1.4.0" — non un tag Git per
-# esteso, solo il numero) — non decide nulla, non tagga nulla: quello è
-# compito esclusivo di tag.yml. Questo workflow fa solo il deploy in
-# produzione della versione indicata, già promossa da Tag in precedenza.
+# Attivazione MANUALE, con l'ambiente di destinazione e la versione da
+# deployare come INPUT ESPLICITI (backend_version/frontend_version/
+# authorizer_version, es. "1.4.0" — non un tag Git per esteso, solo il numero)
+# — non decide nulla, non tagga nulla: quello è compito esclusivo di tag.yml.
+# Questo workflow fa solo il deploy della versione indicata, già promossa da
+# Tag in precedenza, nell'ambiente scelto.
 #
-# Separato da tag.yml perché tag/versioning e deploy in produzione hanno un
-# ciclo di vita diverso: taggare una versione è una decisione (rara,
-# revisionabile via GitHub Release), farla girare in produzione è
-# un'operazione che può servire ripetere (es. per riallineare l'ambiente
-# dopo un incidente) senza dover ripassare da Tag. Rilanciabile più volte con
-# lo stesso input, in sicurezza.
+# Ogni club è un Environment GitHub a sé, con namespace clubby-<env>-app e
+# clubby-<env>-db sullo stesso cluster (vedi .github/actions/ambiente): la
+# stessa versione si porta in un club alla volta, scegliendo l'Environment.
+# development resta escluso: lì deploya Build & Deploy a ogni push, e una
+# promozione manuale ne scavalcherebbe lo stato.
 #
-# Accetta uno o entrambi gli scope: puoi promuovere solo backend, solo
-# frontend, o entrambi nella stessa run — ognuno deploya indipendentemente
+# Separato da tag.yml perché tag/versioning e deploy hanno un ciclo di vita
+# diverso: taggare una versione è una decisione (rara, revisionabile via
+# GitHub Release), farla girare in un ambiente è un'operazione che può servire
+# ripetere (es. per riallineare un club dopo un incidente) senza dover
+# ripassare da Tag. Rilanciabile più volte con lo stesso input, in sicurezza.
+#
+# Accetta uno o più scope: puoi promuovere solo backend, solo frontend, solo
+# authorizer, o più d'uno nella stessa run — ognuno deploya indipendentemente
 # tramite lo stesso workflow riutilizzabile usato da Build & Deploy per lo
-# staging (deploy-backend.yml/deploy-frontend.yml), solo con
-# environment: production invece di development.
+# sviluppo (deploy-backend.yml/deploy-frontend.yml/deploy-authorizer.yml).
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Ambiente di destinazione (il club): deve esistere come Environment del repo, con le proprie Variables/Secrets'
+        type: environment
+        required: true
       backend_version:
-        description: 'Versione backend da deployare in produzione (es. 1.4.0) — deve esistere già come tag server-vX.Y.Z (creato da Tag)'
+        description: 'Versione backend da deployare (es. 1.4.0) — deve esistere già come tag server-vX.Y.Z (creato da Tag)'
         required: false
         default: ''
       frontend_version:
-        description: 'Versione frontend da deployare in produzione (es. 1.4.0) — deve esistere già come tag client-vX.Y.Z (creato da Tag)'
+        description: 'Versione frontend da deployare (es. 1.4.0) — deve esistere già come tag client-vX.Y.Z (creato da Tag)'
+        required: false
+        default: ''
+      authorizer_version:
+        description: 'Versione authorizer da deployare (es. 1.0.0) — deve esistere già come tag auth-vX.Y.Z (creato da Tag)'
         required: false
         default: ''
 
@@ -41,16 +54,29 @@ jobs:
     outputs:
       backend_image_tag: ${{ steps.check.outputs.backend_image_tag }}
       frontend_image_tag: ${{ steps.check.outputs.frontend_image_tag }}
+      authorizer_image_tag: ${{ steps.check.outputs.authorizer_image_tag }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      # Solo il nome: che sia usabile come namespace lo verificano i workflow
+      # di deploy, con la stessa action che ne ricava i namespace.
+      - name: Verifica l'ambiente di destinazione
+        env:
+          AMBIENTE: ${{ inputs.environment }}
+        run: |
+          if [ "$AMBIENTE" = "development" ]; then
+            echo "::error::development non si promuove: lì deploya Build & Deploy a ogni push. Scegli l'ambiente di un club."
+            exit 1
+          fi
+          echo "Ambiente di destinazione: $AMBIENTE"
+
       - name: Verifica input e tag di versione esistenti
         id: check
         run: |
-          if [ -z "${{ inputs.backend_version }}" ] && [ -z "${{ inputs.frontend_version }}" ]; then
-            echo "::error::Specifica almeno una tra backend_version e frontend_version."
+          if [ -z "${{ inputs.backend_version }}" ] && [ -z "${{ inputs.frontend_version }}" ] && [ -z "${{ inputs.authorizer_version }}" ]; then
+            echo "::error::Specifica almeno una fra backend_version, frontend_version e authorizer_version."
             exit 1
           fi
 
@@ -74,20 +100,39 @@ jobs:
             echo "Frontend: $TAG trovato, verrà deployata la versione ${{ inputs.frontend_version }}."
           fi
 
-  deploy-production-backend:
+          if [ -n "${{ inputs.authorizer_version }}" ]; then
+            TAG="auth-v${{ inputs.authorizer_version }}"
+            if ! git tag -l "$TAG" | grep -qx "$TAG"; then
+              echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
+              exit 1
+            fi
+            echo "authorizer_image_tag=${{ inputs.authorizer_version }}" >> "$GITHUB_OUTPUT"
+            echo "Authorizer: $TAG trovato, verrà deployata la versione ${{ inputs.authorizer_version }}."
+          fi
+
+  deploy-backend:
     needs: validate
     if: inputs.backend_version != ''
     uses: ./.github/workflows/deploy-backend.yml
     with:
-      environment: production
+      environment: ${{ inputs.environment }}
       image_tag: ${{ needs.validate.outputs.backend_image_tag }}
     secrets: inherit
 
-  deploy-production-frontend:
+  deploy-frontend:
     needs: validate
     if: inputs.frontend_version != ''
     uses: ./.github/workflows/deploy-frontend.yml
     with:
-      environment: production
+      environment: ${{ inputs.environment }}
       image_tag: ${{ needs.validate.outputs.frontend_image_tag }}
+    secrets: inherit
+
+  deploy-authorizer:
+    needs: validate
+    if: inputs.authorizer_version != ''
+    uses: ./.github/workflows/deploy-authorizer.yml
+    with:
+      environment: ${{ inputs.environment }}
+      image_tag: ${{ needs.validate.outputs.authorizer_image_tag }}
     secrets: inherit

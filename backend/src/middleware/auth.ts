@@ -21,13 +21,20 @@ export interface TokenClaims {
   exp: number;
 }
 
-export type UserRole = 'admin' | 'viewer';
-
+/**
+ * Chi sta chiamando. Ruolo nel club e privilegio di amministrazione sono due
+ * cose indipendenti:
+ *   isIstruttore  tiene incontri (altrimenti è un socio)
+ *   isAdmin       amministra l'applicazione, qualunque sia il suo ruolo
+ * Quando "admin" era un ruolo alternativo, chi amministrava non poteva
+ * risultare istruttore di nessun incontro.
+ */
 export interface AuthContext {
   userId: string;
   email: string;
   groups: string[];
-  role: UserRole;
+  isAdmin: boolean;
+  isIstruttore: boolean;
 }
 
 /** Minimal request event interface */
@@ -88,16 +95,14 @@ export function getAuthContext(event: RequestEvent): AuthContext {
   }
 
   const groups: string[] = Array.isArray(claims.roles) ? claims.roles : [];
-  // Qualunque cosa non sia esplicitamente 'admin' vale come viewer: un token
-  // senza ruoli riconoscibili deve ricadere sui permessi minimi, non su
-  // nessun permesso né su tutti.
-  const role: UserRole = groups.includes('admin') ? 'admin' : 'viewer';
-
+  // Ciò che non è riconosciuto non concede nulla: un token senza ruoli noti
+  // vale come un socio senza privilegi.
   return {
     userId: claims.sub,
     email: claims.email ?? '',
     groups,
-    role,
+    isAdmin: groups.includes('admin'),
+    isIstruttore: groups.includes('istruttore'),
   };
 }
 
@@ -105,7 +110,7 @@ export function getAuthContext(event: RequestEvent): AuthContext {
  * Verifica che l'utente sia admin, altrimenti lancia ForbiddenError
  */
 export function requireAdmin(auth: AuthContext): void {
-  if (auth.role !== 'admin') {
+  if (!auth.isAdmin) {
     throw new ForbiddenError('Accesso riservato agli amministratori');
   }
 }
@@ -115,7 +120,7 @@ export function requireAdmin(auth: AuthContext): void {
  * ai propri dati (viewer può vedere solo il proprio socio)
  */
 export function requireAdminOrSelf(auth: AuthContext, viewerId: string | null): void {
-  if (auth.role === 'admin') return;
+  if (auth.isAdmin) return;
   if (auth.userId === viewerId) return;
   throw new ForbiddenError('Non hai i permessi per accedere a questa risorsa');
 }

@@ -2,10 +2,13 @@
   "name": "clubby",
   "private": true,
   "scripts": {
-    "install:all": "npm install --prefix backend && npm install --prefix frontend",
-    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend && npm install --prefix authorizer",
+    "dev": "concurrently -n backend,authorizer,frontend -c blue,magenta,green \"npm run dev --prefix backend\" \"npm run dev --prefix authorizer\" \"npm run dev --prefix frontend\"",
     "dev:backend": "npm run dev --prefix backend",
+    "dev:authorizer": "npm run dev --prefix authorizer",
     "dev:frontend": "npm run dev --prefix frontend",
+    "test:api": "node --test --test-concurrency=1 tests/api/*.test.ts",
+    "test:api:pulizia": "node tests/api/pulizia.ts",
     "version": "npm version --no-commit-hooks --no-git-tag-version --prefix"
   },
   "devDependencies": {

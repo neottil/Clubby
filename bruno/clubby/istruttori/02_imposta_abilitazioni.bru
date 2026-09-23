@@ -1,0 +1,30 @@
+meta {
+  name: Imposta abilitazioni (admin)
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{base_url}}/api/istruttori/{{istruttore_id}}/attivita
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "attivita_ids": ["{{attivita_id}}"]
+  }
+}
+
+docs {
+  Solo admin. Sostituisce l'INTERO insieme delle abilitazioni dell'istruttore:
+  un elenco vuoto gliele toglie tutte, e con esse la possibilità di registrare
+  incontri.
+
+  Un istruttore che prova a registrare un incontro di un'attività non elencata
+  qui riceve 400, anche chiamando l'API direttamente.
+}

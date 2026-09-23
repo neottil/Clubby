@@ -1,0 +1,40 @@
+meta {
+  name: Imposta ruolo
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/admin/ruolo
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "utente_id": "{{utente_id}}",
+    "ruolo": "istruttore"
+  }
+}
+
+docs {
+  Solo admin. Assegna il ruolo nel club: socio o istruttore. Il privilegio di
+  amministratore è indipendente e si imposta con POST /api/admin/amministratore.
+
+  utente_id accetta l'id dell'account oppure la sua email.
+
+  È il modo per rendere istruttore un utente già registrato. Dopo di che
+  servono le sue abilitazioni (vedi istruttori/02): senza almeno un'attività
+  assegnata non può registrare alcun incontro.
+
+  Cambiare il proprio ruolo è consentito: non tocca il privilegio di
+  amministratore, quindi non c'è rischio di restare senza admin.
+
+  Cambiare ruolo chiude tutte le sessioni aperte dell'interessato: il ruolo
+  viaggia dentro il token, e finché quello vecchio non scade porterebbe ancora
+  i permessi precedenti.
+}

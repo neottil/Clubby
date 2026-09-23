@@ -1,0 +1,37 @@
+meta {
+  name: Concedi o togli il privilegio admin
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/api/admin/amministratore
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "utente_id": "{{utente_id}}",
+    "admin": true
+  }
+}
+
+docs {
+  Solo admin. Concede (admin: true) o toglie (admin: false) il privilegio di
+  amministrare l'applicazione.
+
+  È indipendente dal ruolo nel club: un istruttore può essere admin, e togliere
+  il privilegio non cambia il ruolo. utente_id accetta l'id dell'account oppure
+  la sua email.
+
+  Un admin non può togliere il privilegio a sé stesso (400): è ciò che
+  impedisce di restare senza amministratori.
+
+  Il privilegio viaggia nel token, quindi la modifica chiude le sessioni aperte
+  dell'interessato, che dovrà rifare l'accesso.
+}

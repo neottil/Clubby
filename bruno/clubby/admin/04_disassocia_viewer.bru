@@ -1,5 +1,5 @@
 meta {
-  name: Disassocia viewer da socio
+  name: Scollega account da socio
   type: http
   seq: 4
 }
@@ -15,7 +15,13 @@ auth:bearer {
 }
 
 docs {
-  Solo admin. Rimuove il collegamento tra un utente Keycloak e il socio.
-  Il socio rimane nel DB ma non è più accessibile da nessun viewer.
-  Ritorna 204 No Content.
+  Solo admin. Rimuove il collegamento fra un account e la sua scheda socio.
+  Risponde 204 No Content.
+
+  Lo stato dell'account non cambia: resta attivo (o disattivato) com'era, ma
+  finché non viene collegato a un'altra scheda non vede alcun dato. Per
+  spegnerlo si usa "Attiva o disattiva un account", come decisione a parte.
+
+  Il socio resta con tutti i suoi dati (voucher, incontri, movimenti), pronto
+  per essere collegato a un altro account.
 }

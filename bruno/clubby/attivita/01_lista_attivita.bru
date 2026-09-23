@@ -1,0 +1,32 @@
+meta {
+  name: Lista attività
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/attivita
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (Array.isArray(data) && data.length > 0) {
+    bru.setVar("attivita_id", data[0].id);
+  }
+}
+
+docs {
+  Il listino delle attività, con il costo proposto per ciascuna.
+
+  Accessibile a qualsiasi utente autenticato, ma il contenuto dipende dal ruolo:
+  un istruttore riceve solo le attività a cui è abilitato, gli altri l'elenco
+  delle attive. Con ?tutte=1 un admin ottiene anche quelle disattivate.
+
+  Salva automaticamente attivita_id (la prima della lista) per creare incontri.
+}

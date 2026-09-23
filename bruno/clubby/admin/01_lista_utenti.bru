@@ -1,0 +1,24 @@
+meta {
+  name: Lista utenti registrati
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/admin/users
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Elenco degli account registrati con nominativo, email,
+  telefono, ruolo e stato.
+
+  Il backend non conserva gli account: inoltra la richiesta all'authorizer
+  riportando il token dell'admin che l'ha fatta, così i controlli si
+  applicano all'identità reale di chi opera.
+}

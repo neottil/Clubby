@@ -1,0 +1,41 @@
+# L'authorizer ha un hostname proprio (auth.<dominio>) e non un percorso sotto
+# quello dell'app, per due motivi:
+#
+#  - le sue route stanno alla radice (/auth/..., /admin/..., e soprattutto
+#    /.well-known/jwks.json, che per convenzione deve stare lì): montarle sotto
+#    un prefisso richiederebbe una riscrittura del path a livello di Ingress,
+#    fragile e facile da sbagliare;
+#  - l'hostname finisce nel claim "iss" dei token, quindi è un valore che deve
+#    restare stabile e riconoscibile.
+#
+# Certificato TLS separato da quello dell'app: host diverso, richiesta
+# cert-manager diversa e secretName diverso. Qui l'annotazione va messa —
+# a differenza dell'Ingress del frontend, che condivide l'host col backend e
+# per questo la omette.
+#
+# Assume Traefik come Ingress Controller (default in k3s) e il ClusterIssuer
+# "letsencrypt", entrambi configurati da scripts/setup-vps-k3s.sh.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clubby-authorizer
+  namespace: ${KUBE_NAMESPACE}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ${AUTH_DOMAIN}
+      secretName: clubby-auth-tls
+  rules:
+    - host: ${AUTH_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: clubby-authorizer
+                port:
+                  number: 80

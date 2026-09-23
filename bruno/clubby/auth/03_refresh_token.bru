@@ -1,19 +1,19 @@
 meta {
-  name: Refresh token admin
+  name: Rinnova sessione admin
   type: http
   seq: 3
 }
 
 post {
-  url: {{keycloak_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/token
-  body: formUrlEncoded
+  url: {{auth_url}}/auth/refresh
+  body: json
   auth: none
 }
 
-body:form-urlencoded {
-  grant_type: refresh_token
-  client_id: {{keycloak_client_id}}
-  refresh_token: {{refresh_token_admin}}
+body:json {
+  {
+    "refresh_token": "{{refresh_token_admin}}"
+  }
 }
 
 script:post-response {
@@ -27,9 +27,11 @@ script:post-response {
 }
 
 docs {
-  Rinnova l'access token admin usando il refresh token.
-  Usa questa request invece di 01_token_admin quando il token è scaduto
-  ma il refresh token è ancora valido (default Keycloak: 30 minuti).
-  
-  Aggiorna automaticamente token_admin e refresh_token_admin.
+  Scambia il refresh token con una sessione nuova, quando l'access token è
+  scaduto (dura 15 minuti) ma il refresh è ancora valido (30 giorni).
+
+  Il refresh token viene ruotato: quello usato qui viene revocato e ne
+  arriva uno nuovo, salvato automaticamente. Riprovare con il valore
+  precedente restituisce 401 — è voluto: un token intercettato vale al
+  massimo un utilizzo.
 }

@@ -2,11 +2,16 @@ name: Deploy Frontend
 
 # Solo workflow_call — gemello di deploy-backend.yml per frontend/k8s/*.
 # Vedi commenti lì per il razionale.
+#
+# In più rispetto al backend genera la configurazione del club (nome,
+# indirizzi di API e authorizer, tema, logo) che il browser legge all'avvio da
+# /config.json: l'immagine del frontend è la stessa per tutti i club, e ciò
+# che li distingue arriva da qui, dalle Variables dell'Environment.
 on:
   workflow_call:
     inputs:
       environment:
-        description: 'Environment GitHub da usare (development, production, ...)'
+        description: 'Environment GitHub da usare (development, o il club da deployare)'
         required: true
         type: string
       image_tag:
@@ -23,16 +28,110 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Vedi deploy-backend.yml.
+      - name: Verifica Variables e Secrets dell'ambiente
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
+          TENANT_NAME: ${{ vars.TENANT_NAME }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+        run: |
+          mancanti=0
+          for nome in SSH_HOST SSH_USER APP_DOMAIN AUTH_DOMAIN TENANT_NAME; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::La Variable $nome non è impostata sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          for nome in SSH_PRIVATE_KEY GHCR_PAT; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::Il Secret $nome non è impostato sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          exit $mancanti
+
+      # Vedi deploy-backend.yml: namespace e cartella sulla VPS derivano dal
+      # nome dell'Environment. Gli output letti più sotto come
+      # steps.ambiente.outputs.* sono dichiarati in .github/actions/ambiente/action.yml.
+      - name: Ricava namespace e percorsi dall'ambiente
+        id: ambiente
+        uses: ./.github/actions/ambiente
+        with:
+          environment: ${{ inputs.environment }}
+          # Il frontend non usa il database: DB_NAMESPACE non serve.
+          richiede_database: 'false'
+
       - name: Renderizza manifest k8s (frontend)
         env:
-          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
+          KUBE_NAMESPACE: ${{ steps.ambiente.outputs.app_namespace }}
           FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubby-frontend:${{ inputs.image_tag }}
           APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
           APP_VERSION: ${{ inputs.image_tag }}
+          # Configurazione del club, servita al browser su /config.json.
+          TENANT_NAME: ${{ vars.TENANT_NAME }}
+          THEME_PRIMARY: ${{ vars.THEME_PRIMARY }}
+          THEME_PRIMARY_TEXT: ${{ vars.THEME_PRIMARY_TEXT }}
+          THEME_DANGER: ${{ vars.THEME_DANGER }}
+          THEME_SUCCESS: ${{ vars.THEME_SUCCESS }}
+          THEME_NAV_BG: ${{ vars.THEME_NAV_BG }}
+          THEME_NAV_TEXT: ${{ vars.THEME_NAV_TEXT }}
+          LOGO_FILE: ${{ vars.LOGO_FILE }}
+          # Moduli opzionali del club, le stesse Variables lette dal deploy del
+          # backend: qui servono solo a non mostrare pagine che risponderebbero
+          # 404. Attivi con il valore esatto "true".
+          ENABLE_MODULE_TESSERAMENTO: ${{ vars.ENABLE_MODULE_TESSERAMENTO }}
+          ENABLE_MODULE_FATTURAZIONE: ${{ vars.ENABLE_MODULE_FATTURAZIONE }}
         run: |
+          # Il logo deve essere uno di quelli inclusi nell'immagine
+          # (frontend/public/branding/): un nome sbagliato mostrerebbe
+          # un'immagine rotta in ogni pagina invece di fermarsi qui. Il
+          # controllo guarda il commit da cui parte il workflow: con Promote
+          # un logo aggiunto dopo la versione promossa passerebbe il controllo
+          # senza essere nell'immagine.
+          if [ -n "$LOGO_FILE" ] && [ ! -f "frontend/public/branding/$LOGO_FILE" ]; then
+            echo "::error::LOGO_FILE='$LOGO_FILE' non esiste in frontend/public/branding/."
+            exit 1
+          fi
+
+          # Costruito con jq e non scritto a mano: il nome del club può
+          # contenere virgolette o altri caratteri da escapare. Su una riga
+          # sola, perché finisce dentro il ConfigMap come valore YAML. I
+          # colori non impostati vengono omessi: il frontend usa i suoi default.
+          FRONTEND_CONFIG_JSON=$(jq -nc \
+            --arg api "https://$APP_DOMAIN" \
+            --arg auth "https://$AUTH_DOMAIN" \
+            --arg nome "$TENANT_NAME" \
+            --arg logo "$LOGO_FILE" \
+            --arg primary "$THEME_PRIMARY" \
+            --arg primaryText "$THEME_PRIMARY_TEXT" \
+            --arg danger "$THEME_DANGER" \
+            --arg success "$THEME_SUCCESS" \
+            --arg navBg "$THEME_NAV_BG" \
+            --arg navText "$THEME_NAV_TEXT" \
+            --arg tesseramento "$ENABLE_MODULE_TESSERAMENTO" \
+            --arg fatturazione "$ENABLE_MODULE_FATTURAZIONE" \
+            '{
+              apiBaseUrl: $api,
+              authBaseUrl: $auth,
+              tenantName: $nome,
+              logo: (if $logo == "" then "" else "/branding/" + $logo end),
+              tema: ({primary: $primary, primaryText: $primaryText, danger: $danger,
+                      success: $success, navBg: $navBg, navText: $navText}
+                     | with_entries(select(.value != ""))),
+              moduli: {tesseramento: ($tesseramento == "true"),
+                       fatturazione: ($fatturazione == "true")}
+            }')
+          export FRONTEND_CONFIG_JSON
+          echo "Configurazione del club: $FRONTEND_CONFIG_JSON"
+
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered
-          VARS='$KUBE_NAMESPACE $FRONTEND_IMAGE $APP_DOMAIN $APP_VERSION'
+          VARS='$KUBE_NAMESPACE $FRONTEND_IMAGE $APP_DOMAIN $APP_VERSION $FRONTEND_CONFIG_JSON'
           for f in frontend/k8s/*.yaml; do
             envsubst "$VARS" < "$f" > "k8s/rendered/frontend-$(basename "$f")"
           done
@@ -45,16 +144,16 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
           source: "k8s/rendered/*"
-          target: ${{ vars.DEPLOY_PATH || '/opt/clubby/k8s' }}
+          target: ${{ steps.ambiente.outputs.deploy_path }}
           strip_components: 2
 
       - name: Applica manifest frontend e verifica rollout
         uses: appleboy/ssh-action@v1.2.0
         env:
-          NS: ${{ vars.KUBE_NAMESPACE }}
+          NS: ${{ steps.ambiente.outputs.app_namespace }}
           GHCR_USER: ${{ github.repository_owner }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/clubby/k8s' }}
+          DEPLOY_PATH: ${{ steps.ambiente.outputs.deploy_path }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}

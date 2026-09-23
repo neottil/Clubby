@@ -1,0 +1,42 @@
+meta {
+  name: Fatturazione
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/fatturazione?da=2026-01-01&a=2026-12-31&limit=25&offset=0
+  body: none
+  auth: bearer
+}
+
+params:query {
+  da: 2026-01-01
+  a: 2026-12-31
+  limit: 25
+  offset: 0
+  ~socio_id: {{socio_id}}
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Voci fatturate ai soci, dalla più recente, paginate:
+    { data, total, totale_importo, limit, offset }
+
+  Voci (campo tipo):
+    ricarica      credito acquistato su un voucher
+    tesseramento  quota di un rinnovo del tesseramento
+    incontro      incontro non coperto da un voucher, pagato a parte
+
+  Non compaiono gli incontri addebitati sul voucher (già coperti dalla
+  ricarica), le rettifiche e il saldo importato di un voucher.
+
+  Filtri: socio_id, da/a (estremi inclusi, YYYY-MM-DD). total e totale_importo
+  valgono per tutte le voci filtrate, non per la sola pagina.
+
+  Ordinamento: prima i tesseramenti, poi le altre voci; dentro ogni gruppo
+  dalla data più recente.
+}

@@ -16,11 +16,18 @@ auth:bearer {
 
 body:json {
   {
-    "keycloak_user_id": "viewer@clubby.local"
+    "utente_id": "{{utente_id}}"
   }
 }
 
 docs {
-  Solo admin. Assegna il ruolo 'admin' all'utente indicato.
-  keycloak_user_id può essere l'UUID Keycloak oppure l'email dell'utente.
+  Solo admin. Concede il privilegio di amministratore all'utente indicato, senza
+  cambiarne il ruolo nel club (socio o istruttore). Equivale a
+  POST /api/admin/amministratore con admin: true.
+
+  utente_id accetta l'id dell'account oppure la sua email.
+
+  Cambiare ruolo chiude tutte le sessioni aperte dell'interessato: il ruolo
+  viaggia dentro il token, e finché quello vecchio non scade porterebbe
+  ancora i permessi precedenti.
 }

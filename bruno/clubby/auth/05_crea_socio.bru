@@ -1,0 +1,41 @@
+meta {
+  name: La mia scheda socio
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/auth/socio
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_viewer}}
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const socio = res.getBody();
+    if (socio && socio.id) bru.setVar("socio_id", socio.id);
+  }
+}
+
+docs {
+  Restituisce la scheda socio collegata all'account di chi chiama.
+
+  Sola lettura: non crea nulla e non collega nulla. Il collegamento fra account
+  e socio è SEMPRE un'operazione manuale di un amministratore
+  (POST /api/admin/associa-viewer).
+
+  Esiti:
+    200  la scheda collegata
+    204  nessuna scheda collegata: l'account esiste ma non vede dati finché un
+         admin non fa l'abbinamento
+
+  C'è stato un aggancio automatico basato sull'email, ed è stato tolto:
+  l'indirizzo di un socio lo digita un admin e nessuno lo verifica, quindi chi
+  ne conoscesse uno poteva registrarsi con quello ed ereditare voucher e
+  incontri di un altro. Due schede che condividono un indirizzo — due fratelli
+  iscritti con l'email del genitore — rendevano poi l'abbinamento un'ipotesi.
+}

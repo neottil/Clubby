@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clubby-authorizer
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: clubby-authorizer
+spec:
+  # Una sola replica di proposito: il limitatore dei tentativi di accesso
+  # tiene il conteggio in memoria (vedi middleware/rateLimit.ts), quindi con
+  # più repliche il limite varrebbe per ciascuna e sarebbe di fatto
+  # moltiplicato. Prima di alzare questo numero va sostituito con un
+  # contatore condiviso.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clubby-authorizer
+  template:
+    metadata:
+      labels:
+        app: clubby-authorizer
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: authorizer
+          image: ${AUTHORIZER_IMAGE}
+          ports:
+            - containerPort: ${AUTH_PORT}
+          envFrom:
+            - configMapRef:
+                name: clubby-auth-config
+            - secretRef:
+                name: clubby-auth-secrets
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              # La verifica di una password con scrypt è deliberatamente
+              # costosa in CPU e memoria (circa 16 MB per tentativo): il
+              # limite deve lasciarle spazio, altrimenti i login falliscono
+              # sotto carico invece di rallentare.
+              cpu: "500m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: ${AUTH_PORT}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: ${AUTH_PORT}
+            initialDelaySeconds: 10
+            periodSeconds: 20

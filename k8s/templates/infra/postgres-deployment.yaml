@@ -1,64 +1,76 @@
-# Istanza Postgres unica condivisa da app e Keycloak (due database separati:
-# ${DB_NAME} e "keycloak"), per risparmiare risorse su una VPS di piccole
-# dimensioni con una mole di dati ridotta. Il ConfigMap "postgres-init"
-# (creato dal workflow Infra, non da questo template statico: contiene lo
-# schema.sql dell'app + lo script di creazione del database keycloak) viene
-# eseguito automaticamente da Postgres al primo avvio (directory
-# /docker-entrypoint-initdb.d), quindi solo sul volume dati vuoto.
+# Istanza Postgres del namespace DB_NAMESPACE, condivisibile da più club.
+#
+# L'istanza non contiene nulla di un club in particolare: ha solo il
+# superutente "postgres", la cui password vive nel Secret "postgres-superuser"
+# del namespace e non è nota a nessun club. Database e utenti di ogni club
+# (<env>-clubby, <env>-auth) li crea il workflow Infra sull'istanza già in
+# esecuzione, ciascuno con il proprio utente proprietario e senza accesso agli
+# altri database.
+#
+# Niente script in /docker-entrypoint-initdb.d: vengono eseguiti solo al primo
+# avvio su un volume vuoto, quindi creerebbero i database del primo club e mai
+# quelli dei club successivi.
+#
+# Infra applica questo template solo se il Deployment non esiste ancora: con
+# più club, un ambiente non deve poter cambiare la configurazione dell'istanza
+# che serve anche gli altri.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: clubby-postgres
-  namespace: ${KUBE_NAMESPACE}
+  name: postgres
+  namespace: ${DB_NAMESPACE}
   labels:
-    app: clubby-postgres
+    app: postgres
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: clubby-postgres
+      app: postgres
   template:
     metadata:
       labels:
-        app: clubby-postgres
+        app: postgres
     spec:
       containers:
         - name: postgres
-          image: postgres:16.3-alpine3.20
+          image: postgres:18.3-alpine
           ports:
             - containerPort: 5432
           env:
-            - name: POSTGRES_DB
-              value: "${DB_NAME}"
             - name: POSTGRES_USER
-              value: "${DB_USER}"
+              value: "postgres"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: clubby-infra-secrets
-                  key: DB_PASSWORD
+                  name: postgres-superuser
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
           volumeMounts:
             - name: data
-              mountPath: /var/lib/postgresql/data
-            - name: init-scripts
-              mountPath: /docker-entrypoint-initdb.d
-              readOnly: true
+              # /var/lib/postgresql e non .../data: da Postgres 18 i dati stanno
+              # in una sottocartella con il numero di versione, e l'immagine
+              # rifiuta l'avvio se trova un volume montato sul vecchio percorso
+              # (resterebbe inutilizzato, dando l'illusione della persistenza).
+              mountPath: /var/lib/postgresql
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "${DB_USER}"]
+              command: ["pg_isready", "-U", "postgres"]
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "${DB_USER}"]
+              command: ["pg_isready", "-U", "postgres"]
             initialDelaySeconds: 15
             periodSeconds: 15
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: clubby-postgres
-        - name: init-scripts
-          configMap:
-            name: postgres-init
+            claimName: postgres

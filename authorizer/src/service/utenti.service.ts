@@ -1,10 +1,10 @@
 /**
  * Gestione degli utenti: registrazione, accesso, ruoli, password.
  *
- * Sostituisce integralmente ciò che prima faceva Keycloak. Gli identificativi
- * degli utenti (utente.id) sono gli stessi valori che finiscono nel claim
- * `sub` dei token e che il backend applicativo salva in socio.id_viewer: è
- * quel collegamento a tenere insieme un account e il socio corrispondente.
+ * Gli identificativi degli utenti (utente.id) sono gli stessi valori che
+ * finiscono nel claim `sub` dei token e che il backend applicativo salva in
+ * socio.id_viewer: è quel collegamento a tenere insieme un account e il socio
+ * corrispondente.
  */
 
 import { query } from '../db/client.js';
@@ -21,15 +21,28 @@ import {
   type ClaimsUtente,
 } from '../crypto/tokens.js';
 
-export type Ruolo = 'admin' | 'viewer';
+/**
+ * Ruolo nel club: socio o istruttore. Un istruttore può a sua volta partecipare
+ * come socio agli incontri di un altro istruttore.
+ *
+ * Amministrare l'applicazione NON è un ruolo: è il flag `admin` sull'account,
+ * indipendente da questo. Quando era un terzo ruolo alternativo, chi
+ * amministrava non poteva essere anche istruttore.
+ */
+export type Ruolo = 'socio' | 'istruttore';
 
+const RUOLI: readonly Ruolo[] = ['socio', 'istruttore'];
+
+/**
+ * Account. Nome, cognome e telefono NON sono qui: l'anagrafica è del socio,
+ * nel database applicativo, che ne è l'unica fonte. Vedi db/schema.sql.
+ */
 export interface Utente {
   id: string;
   email: string;
-  nome: string;
-  cognome: string;
-  telefono: string | null;
   ruolo: Ruolo;
+  /** Privilegio di amministrare l'applicazione, indipendente dal ruolo. */
+  admin: boolean;
   attivo: boolean;
   cambio_password_richiesto: boolean;
   ultimo_accesso: string | null;
@@ -50,7 +63,7 @@ export interface Sessione {
 
 // Campi restituiti dalle query: password_hash è escluso ovunque non serva,
 // così non può finire per distrazione in una risposta HTTP.
-const CAMPI_PUBBLICI = `id, email, nome, cognome, telefono, ruolo, attivo,
+const CAMPI_PUBBLICI = `id, email, ruolo, admin, attivo,
                         cambio_password_richiesto, ultimo_accesso, created_at`;
 
 /**
@@ -75,10 +88,8 @@ function toUtente(row: unknown): Utente {
   return {
     id: r.id as string,
     email: r.email as string,
-    nome: r.nome as string,
-    cognome: r.cognome as string,
-    telefono: (r.telefono as string | null) ?? null,
     ruolo: r.ruolo as Ruolo,
+    admin: r.admin === true,
     attivo: r.attivo as boolean,
     cambio_password_richiesto: r.cambio_password_richiesto as boolean,
     ultimo_accesso: (r.ultimo_accesso as string | null) ?? null,
@@ -90,9 +101,10 @@ function claimsDa(utente: Utente): ClaimsUtente {
   return {
     sub: utente.id,
     email: utente.email,
-    nome: utente.nome,
-    cognome: utente.cognome,
-    roles: [utente.ruolo],
+    // Il privilegio di amministrazione viaggia nello stesso elenco del ruolo:
+    // chi verifica il token controlla semplicemente se contiene 'admin', senza
+    // dover conoscere un claim in più.
+    roles: utente.admin ? [utente.ruolo, 'admin'] : [utente.ruolo],
     cambio_password_richiesto: utente.cambio_password_richiesto,
   };
 }
@@ -127,24 +139,21 @@ async function apriSessione(utente: Utente): Promise<Sessione> {
 export interface DatiRegistrazione {
   email: string;
   password: string;
-  nome: string;
-  cognome: string;
-  telefono?: string;
 }
 
 /**
- * Registra un nuovo utente, sempre con ruolo `viewer`: la promozione ad admin
- * è un'azione riservata a un admin esistente (vedi cambiaRuolo). Il ruolo non
+ * Registra un nuovo utente, sempre come `socio` e senza privilegi di
+ * amministrazione: ruolo e privilegi li concede un admin esistente (vedi
+ * cambiaRuolo e cambiaAdmin). Il ruolo non
  * è accettato in ingresso proprio per non renderlo auto-assegnabile.
+ *
+ * Servono solo email e password. L'anagrafica non viene chiesta qui perché non
+ * appartiene a questo servizio: sta sulla riga del socio, e il collegamento fra
+ * account e socio è un'operazione manuale di un amministratore, mai automatica.
  */
 export async function registra(dati: DatiRegistrazione): Promise<Sessione> {
   const email = normalizzaEmail(dati.email);
   validaEmail(email);
-
-  const nome = String(dati.nome ?? '').trim();
-  const cognome = String(dati.cognome ?? '').trim();
-  if (!nome) throw new BadRequestError('Il nome è obbligatorio');
-  if (!cognome) throw new BadRequestError('Il cognome è obbligatorio');
 
   const errorePassword = erroreValidazionePassword(dati.password);
   if (errorePassword) throw new BadRequestError(errorePassword);
@@ -155,16 +164,10 @@ export async function registra(dati: DatiRegistrazione): Promise<Sessione> {
   }
 
   const result = await query(
-    `INSERT INTO utente (email, password_hash, nome, cognome, telefono, ruolo)
-     VALUES (:email, :passwordHash, :nome, :cognome, :telefono, 'viewer')
+    `INSERT INTO utente (email, password_hash, ruolo)
+     VALUES (:email, :passwordHash, 'socio')
      RETURNING ${CAMPI_PUBBLICI}`,
-    {
-      email,
-      passwordHash: await hashPassword(dati.password),
-      nome,
-      cognome,
-      telefono: String(dati.telefono ?? '').trim() || null,
-    }
+    { email, passwordHash: await hashPassword(dati.password) }
   );
 
   return apriSessione(toUtente(result.rows[0]));
@@ -222,7 +225,7 @@ export async function rinnova(refreshToken: string): Promise<Sessione> {
 
   const result = await query(
     `SELECT rt.id AS token_id,
-            u.id, u.email, u.nome, u.cognome, u.telefono, u.ruolo, u.attivo,
+            u.id, u.email, u.ruolo, u.admin, u.attivo,
             u.cambio_password_richiesto, u.ultimo_accesso, u.created_at
      FROM refresh_token rt
      JOIN utente u ON u.id = rt.utente_id
@@ -339,9 +342,35 @@ export async function resetPasswordDaAdmin(utenteId: string): Promise<{ password
 
 export async function listaUtenti(): Promise<Utente[]> {
   const result = await query(
-    `SELECT ${CAMPI_PUBBLICI} FROM utente ORDER BY cognome, nome`
+    `SELECT ${CAMPI_PUBBLICI} FROM utente ORDER BY email`
   );
   return result.rows.map(toUtente);
+}
+
+/** Un istruttore come lo vede chi non è admin: l'identificativo e l'email. */
+export interface Istruttore {
+  id: string;
+  email: string;
+}
+
+/**
+ * Elenco degli istruttori attivi, leggibile da qualsiasi utente autenticato.
+ *
+ * Esiste separato da listaUtenti (riservato agli admin) perché serve a chiunque
+ * apra la pagina Incontri: senza, per mostrare "chi ha tenuto l'incontro"
+ * servirebbero privilegi di amministrazione.
+ *
+ * Restituisce id ed email e nient'altro: il nominativo di un istruttore è
+ * quello del suo socio, e vive nel database applicativo. È il backend a
+ * completarlo, vedi handlers/istruttori.ts.
+ */
+export async function listaIstruttori(): Promise<Istruttore[]> {
+  const result = await query(
+    `SELECT id, email FROM utente
+     WHERE ruolo = 'istruttore' AND attivo = TRUE
+     ORDER BY email`
+  );
+  return result.rows.map(r => ({ id: r.id as string, email: r.email as string }));
 }
 
 export async function getUtente(id: string): Promise<Utente> {
@@ -351,16 +380,14 @@ export async function getUtente(id: string): Promise<Utente> {
 }
 
 /**
- * Cambia il ruolo di un utente. `attoreId` è l'admin che esegue l'operazione:
- * serve a impedirgli di togliersi da solo i privilegi, che è il modo più
- * semplice di restare senza nessun admin nell'istanza.
+ * Cambia il ruolo nel club di un utente (socio o istruttore).
+ *
+ * Non tocca il privilegio di amministrazione, quindi un admin può cambiare
+ * anche il proprio ruolo senza rischiare di chiudersi fuori.
  */
-export async function cambiaRuolo(id: string, ruolo: Ruolo, attoreId: string): Promise<Utente> {
-  if (ruolo !== 'admin' && ruolo !== 'viewer') {
-    throw new BadRequestError('Ruolo non valido');
-  }
-  if (id === attoreId && ruolo !== 'admin') {
-    throw new BadRequestError('Non puoi rimuovere a te stesso il ruolo di amministratore');
+export async function cambiaRuolo(id: string, ruolo: Ruolo): Promise<Utente> {
+  if (!RUOLI.includes(ruolo)) {
+    throw new BadRequestError(`Ruolo non valido. Valori ammessi: ${RUOLI.join(', ')}`);
   }
 
   const result = await query(
@@ -372,6 +399,30 @@ export async function cambiaRuolo(id: string, ruolo: Ruolo, attoreId: string): P
   // Il ruolo è dentro il token: finché quello in circolazione non scade,
   // porterebbe ancora il ruolo vecchio. Chiudere le sessioni rende la modifica
   // effettiva subito, al costo di un nuovo accesso per l'interessato.
+  await revocaTutteLeSessioni(id);
+
+  return toUtente(result.rows[0]);
+}
+
+/**
+ * Concede o toglie il privilegio di amministrare l'applicazione.
+ *
+ * `attoreId` è l'admin che esegue l'operazione: non può togliere il privilegio
+ * a sé stesso. È anche ciò che impedisce di restare senza amministratori — per
+ * toglierlo all'ultimo admin servirebbe un altro admin.
+ */
+export async function cambiaAdmin(id: string, admin: boolean, attoreId: string): Promise<Utente> {
+  if (id === attoreId && !admin) {
+    throw new BadRequestError('Non puoi rimuovere a te stesso il privilegio di amministratore');
+  }
+
+  const result = await query(
+    `UPDATE utente SET admin = :admin WHERE id = :id RETURNING ${CAMPI_PUBBLICI}`,
+    { id, admin }
+  );
+  if (result.rows.length === 0) throw new NotFoundError('Utente non trovato');
+
+  // Come per il ruolo: il privilegio viaggia nel token.
   await revocaTutteLeSessioni(id);
 
   return toUtente(result.rows[0]);
@@ -392,24 +443,35 @@ export async function cambiaAttivo(id: string, attivo: boolean, attoreId: string
   return toUtente(result.rows[0]);
 }
 
+export interface DatiAdminIniziale {
+  email: string;
+  password: string;
+}
+
 /**
  * Crea il primo amministratore se non esiste ancora nessun utente.
+ *
  * Idempotente: a istanza già popolata non fa nulla e non tocca gli account
  * esistenti, così può essere eseguito a ogni avvio senza rischi.
+ *
+ * Solo email e password: l'admin iniziale è un account, non una persona
+ * censita. Se chi amministra è anche un socio dell'associazione, si crea la
+ * scheda socio dal pannello e la si collega a questo account — il
+ * collegamento fra account e socio è sempre un'operazione manuale.
  */
-export async function creaAdminIniziale(email: string, password: string): Promise<boolean> {
+export async function creaAdminIniziale(dati: DatiAdminIniziale): Promise<boolean> {
   const conteggio = await query(`SELECT COUNT(*) AS n FROM utente`);
   if (Number(conteggio.rows[0].n) > 0) return false;
 
-  const emailNormalizzata = normalizzaEmail(email);
+  const emailNormalizzata = normalizzaEmail(dati.email);
   validaEmail(emailNormalizzata);
-  const errore = erroreValidazionePassword(password);
+  const errore = erroreValidazionePassword(dati.password);
   if (errore) throw new BadRequestError(`Password dell'admin iniziale non valida: ${errore}`);
 
   await query(
-    `INSERT INTO utente (email, password_hash, nome, cognome, ruolo, cambio_password_richiesto)
-     VALUES (:email, :hash, 'Amministratore', 'Clubby', 'admin', TRUE)`,
-    { email: emailNormalizzata, hash: await hashPassword(password) }
+    `INSERT INTO utente (email, password_hash, ruolo, admin, cambio_password_richiesto)
+     VALUES (:email, :hash, 'socio', TRUE, TRUE)`,
+    { email: emailNormalizzata, hash: await hashPassword(dati.password) }
   );
   return true;
 }

@@ -1,0 +1,98 @@
+name: Ambiente Clubby
+description: >-
+  Ricava dal nome dell'Environment GitHub il namespace dell'applicazione, i
+  nomi dei database e le cartelle sulla VPS di un ambiente, e dal namespace
+  dell'istanza Postgres il suo indirizzo, dopo aver validato entrambi.
+  Unico punto in cui è definita la convenzione: Infra e i workflow di deploy la
+  usano tutti da qui, così non possono divergere.
+
+inputs:
+  environment:
+    description: Nome dell'Environment GitHub (es. development, romaasd)
+    required: true
+  db_namespace:
+    description: >-
+      Namespace dell'istanza Postgres (variabile DB_NAMESPACE dell'Environment).
+      Più club possono condividerlo: ognuno ha i propri database sulla stessa
+      istanza.
+    required: false
+    default: ''
+  richiede_database:
+    description: "'true' se il chiamante usa il database: in quel caso db_namespace è obbligatorio"
+    required: false
+    default: 'true'
+
+outputs:
+  app_namespace:
+    description: Namespace dei moduli applicativi (clubby-<env>-app)
+    value: ${{ steps.calcola.outputs.app_namespace }}
+  db_namespace:
+    description: Namespace dell'istanza Postgres
+    value: ${{ steps.calcola.outputs.db_namespace }}
+  db_host:
+    description: Nome completo del Service Postgres, raggiungibile da qualunque namespace
+    value: ${{ steps.calcola.outputs.db_host }}
+  db_name:
+    description: Database (e utente) dell'applicazione (<env>-clubby)
+    value: ${{ steps.calcola.outputs.db_name }}
+  auth_db_name:
+    description: Database (e utente) dell'authorizer (<env>-auth)
+    value: ${{ steps.calcola.outputs.auth_db_name }}
+  deploy_path:
+    description: Cartella sulla VPS in cui copiare i manifest dei moduli applicativi
+    value: ${{ steps.calcola.outputs.deploy_path }}
+  infra_path:
+    description: Cartella sulla VPS in cui copiare i manifest di Infra
+    value: ${{ steps.calcola.outputs.infra_path }}
+
+runs:
+  using: composite
+  steps:
+    - id: calcola
+      shell: bash
+      env:
+        AMBIENTE: ${{ inputs.environment }}
+        DB_NAMESPACE: ${{ inputs.db_namespace }}
+        RICHIEDE_DATABASE: ${{ inputs.richiede_database }}
+      run: |
+        # Etichetta DNS: lettere minuscole, cifre e trattini, con una lettera
+        # o una cifra all'inizio e alla fine. È il formato dei nomi dei
+        # namespace Kubernetes.
+        etichetta_dns='^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+
+        # Il nome dell'ambiente finisce nel namespace (max 63 caratteri, e
+        # "clubby-" + "-app" ne occupano 11) e nei nomi dei database (max 63
+        # per Postgres, "-clubby" ne occupa 7).
+        if [[ ! "$AMBIENTE" =~ $etichetta_dns ]] || [ "${#AMBIENTE}" -gt 52 ]; then
+          echo "::error::Nome dell'Environment '$AMBIENTE' non utilizzabile: sono ammessi solo lettere minuscole, cifre e trattini, con una lettera o una cifra all'inizio e alla fine, per al massimo 52 caratteri."
+          exit 1
+        fi
+
+        if [ "$RICHIEDE_DATABASE" = "true" ]; then
+          if [ -z "$DB_NAMESPACE" ]; then
+            echo "::error::La variabile DB_NAMESPACE non è impostata sull'Environment $AMBIENTE. Indica il namespace dell'istanza Postgres da usare (es. postgres-prod): più club possono condividerlo."
+            exit 1
+          fi
+          if [[ ! "$DB_NAMESPACE" =~ $etichetta_dns ]] || [ "${#DB_NAMESPACE}" -gt 63 ]; then
+            echo "::error::DB_NAMESPACE='$DB_NAMESPACE' non è un nome di namespace valido: solo lettere minuscole, cifre e trattini, al massimo 63 caratteri."
+            exit 1
+          fi
+        fi
+
+        # Cartelle sulla VPS separate per ambiente: con una sola cartella
+        # condivisa, due deploy di club diversi si sovrascriverebbero i
+        # manifest a vicenda.
+        {
+          echo "app_namespace=clubby-$AMBIENTE-app"
+          echo "db_namespace=$DB_NAMESPACE"
+          echo "db_host=postgres.$DB_NAMESPACE.svc.cluster.local"
+          echo "db_name=$AMBIENTE-clubby"
+          echo "auth_db_name=$AMBIENTE-auth"
+          echo "deploy_path=/opt/clubby/$AMBIENTE/k8s"
+          echo "infra_path=/opt/clubby/$AMBIENTE/infra"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Ambiente $AMBIENTE: namespace clubby-$AMBIENTE-app, cartelle in /opt/clubby/$AMBIENTE/"
+        if [ "$RICHIEDE_DATABASE" = "true" ]; then
+          echo "Database $AMBIENTE-clubby e $AMBIENTE-auth sull'istanza Postgres di $DB_NAMESPACE"
+        fi

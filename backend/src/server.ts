@@ -20,10 +20,16 @@ import http from 'http';
 import { verifyToken, type RequestEvent } from './middleware/auth.js';
 import { handler as sociHandler } from './handlers/soci.js';
 import { handler as incontriHandler } from './handlers/incontri.js';
+import { handler as attivitaHandler } from './handlers/attivita.js';
+import { handler as istruttoriHandler } from './handlers/istruttori.js';
 import { handler as vouchersHandler } from './handlers/vouchers.js';
+import { handler as tesseramentiHandler } from './handlers/tesseramenti.js';
+import { handler as fatturazioneHandler } from './handlers/fatturazione.js';
+import { handler as impostazioniHandler } from './handlers/impostazioni.js';
 import { handler as adminHandler } from './handlers/admin.js';
 import { handler as authHandler } from './handlers/auth.js';
 import { handler as versionHandler } from './handlers/version.js';
+import { moduloAttivo, type Modulo } from './util/moduli.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0'; // 0.0.0.0 necessario nei container
@@ -36,29 +42,40 @@ interface RouteMatch {
   params: Record<string, string>;
 }
 
+// `modulo`: la route esiste solo se quel modulo opzionale è attivo (vedi
+// util/moduli.ts). Spento, risponde 404 come qualunque percorso inesistente:
+// un 403 direbbe a chi non ha acquistato il modulo che c'è qualcosa da
+// acquistare, e non è il server a doverlo annunciare.
 const ROUTES: Array<{
   pattern: RegExp;
   handler: (event: RequestEvent) => Promise<unknown>;
   param: string | null;
+  modulo?: Modulo;
 }> = [
-  { pattern: /^\/api\/auth\/register$/,              handler: authHandler,      param: null },
+  { pattern: /^\/api\/auth\/socio$/,                 handler: authHandler,      param: null },
   { pattern: /^\/api\/version$/,                     handler: versionHandler,   param: null },
   { pattern: /^\/api\/soci\/([^/]+)$/,               handler: sociHandler,      param: 'id' },
   { pattern: /^\/api\/soci$/,                        handler: sociHandler,      param: null },
-  // Prima della rotta con :id, altrimenti "resoconto" verrebbe interpretato
-  // come l'id di un incontro (le rotte sono valutate in ordine).
-  { pattern: /^\/api\/incontri\/resoconto$/,         handler: incontriHandler,  param: null },
+  { pattern: /^\/api\/attivita\/([^/]+)$/,           handler: attivitaHandler,  param: 'id' },
+  { pattern: /^\/api\/attivita$/,                    handler: attivitaHandler,  param: null },
+  { pattern: /^\/api\/istruttori\/([^/]+)\/attivita$/, handler: istruttoriHandler, param: 'id' },
+  { pattern: /^\/api\/istruttori$/,                  handler: istruttoriHandler, param: null },
   { pattern: /^\/api\/incontri\/([^/]+)$/,           handler: incontriHandler,  param: 'id' },
   { pattern: /^\/api\/incontri$/,                    handler: incontriHandler,  param: null },
   { pattern: /^\/api\/voucher\/([^/]+)\/movimenti$/, handler: vouchersHandler,  param: 'id' },
-  { pattern: /^\/api\/voucher\/([^/]+)$/,            handler: vouchersHandler,  param: 'id' },
+  { pattern: /^\/api\/voucher\/([^/]+)\/ultima-ricarica$/, handler: vouchersHandler, param: 'id' },
   { pattern: /^\/api\/voucher$/,                     handler: vouchersHandler,  param: null },
+  { pattern: /^\/api\/tesseramenti\/([^/]+)$/,       handler: tesseramentiHandler, param: 'id', modulo: 'tesseramento' },
+  { pattern: /^\/api\/tesseramenti$/,                handler: tesseramentiHandler, param: null, modulo: 'tesseramento' },
+  { pattern: /^\/api\/fatturazione$/,                handler: fatturazioneHandler, param: null, modulo: 'fatturazione' },
+  { pattern: /^\/api\/impostazioni$/,                handler: impostazioniHandler, param: null },
   { pattern: /^\/api\/admin\/associa-viewer\/([^/]+)$/, handler: adminHandler,   param: 'socioId' },
   { pattern: /^\/api\/admin/,                          handler: adminHandler,   param: null },
 ];
 
 function route(pathname: string): RouteMatch | null {
-  for (const { pattern, handler, param } of ROUTES) {
+  for (const { pattern, handler, param, modulo } of ROUTES) {
+    if (modulo && !moduloAttivo(modulo)) continue;
     const match = pathname.match(pattern);
     if (match) {
       return { handler, params: param ? { [param]: match[1] } : {} };
@@ -148,7 +165,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Autenticazione JWT — verifica firma via JWKS Keycloak
+  // Autenticazione JWT — firma verificata con la chiave pubblica
+  // dell'authorizer, scaricata dal suo endpoint JWKS (vedi middleware/auth.ts)
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     res.writeHead(401, { 'Content-Type': 'application/json', ...CORS_HEADERS });
@@ -185,9 +203,14 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[server] Clubby API listening on http://${HOST}:${PORT}`);
-  console.log(`[server] Keycloak: ${process.env.KEYCLOAK_URL ?? 'http://localhost:8080'}`);
+  console.log(`[server] Authorizer: ${process.env.AUTH_INTERNAL_URL ?? process.env.AUTH_ISSUER ?? 'http://localhost:3001'}`);
   console.log(`[server] DB: ${process.env.DB_HOST ?? 'localhost'}:${process.env.DB_PORT ?? 5432}/${process.env.DB_NAME ?? 'clubby'}`);
   console.log(`[server] CORS origin: ${CORS_ORIGIN}`);
+  // Un modulo spento fa rispondere 404 alle sue route: senza questa riga, la
+  // causa sarebbe indistinguibile da un errore di routing.
+  const moduli = (['tesseramento', 'fatturazione'] as const)
+    .map(m => `${m}=${moduloAttivo(m) ? 'attivo' : 'spento'}`).join(', ');
+  console.log(`[server] Moduli opzionali: ${moduli}`);
 });
 
 // Graceful shutdown — necessario in Kubernetes per evitare richieste perse al SIGTERM

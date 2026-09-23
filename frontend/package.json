@@ -4,9 +4,7 @@
   "version": "2.6.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/apply-logo.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/apply-logo.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -19,7 +17,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.4",

@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clubby-auth-config
+  namespace: ${KUBE_NAMESPACE}
+data:
+  # Postgres vive in un namespace dedicato (postgres-dev/postgres-prod):
+  # l'host è quindi il nome completo del Service, comprensivo di namespace,
+  # non il solo nome breve che varrebbe solo all'interno dello stesso.
+  DB_HOST: "${DB_HOST}"
+  DB_PORT: "${DB_PORT}"
+  DB_NAME: "${AUTH_DB_NAME}"
+  DB_USER: "${AUTH_DB_USER}"
+  # URL pubblico di questo servizio: finisce nel claim "iss" dei token ed è
+  # il valore che il backend confronta in fase di verifica. Se i due non
+  # coincidono esattamente, ogni token viene rifiutato.
+  AUTH_ISSUER: "https://${AUTH_DOMAIN}"
+  # Origine ammessa per le chiamate dal browser: è il frontend a parlare
+  # direttamente con l'authorizer per accesso e registrazione.
+  CORS_ORIGIN: "https://${APP_DOMAIN}"
+  PORT: "${AUTH_PORT}"
+  # Anagrafica del primo amministratore. Non è sensibile e sta qui, non nel
+  # Secret: lì resta solo la password temporanea. Chi amministra è di norma
+  # anche uno degli istruttori, quindi nome, cognome e telefono sono quelli
+  # di una persona reale.
+  INITIAL_ADMIN_EMAIL: "${INITIAL_ADMIN_EMAIL}"

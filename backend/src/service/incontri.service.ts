@@ -1,6 +1,9 @@
 import { query, withTransaction, type QueryFn } from '../db/client.js';
+import { limiteEOffset } from '../util/paginazione.js';
+import { condizioniRicerca } from '../util/ricerca.js';
 import { NotFoundError, BadRequestError } from '../middleware/auth.js';
 import { getSocioById } from './soci.service.js';
+import { getAttivitaById } from './attivita.service.js';
 import {
   getVoucherBySocioId,
   createMovimento,
@@ -13,12 +16,21 @@ export interface Incontro {
   id: string;
   socio_id: string;
   data_incontro: string;
-  attivita: string;
-  // Nome dell'istruttore, scelto fra quelli configurati nel frontend
-  // (VITE_SELECT_ISTRUTTORI_VALUES). null quando il tenant non configura la
-  // lista (un solo istruttore: il campo non viene nemmeno mostrato) o per gli
-  // incontri registrati prima dell'introduzione del campo.
-  istruttore: string | null;
+  /** Voce di listino (tabella attivita). */
+  attivita_id: string;
+  /**
+   * Nome dell'attività, dalla JOIN con il listino: non è una colonna di
+   * incontro. Presente in lettura perché ogni riga sia leggibile da sola,
+   * senza che il chiamante debba incrociare a parte il listino.
+   */
+  attivita?: string;
+  /**
+   * Account dell'istruttore che ha tenuto l'incontro (claim `sub`). null se
+   * l'incontro non è attribuito a nessuno: l'admin può non indicarlo, e gli
+   * incontri anteriori alla gestione degli istruttori a database non hanno un
+   * account a cui ricondursi.
+   */
+  istruttore_id: string | null;
   costo: number;
   note: string | null;
   note_markdown: boolean;
@@ -29,8 +41,8 @@ export interface Incontro {
 export interface CreateIncontroInput {
   socio_id: string;
   data_incontro: string;
-  attivita: string;
-  istruttore?: string;
+  attivita_id: string;
+  istruttore_id?: string | null;
   costo: number;
   note?: string;
   note_markdown?: boolean;
@@ -40,8 +52,8 @@ export interface CreateIncontroInput {
 // dopo la creazione (vedi updateIncontro).
 export interface UpdateIncontroInput {
   data_incontro?: string;
-  attivita?: string;
-  istruttore?: string | null;
+  attivita_id?: string;
+  istruttore_id?: string | null;
   costo?: number;
   note?: string;
   note_markdown?: boolean;
@@ -61,11 +73,22 @@ export interface Page<T> {
   total: number;
 }
 
+/**
+ * Pagina di incontri con, in più, la somma dei costi di TUTTI gli incontri che
+ * soddisfano il filtro — non solo di quelli restituiti. È il totale che il
+ * resoconto mostra per il periodo scelto: calcolarlo nel browser sulle righe
+ * caricate darebbe un valore più basso del vero finché non si carica tutto.
+ */
+export interface PaginaIncontri extends Page<Incontro> {
+  totaleCosto: number;
+}
+
 export interface ListIncontriOptions {
   socioId?: string;
   /** Ricerca libera su cognome, nome e attività. */
   q?: string;
-  attivita?: string;
+  attivitaId?: string;
+  istruttoreId?: string;
   /** Estremi inclusi, "YYYY-MM-DD". */
   da?: string;
   a?: string;
@@ -89,15 +112,15 @@ export interface ListIncontriOptions {
 const SORT_COLUMNS: Record<string, string[]> = {
   socioNome:     ['s.cognome', 's.nome'],
   data_incontro: ['i.data_incontro'],
-  attivita:      ['i.attivita'],
-  istruttore:    ['i.istruttore'],
+  attivita:      ['a.nome'],
+  // Per id e non per nome: i nomi degli istruttori stanno nel database
+  // dell'authorizer e non sono raggiungibili da questa query. L'ordinamento
+  // non è alfabetico, ma tiene insieme le righe dello stesso istruttore, che è
+  // ciò per cui si clicca su quella colonna.
+  istruttore:    ['i.istruttore_id'],
   costo:         ['i.costo'],
 };
 
-const DEFAULT_LIMIT = 25;
-// Tetto massimo per una singola pagina: senza, un client potrebbe chiedere
-// limit=1000000 e riportare il problema che la paginazione serve a evitare.
-const MAX_LIMIT = 200;
 
 /**
  * Descrizione del movimento di addebito generato da un incontro.
@@ -105,6 +128,11 @@ const MAX_LIMIT = 200;
  * Unico punto in cui viene composta: la usano sia la creazione sia la modifica
  * dell'incontro, che devono produrre la stessa stringa (altrimenti rinominare
  * l'attività lascerebbe descrizioni di formato diverso nella stessa lista).
+ *
+ * Il nome dell'attività viene copiato nella descrizione invece di essere
+ * risolto ogni volta dal listino: il movimento è una scrittura contabile, e
+ * deve continuare a dire per che cosa fu addebitato anche se l'attività viene
+ * in seguito rinominata.
  */
 function descrizioneAddebito(attivita: string): string {
   return `Incontro: ${attivita}`;
@@ -122,9 +150,8 @@ function descrizioneAddebito(attivita: string): string {
  * anche sul nominativo, senza che il chiamante debba incrociare a parte
  * l'elenco dei soci.
  */
-export async function listIncontri(options: ListIncontriOptions = {}): Promise<Page<Incontro>> {
-  const limit  = Math.min(Math.max(1, options.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
-  const offset = Math.max(0, options.offset ?? 0);
+export async function listIncontri(options: ListIncontriOptions = {}): Promise<PaginaIncontri> {
+  const { limit, offset } = limiteEOffset(options);
 
   const where: string[] = [];
   const params: Record<string, unknown> = { limit, offset };
@@ -133,9 +160,13 @@ export async function listIncontri(options: ListIncontriOptions = {}): Promise<P
     where.push('i.socio_id = :socioId');
     params.socioId = options.socioId;
   }
-  if (options.attivita) {
-    where.push('i.attivita = :attivita');
-    params.attivita = options.attivita;
+  if (options.attivitaId) {
+    where.push('i.attivita_id = :attivitaId');
+    params.attivitaId = options.attivitaId;
+  }
+  if (options.istruttoreId) {
+    where.push('i.istruttore_id = :istruttoreId');
+    params.istruttoreId = options.istruttoreId;
   }
   // CAST(... AS DATE) e non "::date": il convertitore di parametri con nome
   // (db/client.ts) sostituisce ogni ":parola" e leggerebbe "::date" come un
@@ -148,10 +179,7 @@ export async function listIncontri(options: ListIncontriOptions = {}): Promise<P
     where.push('i.data_incontro <= CAST(:a AS DATE)');
     params.a = options.a;
   }
-  if (options.q?.trim()) {
-    where.push(`(s.cognome ILIKE :q OR s.nome ILIKE :q OR i.attivita ILIKE :q)`);
-    params.q = `%${options.q.trim()}%`;
-  }
+  where.push(...condizioniRicerca(options.q, ['s.cognome', 's.nome', 'a.nome'], params));
 
   const orderColumns = SORT_COLUMNS[options.sort ?? ''] ?? SORT_COLUMNS.data_incontro;
   const orderDir     = options.dir === 'asc' ? 'ASC' : 'DESC';
@@ -163,88 +191,44 @@ export async function listIncontri(options: ListIncontriOptions = {}): Promise<P
 
   const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
-  // COUNT(*) OVER(): il totale delle righe che passano il filtro viene
-  // calcolato dalla stessa query che restituisce la pagina, evitando una
-  // seconda andata e ritorno al database con gli stessi filtri da tenere
-  // sincronizzati a mano.
+  // COUNT(*) OVER() e SUM(costo) OVER(): numero e costo complessivo delle
+  // righe che passano il filtro, calcolati dalla stessa query che restituisce
+  // la pagina. Le funzioni finestra sono valutate prima di LIMIT/OFFSET, quindi
+  // coprono tutto il risultato filtrato e non la sola pagina; e stando nella
+  // stessa query non esiste il rischio che totali e righe rispondano a filtri
+  // leggermente diversi.
   const result = await query(
-    `SELECT i.*, s.nome, s.cognome, COUNT(*) OVER() AS total_count
+    `SELECT i.*, s.nome, s.cognome, a.nome AS attivita,
+            COUNT(*) OVER() AS total_count,
+            SUM(i.costo) OVER() AS totale_costo
      FROM incontro i
      JOIN socio s ON s.id = i.socio_id
+     JOIN attivita a ON a.id = i.attivita_id
      ${whereSql}
      ORDER BY ${orderBy}
      LIMIT :limit OFFSET :offset`,
     params
   );
 
-  const total = result.rows.length > 0 ? Number(result.rows[0].total_count) : 0;
+  const prima = result.rows[0];
+  const total       = prima ? Number(prima.total_count) : 0;
+  const totaleCosto = prima ? Number(prima.totale_costo) : 0;
   const rows = result.rows.map(row => {
-    // total_count è un dettaglio della query, non un campo dell'incontro:
-    // lasciarlo passerebbe nel JSON di ogni riga.
-    const { total_count: _ignored, ...incontro } = row as Record<string, unknown>;
+    // I totali sono un dettaglio della query, non campi dell'incontro:
+    // lasciarli passerebbe nel JSON di ogni riga.
+    const { total_count: _n, totale_costo: _c, ...incontro } = row as Record<string, unknown>;
     return toIncontro(incontro);
   });
 
-  return { rows, total };
-}
-
-/** Una riga del resoconto: un'attività di un istruttore, con conteggio e costo. */
-export interface RigaResoconto {
-  /** null per gli incontri senza istruttore (vedi la colonna in schema.sql). */
-  istruttore: string | null;
-  attivita: string;
-  incontri: number;
-  costo: number;
-}
-
-/**
- * Resoconto aggregato degli incontri di un periodo, raggruppati per istruttore
- * e attività.
- *
- * L'aggregazione è in SQL e non nel browser perché il resoconto ha bisogno di
- * *tutti* gli incontri del periodo: con l'elenco paginato il frontend ne vedrebbe
- * solo una pagina e produrrebbe totali più bassi del vero, senza alcun segnale
- * che manchi qualcosa. Qui il traffico è invece proporzionale al numero di
- * combinazioni istruttore/attività — poche decine — non al numero di incontri.
- *
- * Include anche i gruppi con istruttore NULL: sta al chiamante decidere come
- * presentarli (ResocontoPage li dichiara come esclusi dai prospetti).
- */
-export async function resocontoIncontri(da?: string, a?: string): Promise<RigaResoconto[]> {
-  const where: string[] = [];
-  const params: Record<string, unknown> = {};
-
-  if (da) {
-    where.push('data_incontro >= CAST(:da AS DATE)');
-    params.da = da;
-  }
-  if (a) {
-    where.push('data_incontro <= CAST(:a AS DATE)');
-    params.a = a;
-  }
-
-  const result = await query(
-    `SELECT istruttore, attivita, COUNT(*) AS incontri, SUM(costo) AS costo
-     FROM incontro
-     ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-     GROUP BY istruttore, attivita
-     ORDER BY istruttore NULLS LAST, SUM(costo) DESC`,
-    params
-  );
-
-  // COUNT e SUM arrivano come stringa (bigint e numeric via JSON): convertiti
-  // qui, così il frontend riceve numeri e non deve ricordarsi di farlo.
-  return result.rows.map(row => ({
-    istruttore: (row.istruttore as string | null) ?? null,
-    attivita:   row.attivita as string,
-    incontri:   Number(row.incontri),
-    costo:      Number(row.costo),
-  }));
+  return { rows, total, totaleCosto };
 }
 
 export async function getIncontroById(id: string, q: QueryFn = query): Promise<Incontro> {
   const result = await q(
-    `SELECT * FROM incontro WHERE id = :id`,
+    `SELECT i.*, a.nome AS attivita
+     FROM incontro i
+     JOIN attivita a ON a.id = i.attivita_id
+     WHERE i.id = :id`,
     { id }
   );
   if (result.rows.length === 0) {
@@ -262,35 +246,39 @@ export async function getIncontroById(id: string, q: QueryFn = query): Promise<I
 export async function createIncontro(input: CreateIncontroInput): Promise<Incontro> {
   if (!input.socio_id) throw new BadRequestError('socio_id è obbligatorio');
   if (!input.data_incontro) throw new BadRequestError('data_incontro è obbligatoria');
-  // Controllo esplicito e non lasciato al vincolo NOT NULL della colonna: una
-  // stringa vuota lo soddisfarebbe comunque, e l'errore di Postgres tornerebbe
-  // al client come 500 anziché come 400 con un messaggio leggibile.
-  if (!input.attivita?.trim()) throw new BadRequestError('attivita è obbligatoria');
+  // Controllo esplicito e non lasciato al vincolo NOT NULL della colonna:
+  // l'errore di Postgres tornerebbe al client come 500 anziché come 400 con un
+  // messaggio leggibile.
+  if (!input.attivita_id) throw new BadRequestError('attivita_id è obbligatoria');
   if (input.costo === undefined || input.costo < 0) {
     throw new BadRequestError('costo deve essere >= 0');
   }
 
   await getSocioById(input.socio_id);
+  // Il nome serve alla descrizione del movimento, e la lettura fa da controllo
+  // di esistenza: un attivita_id inventato verrebbe altrimenti respinto dalla
+  // foreign key con un errore del driver.
+  const attivita = await getAttivitaById(input.attivita_id);
 
   return withTransaction(async (q) => {
     const result = await q(
-      `INSERT INTO incontro (socio_id, data_incontro, attivita, istruttore, costo, note, note_markdown)
-       VALUES (:socio_id, :data_incontro, :attivita, :istruttore, :costo, :note, :note_markdown)
+      `INSERT INTO incontro (socio_id, data_incontro, attivita_id, istruttore_id, costo, note, note_markdown)
+       VALUES (:socio_id, :data_incontro, :attivita_id, :istruttore_id, :costo, :note, :note_markdown)
        RETURNING *`,
       {
         socio_id: input.socio_id,
         data_incontro: input.data_incontro,
-        attivita: input.attivita.trim(),
+        attivita_id: input.attivita_id,
         // Stringa vuota normalizzata a NULL: "nessun istruttore" deve essere
         // un solo valore a db, altrimenti i raggruppamenti del resoconto
         // vedrebbero due gruppi distinti ('' e NULL) per lo stesso caso.
-        istruttore: input.istruttore?.trim() || null,
+        istruttore_id: input.istruttore_id || null,
         costo: input.costo,
         note: input.note ?? null,
         note_markdown: input.note_markdown ?? false,
       }
     );
-    const incontro = toIncontro(result.rows[0]);
+    const incontro = { ...toIncontro(result.rows[0]), attivita: attivita.nome };
 
     const voucher = await getVoucherBySocioId(input.socio_id, q);
     if (voucher) {
@@ -298,7 +286,7 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
         voucher.id,
         {
           importo: -Number(input.costo),
-          descrizione: descrizioneAddebito(input.attivita),
+          descrizione: descrizioneAddebito(attivita.nome),
           incontro_id: incontro.id,
           data_movimento: input.data_incontro,
         },
@@ -327,14 +315,15 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
       setClauses.push('data_incontro = :data_incontro');
       params.data_incontro = input.data_incontro;
     }
-    if (input.attivita !== undefined) {
-      if (!input.attivita.trim()) throw new BadRequestError('attivita è obbligatoria');
-      setClauses.push('attivita = :attivita');
-      params.attivita = input.attivita.trim();
+    if (input.attivita_id !== undefined) {
+      if (!input.attivita_id) throw new BadRequestError('attivita_id è obbligatoria');
+      await getAttivitaById(input.attivita_id, q);
+      setClauses.push('attivita_id = :attivita_id');
+      params.attivita_id = input.attivita_id;
     }
-    if (input.istruttore !== undefined) {
-      setClauses.push('istruttore = :istruttore');
-      params.istruttore = input.istruttore?.trim() || null;
+    if (input.istruttore_id !== undefined) {
+      setClauses.push('istruttore_id = :istruttore_id');
+      params.istruttore_id = input.istruttore_id || null;
     }
     if (input.costo !== undefined) {
       if (input.costo < 0) throw new BadRequestError('costo deve essere >= 0');
@@ -352,18 +341,21 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
 
     if (setClauses.length === 0) throw new BadRequestError('Nessun campo da aggiornare');
 
-    const result = await q(
-      `UPDATE incontro SET ${setClauses.join(', ')} WHERE id = :id RETURNING *`,
+    await q(
+      `UPDATE incontro SET ${setClauses.join(', ')} WHERE id = :id`,
       params
     );
-    const incontro = toIncontro(result.rows[0]);
+    // Riletto con la JOIN invece di usare RETURNING: serve il nome
+    // dell'attività aggiornata, sia per la risposta sia per la descrizione del
+    // movimento collegato.
+    const incontro = await getIncontroById(id, q);
 
     // Il movimento collegato segue l'incontro in importo, data e descrizione:
     // una sola lettura, poi solo i campi effettivamente cambiati. Data e
     // descrizione sono presi dalla riga appena aggiornata e non da "input",
     // che è parziale: se cambia solo l'attività, la data da riscrivere è
     // comunque quella già memorizzata sull'incontro.
-    const derivatiCambiati = input.data_incontro !== undefined || input.attivita !== undefined;
+    const derivatiCambiati = input.data_incontro !== undefined || input.attivita_id !== undefined;
     if (input.costo !== undefined || derivatiCambiati) {
       const movimento = await getMovimentoByIncontroId(id, q);
       if (movimento) {
@@ -375,7 +367,7 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
             movimento.id,
             {
               data_movimento: incontro.data_incontro,
-              descrizione: descrizioneAddebito(incontro.attivita),
+              descrizione: descrizioneAddebito(incontro.attivita ?? ''),
             },
             q
           );

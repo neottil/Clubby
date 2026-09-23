@@ -1,12 +1,11 @@
 name: Build & Deploy
 
-# Backend e frontend sono due scope completamente indipendenti: ognuno ha i
-# propri manifest k8s colocati nel proprio folder (backend/k8s/, frontend/k8s/
-# — non più un k8s/templates/app/ condiviso), il proprio tag Git
+# Backend, frontend e authorizer sono tre scope completamente indipendenti:
+# ognuno ha i propri manifest k8s colocati nel proprio folder (backend/k8s/,
+# frontend/k8s/, authorizer/k8s/), il proprio tag Git
 # "<scope>-<branch>-<data>" (stesso tag sia da riferimento per il diff della
-# prossima run, sia da riferimento per il workflow Tag: niente più due
-# famiglie di tag separate), e build/deploy che girano solo se necessario,
-# senza mai toccare il Deployment k8s dell'altro componente.
+# prossima run, sia da riferimento per il workflow Tag), e build/deploy che
+# girano solo se necessario, senza mai toccare i Deployment k8s degli altri.
 on:
   push:
     branches:
@@ -22,7 +21,7 @@ on:
       # applicativi non esistono più, ma per il diff "non è cambiato niente" e
       # i job di deploy non girerebbero affatto).
       force_all:
-        description: 'Forza rebuild e redeploy di backend e frontend, ignorando il diff'
+        description: 'Forza rebuild e redeploy di backend, frontend e authorizer, ignorando il diff'
         type: boolean
         default: false
 
@@ -35,12 +34,15 @@ jobs:
     outputs:
       server: ${{ steps.v.outputs.server }}
       client: ${{ steps.v.outputs.client }}
+      auth: ${{ steps.v.outputs.auth }}
       date_tag: ${{ steps.v.outputs.date_tag }}
       sha: ${{ steps.v.outputs.sha }}
       has_backend: ${{ steps.analyze.outputs.has_backend }}
       has_frontend: ${{ steps.analyze.outputs.has_frontend }}
+      has_authorizer: ${{ steps.analyze.outputs.has_authorizer }}
       deploy_backend: ${{ steps.analyze.outputs.deploy_backend }}
       deploy_frontend: ${{ steps.analyze.outputs.deploy_frontend }}
+      deploy_authorizer: ${{ steps.analyze.outputs.deploy_authorizer }}
     steps:
       # fetch-depth: 0 necessario per "git tag --merged" e il diff nello step
       # di analisi sotto (serve tutta la history + i tag, non solo l'ultimo commit).
@@ -72,14 +74,14 @@ jobs:
       # tratta entrambi gli scope come "codice + manifest cambiati". Sui push
       # la variabile è stringa vuota, quindi il confronto con "true" è falso e
       # il comportamento normale resta invariato.
-      - name: Analizza modifiche (backend e frontend indipendentemente)
+      - name: Analizza modifiche (i tre scope indipendentemente)
         id: analyze
         env:
           FORCE_ALL: ${{ inputs.force_all }}
         run: |
           BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
 
-          for SCOPE in backend frontend; do
+          for SCOPE in backend frontend authorizer; do
             PREV_TAG=$(git tag --merged HEAD --sort=-creatordate -l "${SCOPE}-${BRANCH_SLUG}-*" | head -1)
 
             if [ "$FORCE_ALL" = "true" ]; then
@@ -121,6 +123,7 @@ jobs:
           BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
           echo "server=$(node -p "require('./backend/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "client=$(node -p "require('./frontend/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "auth=$(node -p "require('./authorizer/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "date_tag=${BRANCH_SLUG}-$(date -u +%Y%m%d_%H%M)" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -137,7 +140,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
@@ -183,38 +186,17 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      # Le variabili VITE_* sono compilate nel bundle statico da Vite in questo
-      # step (pipeline), non nel Dockerfile: Vite le legge solo a build-time.
-      # LOGO_FILE non ha prefisso VITE_ perché non è letta dal browser: la
-      # legge scripts/apply-logo.mjs (hook "prebuild" di npm) per copiare il
-      # logo del tenant da frontend/branding/ in frontend/public/logo.svg
-      # prima che Vite lo includa come asset statico.
-      #
-      # VITE_API_BASE_URL/VITE_KEYCLOAK_URL/VITE_KEYCLOAK_REALM/VITE_KEYCLOAK_CLIENT_ID
-      # non sono variabili GitHub separate: derivano da APP_DOMAIN/KEYCLOAK_HOST/
-      # KEYCLOAK_REALM/KEYCLOAK_CLIENT_ID (stessi valori usati da backend/Infra),
-      # per evitare di dover tenere sincronizzate due variabili identiche.
+      # Nessuna configurazione del club in questa build: nome, indirizzi di API
+      # e authorizer, tema e logo li legge il browser all'avvio da
+      # /config.json, generato al deploy per ciascun ambiente
+      # (deploy-frontend.yml). L'immagine è così la stessa per tutti i club, e
+      # Promote la porta in qualunque ambiente senza ricompilarla.
       - name: Installa dipendenze e builda il frontend
         working-directory: frontend
-        env:
-          VITE_API_BASE_URL: https://${{ vars.APP_DOMAIN }}
-          VITE_KEYCLOAK_URL: https://${{ vars.KEYCLOAK_HOST }}
-          VITE_KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'clubby' }}
-          VITE_KEYCLOAK_CLIENT_ID: ${{ vars.KEYCLOAK_CLIENT_ID || 'clubby-spa' }}
-          VITE_TENANT_NAME: ${{ vars.VITE_TENANT_NAME }}
-          VITE_ACTIVITY_SELECT_VALUES_MAPPING: ${{ vars.VITE_ACTIVITY_SELECT_VALUES_MAPPING }}
-          VITE_SELECT_ISTRUTTORI_VALUES: ${{ vars.VITE_SELECT_ISTRUTTORI_VALUES }}
-          VITE_THEME_PRIMARY: ${{ vars.VITE_THEME_PRIMARY }}
-          VITE_THEME_PRIMARY_TEXT: ${{ vars.VITE_THEME_PRIMARY_TEXT }}
-          VITE_THEME_DANGER: ${{ vars.VITE_THEME_DANGER }}
-          VITE_THEME_SUCCESS: ${{ vars.VITE_THEME_SUCCESS }}
-          VITE_THEME_NAV_BG: ${{ vars.VITE_THEME_NAV_BG }}
-          VITE_THEME_NAV_TEXT: ${{ vars.VITE_THEME_NAV_TEXT }}
-          LOGO_FILE: ${{ vars.LOGO_FILE }}
         run: |
           npm ci
           npm run build
@@ -232,6 +214,47 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/clubby-frontend:${{ needs.versions.outputs.date_tag }}
             ghcr.io/${{ github.repository_owner }}/clubby-frontend:latest
+
+  build-authorizer:
+    needs: versions
+    if: needs.versions.outputs.has_authorizer == 'true'
+    runs-on: ubuntu-latest
+    environment: development
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: authorizer/package-lock.json
+
+      # Come per il backend, la compilazione avviene qui: il Dockerfile si
+      # limita a impacchettare authorizer/dist già pronto.
+      - name: Installa dipendenze e builda l'authorizer
+        working-directory: authorizer
+        run: |
+          npm ci
+          npm run build
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Context = ./authorizer: a differenza del backend, qui non serve nulla
+      # dalla radice del repo.
+      - uses: docker/build-push-action@v7
+        with:
+          context: ./authorizer
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/clubby-authorizer:${{ needs.versions.outputs.date_tag }}
+            ghcr.io/${{ github.repository_owner }}/clubby-authorizer:latest
 
   # Decide quale immagine backend deployare in QUESTA run (specifico di
   # questa run: branch, history dei tag — resta fuori dal workflow
@@ -405,6 +428,78 @@ jobs:
             git push origin "$TAG" --force
           fi
 
+  # Vedi commento gemello in resolve-backend-image.
+  resolve-authorizer-image:
+    needs: [versions, build-authorizer]
+    if: |
+      always() &&
+      needs.versions.outputs.deploy_authorizer == 'true' &&
+      needs.versions.result == 'success' &&
+      (needs.build-authorizer.result == 'success' || needs.build-authorizer.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.image.outputs.image_tag }}
+      branch_slug: ${{ steps.image.outputs.branch_slug }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determina l'immagine authorizer da usare
+        id: image
+        run: |
+          BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
+          echo "branch_slug=$BRANCH_SLUG" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ needs.versions.outputs.has_authorizer }}" = "true" ]; then
+            echo "image_tag=${{ needs.versions.outputs.date_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            PREV=$(git tag -l "authorizer-${BRANCH_SLUG}-*" --sort=-creatordate | head -1)
+            if [ -z "$PREV" ]; then
+              echo "ERRORE: nessuna immagine authorizer risulta mai deployata su questo branch, e questa run non ne ha buildata una nuova. Impossibile continuare." >&2
+              exit 1
+            fi
+            echo "image_tag=${PREV#authorizer-}" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy-authorizer:
+    needs: resolve-authorizer-image
+    if: needs.resolve-authorizer-image.result == 'success'
+    uses: ./.github/workflows/deploy-authorizer.yml
+    with:
+      environment: development
+      image_tag: ${{ needs.resolve-authorizer-image.outputs.image_tag }}
+    secrets: inherit
+
+  # Vedi commento gemello in register-backend-tag.
+  register-authorizer-tag:
+    needs: [versions, resolve-authorizer-image, deploy-authorizer]
+    if: needs.deploy-authorizer.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Config git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Registra il deploy di authorizer
+        run: |
+          if [ "${{ needs.versions.outputs.has_authorizer }}" = "true" ]; then
+            TAG="authorizer-${{ needs.versions.outputs.date_tag }}"
+            git tag -a "$TAG" -m "$TAG"
+            git push origin "$TAG"
+          else
+            TAG=$(git tag -l "authorizer-${{ needs.resolve-authorizer-image.outputs.branch_slug }}-*" --sort=-creatordate | head -1)
+            git tag -fa "$TAG" -m "$TAG"
+            git push origin "$TAG" --force
+          fi
+
   # A fine deploy, ripulisce dal registry le immagini taggate con la sola data,
   # mantenendo solo le 3 più recenti per repository immagine. I tag di versione
   # reale (X.Y.Z, assegnati dal workflow Tag) sono esclusi e non vengono mai
@@ -415,13 +510,14 @@ jobs:
   # direttamente l'API di GitHub Packages via "gh api", stesso approccio già
   # usato in cleanup-build-tags.yml.
   cleanup-registry:
-    needs: [versions, deploy-backend, deploy-frontend]
+    needs: [versions, deploy-backend, deploy-frontend, deploy-authorizer]
     if: |
       always() &&
       needs.versions.result == 'success' &&
       (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped') &&
       (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped') &&
-      (needs.deploy-backend.result == 'success' || needs.deploy-frontend.result == 'success')
+      (needs.deploy-authorizer.result == 'success' || needs.deploy-authorizer.result == 'skipped') &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-frontend.result == 'success' || needs.deploy-authorizer.result == 'success')
     runs-on: ubuntu-latest
     environment: development
     permissions:
@@ -432,7 +528,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          for IMG in clubby-backend clubby-frontend; do
+          for IMG in clubby-backend clubby-frontend clubby-authorizer; do
             echo "=== $IMG ==="
             VERSIONS=$(gh api "/users/$OWNER/packages/container/$IMG/versions?per_page=100" --paginate 2>/dev/null || echo '[]')
 

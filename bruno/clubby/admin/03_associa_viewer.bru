@@ -17,13 +17,16 @@ auth:bearer {
 body:json {
   {
     "socio_id": "{{socio_id}}",
-    "keycloak_user_id": "viewer@clubby.local"
+    "utente_id": "{{utente_id}}"
   }
 }
 
 docs {
-  Solo admin. Collega un utente Keycloak (viewer) a un record socio nel DB.
-  Dopo questa operazione il viewer può accedere ai dati di quel socio.
-  keycloak_user_id può essere UUID o email.
-  Utile per i soci creati manualmente dall'admin prima che l'utente si registrasse.
+  Solo admin. Collega un account a un record socio: da quel momento quella
+  persona vede i dati di quel socio e nessun altro.
+
+  utente_id accetta l'id dell'account oppure la sua email.
+
+  Serve per i soci creati a mano dall'admin prima che la persona si
+  registrasse: alla registrazione il collegamento avviene da solo.
 }

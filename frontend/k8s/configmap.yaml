@@ -1,12 +1,20 @@
-# Versione del frontend, esposta a runtime su GET /version.json.
+# File serviti da nginx a runtime (vedi nginx.conf), montati nel pod da
+# frontend/k8s/deployment.yaml:
 #
-# Non è una VITE_* compilata nel bundle: quelle si fissano al momento della
-# build, mentre APP_VERSION qui è il tag dell'immagine che QUESTO deploy sta
-# mettendo in esecuzione — tag di data da Build & Deploy (es.
-# "main-20260728_1553"), versione reale "X.Y.Z" da Promote, che ri-tagga
-# l'immagine senza ribuildarla e quindi non potrebbe mai aggiornare un valore
-# compilato dentro il bundle. Stessa logica di APP_VERSION lato backend
-# (backend/k8s/configmap.yaml), servita nel modo che ha senso per nginx.
+#   /version.json  versione dell'immagine in esecuzione, mostrata dalla
+#                  pagina Info
+#   /config.json   configurazione del club: nome, indirizzi di API e
+#                  authorizer, tema e logo, letta dal browser all'avvio
+#
+# Nessuno dei due è compilato nel bundle. La versione non potrebbe esserlo:
+# APP_VERSION è il tag che QUESTO deploy mette in esecuzione — tag di data da
+# Build & Deploy (es. "main-20260728_1553"), versione reale "X.Y.Z" da Promote,
+# che ri-tagga l'immagine senza ribuildarla. La configurazione non deve
+# esserlo: la stessa immagine serve tutti i club, e ciascuno riceve la propria
+# da qui.
+#
+# FRONTEND_CONFIG_JSON è costruito da deploy-frontend.yml con jq: già su una
+# riga e con gli escape JSON, quindi sicuro anche con virgolette nel nome.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,3 +23,5 @@ metadata:
 data:
   version.json: |
     {"version":"${APP_VERSION}"}
+  config.json: |
+    ${FRONTEND_CONFIG_JSON}

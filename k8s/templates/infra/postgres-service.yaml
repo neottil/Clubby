@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: clubby-postgres
-  namespace: ${KUBE_NAMESPACE}
+  name: postgres
+  namespace: ${DB_NAMESPACE}
 spec:
   selector:
-    app: clubby-postgres
+    app: postgres
   ports:
     - port: 5432
       targetPort: 5432

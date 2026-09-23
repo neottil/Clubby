@@ -113,9 +113,10 @@ EOF
 
 # /opt è tipicamente root:root (755): senza questo passo l'utente di deploy
 # non ha i permessi per creare le sottocartelle dove le pipeline Infra/Build &
-# Deploy copiano i manifest via scp (DEPLOY_PATH/INFRA_DEPLOY_PATH, default
-# /opt/clubby/k8s e /opt/clubby/infra — vedi README), causando un
-# errore "Process exited with status 1" nello step scp-action.
+# Deploy copiano i manifest via scp (/opt/clubby/<ambiente>/k8s e
+# /opt/clubby/<ambiente>/infra, una cartella per ambiente — vedi
+# .github/actions/ambiente), causando un errore "Process exited with status 1"
+# nello step scp-action.
 echo "=== 6/6: Preparo /opt/clubby per l'utente $DEPLOY_USER ==="
 mkdir -p /opt/clubby
 chown -R "$DEPLOY_USER":"$DEPLOY_USER" /opt/clubby

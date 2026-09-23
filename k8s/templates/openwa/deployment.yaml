@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwa-api
+  namespace: openwa
+  labels:
+    app: openwa
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwa
+  template:
+    metadata:
+      labels:
+        app: openwa
+    spec:
+      containers:
+        - name: openwa-api
+          image: ghcr.io/rmyndharis/openwa:0.18
+          ports:
+            - containerPort: 2785
+          envFrom:
+            - secretRef:
+                name: openwa-secrets
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "2785"
+            - name: ENGINE_TYPE
+              value: "baileys"
+            - name: SESSION_DATA_PATH
+              value: "/app/data/sessions"
+            - name: STORAGE_TYPE
+              value: "local"
+            - name: STORAGE_LOCAL_PATH
+              value: "/app/data/media"
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 2785
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 2785
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openwa-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openwa-service
+  namespace: openwa
+spec:
+  type: ClusterIP
+  selector:
+    app: openwa
+  ports:
+    - name: http
+      port: 2785
+      targetPort: 2785

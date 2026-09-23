@@ -10,16 +10,26 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, logout } = useAuth();
+  const { user, logout, socioCollegato } = useAuth();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Voucher è la home (vedi App.tsx): primo nel menu.
+  // L'istruttore ha bisogno dell'elenco soci (ne vede il solo nominativo) e
+  // del proprio resoconto; l'amministrazione resta agli admin.
   const navLinks = [
     { to: '/voucher', label: 'Voucher' },
-    ...(user?.isAdmin ? [{ to: '/soci', label: 'Soci' }] : []),
+    ...(user?.isAdmin || user?.isIstruttore ? [{ to: '/soci', label: 'Soci' }] : []),
     { to: '/incontri', label: 'Incontri' },
-    ...(user?.isAdmin ? [{ to: '/resoconto', label: 'Resoconto' }] : []),
+    // Resoconto è la vista del singolo istruttore: un admin consulta gli
+    // stessi dati da Resoconti, scegliendo sé stesso.
+    ...(user?.isIstruttore && !user?.isAdmin ? [{ to: '/resoconto', label: 'Resoconto' }] : []),
+    ...(user?.isAdmin ? [
+      { to: '/resoconti', label: 'Resoconti' },
+      // Moduli opzionali del club: senza, le rotte non esistono (vedi App.tsx).
+      ...(config.moduli.tesseramento ? [{ to: '/tesseramenti', label: 'Tesseramenti' }] : []),
+      ...(config.moduli.fatturazione ? [{ to: '/fatturazione', label: 'Fatturazione' }] : []),
+    ] : []),
     { to: '/info',    label: 'Info' },
     ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin' }] : []),
   ];
@@ -50,7 +60,7 @@ export default function Layout({ children }: LayoutProps) {
       `}</style>
       <nav style={styles.nav}>
         <Link to="/voucher" style={styles.brandLink}>
-          <img src="/logo.svg" alt="" style={styles.brandLogo} />
+          <img src={config.logo} alt="" style={styles.brandLogo} />
           <span style={styles.brand}>{config.tenantName}</span>
         </Link>
 
@@ -103,6 +113,16 @@ export default function Layout({ children }: LayoutProps) {
         />
       )}
 
+      {/* Un account che non è ancora legato a un socio vede l'applicazione
+          vuota: senza questo avviso sembrerebbe rotta. Non riguarda gli admin,
+          che lavorano sui dati di tutti e non hanno bisogno di un socio
+          proprio. */}
+      {socioCollegato === false && !user?.isAdmin && (
+        <div style={styles.avvisoSocio}>
+          Il tuo account non è ancora collegato alla tua scheda socio. Chiedi a un amministratore di collegarlo.
+        </div>
+      )}
+
       <main style={styles.main}>{children}</main>
     </div>
   );
@@ -110,6 +130,10 @@ export default function Layout({ children }: LayoutProps) {
 
 const styles: Record<string, React.CSSProperties> = {
   wrapper: { minHeight: '100vh', background: '#f8f9fa' },
+  avvisoSocio: {
+    background: '#fff7ed', color: '#9a3412', borderBottom: '1px solid #fed7aa',
+    padding: '12px 32px', fontSize: 14, lineHeight: 1.5,
+  },
   nav: {
     position: 'relative',
     display: 'flex',

@@ -76,7 +76,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      # Per ciascuno dei 2 scope: trova l'ultimo tag <scope>-main-*, controlla
+      # Per ciascuno dei 3 scope: trova l'ultimo tag <scope>-main-*, controlla
       # se il suo commit è già coperto da un tag di versione reale (già
       # promosso: salta), altrimenti legge la versione dal package.json AL
       # COMMIT di quel tag (non da HEAD: ogni scope può essere più
@@ -86,14 +86,14 @@ jobs:
       # rebuild), e crea la GitHub Release per quella versione (idempotente:
       # se esiste già — es. dopo uno spostamento del tag sullo stesso nome —
       # la lascia invariata invece di fallire).
-      - name: Promuovi backend e frontend (solo gli scope che ne hanno bisogno)
+      - name: Promuovi i moduli (solo gli scope che ne hanno bisogno)
         id: promuovi
         run: |
-          declare -A REAL_PREFIX=( [backend]=server [frontend]=client )
-          declare -A IMAGE=( [backend]=clubby-backend [frontend]=clubby-frontend )
-          declare -A PROMOTED=( [backend]=false [frontend]=false )
+          declare -A REAL_PREFIX=( [backend]=server [frontend]=client [authorizer]=auth )
+          declare -A IMAGE=( [backend]=clubby-backend [frontend]=clubby-frontend [authorizer]=clubby-authorizer )
+          declare -A PROMOTED=( [backend]=false [frontend]=false [authorizer]=false )
 
-          for SCOPE in backend frontend; do
+          for SCOPE in backend frontend authorizer; do
             echo "=== $SCOPE ==="
             DEPLOY_TAG=$(git tag -l "${SCOPE}-main-*" --sort=-creatordate | head -1)
             if [ -z "$DEPLOY_TAG" ]; then
@@ -133,8 +133,16 @@ jobs:
             PROMOTED[$SCOPE]=true
           done
 
+          # Conta quanti scope sono stati promossi: serve sia per sapere se
+          # c'è qualcosa da ripulire, sia per decidere se limitare la pulizia.
+          PROMOSSI=""
+          for SCOPE in backend frontend authorizer; do
+            if [ "${PROMOTED[$SCOPE]}" = "true" ]; then PROMOSSI="$PROMOSSI $SCOPE"; fi
+          done
+          PROMOSSI=$(echo "$PROMOSSI" | xargs)
+
           PROMOTED_ANY=false
-          if [ "${PROMOTED[backend]}" = "true" ] || [ "${PROMOTED[frontend]}" = "true" ]; then
+          if [ -n "$PROMOSSI" ]; then
             PROMOTED_ANY=true
           else
             echo ""
@@ -142,14 +150,13 @@ jobs:
           fi
 
           # Scope da passare al trigger di cleanup: se è stato promosso un
-          # solo scope, limita la pulizia a quello (non ha senso ripulire
-          # anche l'altro, che non è cambiato); se sono stati promossi
-          # entrambi, vuoto = pulisce entrambi.
+          # solo scope, limita la pulizia a quello (non ha senso ripulire gli
+          # altri, che non sono cambiati). Se ne sono stati promossi più
+          # d'uno, vuoto = li pulisce tutti, perché l'input "scope" del
+          # workflow di cleanup accetta un solo valore per volta.
           CLEANUP_SCOPE=""
-          if [ "${PROMOTED[backend]}" = "true" ] && [ "${PROMOTED[frontend]}" != "true" ]; then
-            CLEANUP_SCOPE="backend"
-          elif [ "${PROMOTED[frontend]}" = "true" ] && [ "${PROMOTED[backend]}" != "true" ]; then
-            CLEANUP_SCOPE="frontend"
+          if [ "$(echo "$PROMOSSI" | wc -w)" = "1" ]; then
+            CLEANUP_SCOPE="$PROMOSSI"
           fi
 
           echo "promoted_any=$PROMOTED_ANY" >> "$GITHUB_OUTPUT"

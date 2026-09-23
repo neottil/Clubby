@@ -1,21 +1,20 @@
 meta {
-  name: Ottieni token viewer
+  name: Accesso viewer
   type: http
   seq: 2
 }
 
 post {
-  url: {{keycloak_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/token
-  body: formUrlEncoded
+  url: {{auth_url}}/auth/login
+  body: json
   auth: none
 }
 
-body:form-urlencoded {
-  grant_type: password
-  client_id: {{keycloak_client_id}}
-  username: viewer@clubby.local
-  password: Viewer1234!
-  scope: openid
+body:json {
+  {
+    "email": "mario.rossi@demo.local",
+    "password": "Demo12345!"
+  }
 }
 
 script:post-response {
@@ -29,6 +28,8 @@ script:post-response {
 }
 
 docs {
-  Ottieni un access token per l'utente viewer.
-  Il token viene salvato automaticamente nella variabile token_viewer.
+  Accesso come utente viewer: salva token_viewer e refresh_token_viewer.
+
+  Le credenziali sono quelle create da scripts/seed-demo-data.sh. Lancialo
+  prima, altrimenti l'account non esiste.
 }

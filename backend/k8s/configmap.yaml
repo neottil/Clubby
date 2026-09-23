@@ -4,12 +4,20 @@ metadata:
   name: clubby-config
   namespace: ${KUBE_NAMESPACE}
 data:
+  # Postgres vive in un namespace dedicato (postgres-dev/postgres-prod):
+  # DB_HOST è quindi il nome completo del Service, comprensivo di namespace.
   DB_HOST: "${DB_HOST}"
   DB_PORT: "${DB_PORT}"
   DB_NAME: "${DB_NAME}"
   DB_USER: "${DB_USER}"
-  KEYCLOAK_URL: "${KEYCLOAK_URL}"
-  KEYCLOAK_REALM: "${KEYCLOAK_REALM}"
-  KEYCLOAK_ADMIN_CLIENT_ID: "${KEYCLOAK_ADMIN_CLIENT_ID}"
+  # Emittente atteso dei token: l'URL pubblico dell'authorizer, cioè il valore
+  # che l'authorizer stesso scrive nel claim "iss". Se i due non coincidono
+  # esattamente, il backend rifiuta ogni token.
+  AUTH_ISSUER: "https://${AUTH_DOMAIN}"
+  # Indirizzo con cui il backend raggiunge davvero l'authorizer: il Service
+  # interno al cluster, non il nome pubblico. Da lì scarica le chiavi
+  # pubbliche per verificare i token e inoltra le operazioni di
+  # amministrazione sugli utenti.
+  AUTH_INTERNAL_URL: "http://clubby-authorizer.${KUBE_NAMESPACE}.svc.cluster.local"
   PORT: "${BACKEND_PORT}"
   APP_VERSION: "${APP_VERSION}"

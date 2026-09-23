@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: clubby-postgres
-  namespace: ${KUBE_NAMESPACE}
+  name: postgres
+  namespace: ${DB_NAMESPACE}
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:

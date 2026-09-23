@@ -1,0 +1,26 @@
+meta {
+  name: Aggiorna impostazioni
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{base_url}}/api/impostazioni
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "quota_tesseramento": 40.00
+  }
+}
+
+docs {
+  Solo admin. quota_tesseramento (>= 0): la quota proposta a ogni rinnovo del
+  tesseramento. I rinnovi già registrati mantengono la quota che avevano.
+}

@@ -1,39 +1,43 @@
 meta {
-  name: Registrazione autonoma (post-login)
+  name: Registrazione nuovo account
   type: http
-  seq: 3
+  seq: 4
 }
 
 post {
-  url: {{base_url}}/api/auth/register
+  url: {{auth_url}}/auth/register
   body: json
-  auth: bearer
-}
-
-auth:bearer {
-  token: {{token_viewer}}
+  auth: none
 }
 
 body:json {
   {
-    "nome": "Mario",
-    "cognome": "Rossi",
-    "email": "viewer@clubby.local"
+    "email": "anna.neri@demo.local",
+    "password": "Password123!"
   }
 }
 
 script:post-response {
   const data = res.getBody();
-  if (data.id) {
-    bru.setVar("socio_id", data.id);
+  if (data.access_token) {
+    bru.setVar("token_viewer", data.access_token);
+  }
+  if (data.utente && data.utente.id) {
+    bru.setVar("utente_id", data.utente.id);
   }
 }
 
 docs {
-  Chiamato dal frontend dopo il primo login PKCE.
-  Crea il record socio nel DB e assegna il ruolo viewer in Keycloak.
-  È idempotente: se il socio esiste già ritorna 200 con il socio esistente.
-  
-  Richiede un JWT valido (token_viewer o token_admin).
-  Salva automaticamente l'id del socio creato in socio_id.
+  Crea un account e apre subito una sessione. Il ruolo è sempre "socio", senza privilegio admin:
+  non è accettato in ingresso, proprio per non renderlo auto-assegnabile.
+
+  Servono solo email e password: nome, cognome e telefono non appartengono a
+  questo servizio, stanno sulla scheda socio nel database applicativo.
+
+  La password deve essere lunga almeno 10 caratteri.
+
+  Questo crea solo l'ACCOUNT. Per legarlo alla sua scheda socio si chiama poi
+  POST /api/auth/register sul backend (cartella auth, "Collega l'account al
+  socio"): aggancia il socio già censito con questa stessa email, e se non
+  esiste risponde 204 lasciando l'abbinamento a un admin.
 }

@@ -6,8 +6,10 @@
 # stesso host: qui solo /api, l'altro fa da default per "/".
 #
 # Il backend non ha un hostname proprio: espone già tutte le sue route sotto
-# il prefisso /api (vedi backend/src/server.ts), e il client frontend chiama
-# ${VITE_API_BASE_URL}/api/... — un solo host condiviso, routing per path.
+# il prefisso /api (vedi backend/src/server.ts), e il frontend le chiama sullo
+# stesso host da cui è servito — un solo host condiviso, routing per path.
+# L'authorizer fa eccezione e ha un host proprio: le sue route stanno alla
+# radice, /.well-known/jwks.json compreso.
 #
 # Assume Traefik come Ingress Controller (incluso di default in k3s, ingressClassName
 # "traefik") e cert-manager con il ClusterIssuer "letsencrypt", entrambi configurati da

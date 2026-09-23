@@ -1,0 +1,30 @@
+meta {
+  name: Modifica attività (admin)
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{base_url}}/api/attivita/{{attivita_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "costo_default": 30.00,
+    "attiva": true
+  }
+}
+
+docs {
+  Solo admin. Campi modificabili: nome, costo_default, attiva.
+
+  Impostare attiva a false è il modo normale di ritirare un'attività: sparisce
+  dalle scelte ma resta leggibile sugli incontri già registrati. L'eliminazione
+  vera è possibile solo finché nessun incontro la usa.
+}

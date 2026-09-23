@@ -1,49 +1,78 @@
 name: Infra
 
-# Attivazione MANUALE: provisiona (o ri-applica in modo idempotente) il
-# namespace k8s, l'istanza Postgres condivisa (database applicativo +
-# database Keycloak) e Keycloak stesso, poi inizializza il realm. Da
-# eseguire una volta prima del primo deploy applicativo in un namespace, o
-# quando serve ricreare l'infrastruttura.
+# Attivazione MANUALE: prepara (o ri-applica in modo idempotente)
+# l'infrastruttura di un ambiente — development o un club:
+#   - il namespace dell'applicazione, clubby-<env>-app;
+#   - l'istanza Postgres nel namespace DB_NAMESPACE, SOLO se non esiste già;
+#   - i database e gli utenti del club su quell'istanza, <env>-clubby e
+#     <env>-auth, con i rispettivi schemi.
 #
-# Scope volutamente separato da Build & Deploy, che gestisce solo backend e
-# frontend applicativi (vedi README, sezione K8s).
+# DB_NAMESPACE può essere lo stesso per più club: condividono allora
+# l'istanza, ciascuno con i propri database e senza accesso a quelli altrui.
+#
+# Da eseguire una volta per ambiente prima del primo deploy applicativo, o
+# quando serve riallineare l'infrastruttura. Scope volutamente separato da
+# Build & Deploy e Promote, che gestiscono i tre moduli applicativi.
 on:
   workflow_dispatch:
     inputs:
-      env:
-        description: 'Ambiente target (deve esistere come Environment del repo, con le proprie Variables/Secrets)'
+      environment:
+        description: 'Ambiente su cui agire (development o un club): deve esistere come Environment del repo, con le proprie Variables/Secrets'
         type: environment
-        required: true
-      initial_admin_email:
-        description: 'Email del primo utente admin reale da creare in Keycloak'
-        required: true
-      initial_admin_password:
-        description: >-
-          Password iniziale (temporanea) del primo admin. Keycloak obbliga a
-          cambiarla al primo login. Non riusarla altrove: resta visibile nei
-          log di questa run.
         required: true
 
 jobs:
   infra:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.env }}
+    environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v7
 
+      # Infra genera da sé i secret del club: servono le credenziali per
+      # raggiungere la VPS (DB_NAMESPACE lo controlla la action ambiente) e
+      # l'email del primo admin, a cui è destinata la password generata qui.
+      - name: Verifica Variables e Secrets dell'ambiente
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          INITIAL_ADMIN_EMAIL: ${{ vars.INITIAL_ADMIN_EMAIL }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mancanti=0
+          for nome in SSH_HOST SSH_USER INITIAL_ADMIN_EMAIL; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::La Variable $nome non è impostata sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "::error::Il Secret SSH_PRIVATE_KEY non è impostato sull'Environment ${{ inputs.environment }}."
+            mancanti=1
+          fi
+          exit $mancanti
+
+      # Composite action locale: gli output letti più sotto come
+      # steps.ambiente.outputs.* sono dichiarati in .github/actions/ambiente/action.yml.
+      - name: Ricava namespace, database e percorsi dall'ambiente
+        id: ambiente
+        uses: ./.github/actions/ambiente
+        with:
+          environment: ${{ inputs.environment }}
+          db_namespace: ${{ vars.DB_NAMESPACE }}
+
       # Se questi Secrets esistono già sull'Environment (copiati da una run
       # precedente, anche fallita più avanti — vedi step di riepilogo con
-      # if: always()), li RIUSA invece di rigenerarli a caso: Postgres/Keycloak
-      # persistono i dati tra un run e l'altro (PVC), quindi una password
-      # rigenerata ogni volta smetterebbe di corrispondere a quella realmente
-      # impostata al primo avvio, rompendo i login su ogni run successivo.
-      - name: Genera (o riusa) i secret dell'infrastruttura
+      # if: always()), li RIUSA invece di rigenerarli a caso: i dati restano
+      # sul volume fra un run e l'altro, e una chiave di firma rigenerata
+      # invaliderebbe tutti i token in circolazione. Le password dei database
+      # vengono comunque riallineate sugli utenti Postgres a ogni run.
+      - name: Genera (o riusa) i secret del club
         id: secrets
         env:
           EXISTING_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          EXISTING_KC_BOOTSTRAP_PASSWORD: ${{ secrets.KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD }}
-          EXISTING_KC_BACKEND_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
+          EXISTING_AUTH_DB_PASSWORD: ${{ secrets.AUTH_DB_PASSWORD }}
+          EXISTING_AUTH_JWT_PRIVATE_KEY: ${{ secrets.AUTH_JWT_PRIVATE_KEY }}
+          EXISTING_INITIAL_ADMIN_PASSWORD: ${{ secrets.INITIAL_ADMIN_PASSWORD }}
         run: |
           if [ -n "$EXISTING_DB_PASSWORD" ]; then
             echo "db_password=$EXISTING_DB_PASSWORD" >> "$GITHUB_OUTPUT"
@@ -53,46 +82,79 @@ jobs:
             echo "  DB_PASSWORD: generato nuovo (nessun secret esistente trovato)."
           fi
 
-          if [ -n "$EXISTING_KC_BOOTSTRAP_PASSWORD" ]; then
-            echo "kc_bootstrap_password=$EXISTING_KC_BOOTSTRAP_PASSWORD" >> "$GITHUB_OUTPUT"
-            echo "  KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD: riuso quello già presente nell'Environment."
+          if [ -n "$EXISTING_AUTH_DB_PASSWORD" ]; then
+            echo "auth_db_password=$EXISTING_AUTH_DB_PASSWORD" >> "$GITHUB_OUTPUT"
+            echo "  AUTH_DB_PASSWORD: riuso quello già presente nell'Environment."
           else
-            echo "kc_bootstrap_password=$(openssl rand -base64 24)" >> "$GITHUB_OUTPUT"
-            echo "  KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD: generato nuovo (nessun secret esistente trovato)."
+            echo "auth_db_password=$(openssl rand -base64 24)" >> "$GITHUB_OUTPUT"
+            echo "  AUTH_DB_PASSWORD: generato nuovo (nessun secret esistente trovato)."
           fi
 
-          if [ -n "$EXISTING_KC_BACKEND_SECRET" ]; then
-            echo "kc_backend_secret=$EXISTING_KC_BACKEND_SECRET" >> "$GITHUB_OUTPUT"
-            echo "  KEYCLOAK_ADMIN_CLIENT_SECRET: riuso quello già presente nell'Environment."
+          # Chiave di firma dei token. Va riusata a ogni run: rigenerarla
+          # invaliderebbe di colpo tutti i token e i refresh token in
+          # circolazione, disconnettendo ogni utente. Gli a capo del PEM sono
+          # convertiti in "\n" letterali perché il valore deve stare su una
+          # riga sola sia come output di step sia come GitHub Secret
+          # (crypto/tokens.ts li ripristina prima di leggere la chiave).
+          if [ -n "$EXISTING_AUTH_JWT_PRIVATE_KEY" ]; then
+            echo "auth_jwt_key=$EXISTING_AUTH_JWT_PRIVATE_KEY" >> "$GITHUB_OUTPUT"
+            echo "  AUTH_JWT_PRIVATE_KEY: riuso quella già presente nell'Environment."
           else
-            echo "kc_backend_secret=$(openssl rand -hex 32)" >> "$GITHUB_OUTPUT"
-            echo "  KEYCLOAK_ADMIN_CLIENT_SECRET: generato nuovo (nessun secret esistente trovato)."
+            KEY=$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null | awk '{printf "%s\\n", $0}')
+            echo "auth_jwt_key=$KEY" >> "$GITHUB_OUTPUT"
+            echo "  AUTH_JWT_PRIVATE_KEY: generata nuova (nessun secret esistente trovato)."
           fi
+
+          # Password temporanea del primo admin: generata qui invece di essere
+          # chiesta a chi lancia la pipeline. Va comunque sostituita al primo
+          # accesso, quindi farla scegliere sarebbe solo un passaggio in più —
+          # per giunta con il rischio che venga riusata da altre parti.
+          #
+          # Riusata se già presente nell'Environment, come gli altri secret:
+          # se l'admin non è ancora stato creato (deploy non ancora fatto),
+          # rigenerarla renderebbe inutilizzabile quella già annotata.
+          # Alfabeto senza caratteri ambigui: va letta e ridigitata da una
+          # persona, spesso dettata a voce.
+          if [ -n "$EXISTING_INITIAL_ADMIN_PASSWORD" ]; then
+            echo "initial_admin_password=$EXISTING_INITIAL_ADMIN_PASSWORD" >> "$GITHUB_OUTPUT"
+            echo "  INITIAL_ADMIN_PASSWORD: riuso quella già presente nell'Environment."
+          else
+            PWD_TEMP=$(LC_ALL=C tr -dc 'A-HJ-NP-Za-hj-km-np-z2-9' < /dev/urandom | head -c 14)
+            echo "initial_admin_password=$PWD_TEMP" >> "$GITHUB_OUTPUT"
+            echo "  INITIAL_ADMIN_PASSWORD: generata nuova (nessun secret esistente trovato)."
+          fi
+
+      # Usata SOLO se l'istanza Postgres del namespace non ha ancora un
+      # superutente: in quel caso finisce in un Secret del cluster e non va
+      # copiata da nessuna parte. Se l'istanza esiste già (l'ha creata un altro
+      # club) viene ignorata.
+      - name: Prepara la password del superutente di una nuova istanza
+        id: superutente
+        run: |
+          PASSWORD=$(openssl rand -base64 24)
+          echo "::add-mask::$PASSWORD"
+          echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
 
       - name: Renderizza manifest k8s/templates/infra
         env:
-          KUBE_NAMESPACE: ${{ vars.KUBE_NAMESPACE }}
-          DB_NAME: ${{ vars.DB_NAME || 'clubby' }}
-          DB_USER: ${{ vars.DB_USER || 'clubby' }}
+          KUBE_NAMESPACE: ${{ steps.ambiente.outputs.app_namespace }}
+          DB_NAMESPACE: ${{ steps.ambiente.outputs.db_namespace }}
           POSTGRES_STORAGE_SIZE: ${{ vars.POSTGRES_STORAGE_SIZE || '5Gi' }}
-          KEYCLOAK_HOST: ${{ vars.KEYCLOAK_HOST }}
-          KEYCLOAK_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
-          KEYCLOAK_START_MODE: ${{ vars.KEYCLOAK_START_MODE || 'start' }}
           DB_NODE_PORT: ${{ vars.DB_NODE_PORT }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered-infra
-          VARS='$KUBE_NAMESPACE $DB_NAME $DB_USER $POSTGRES_STORAGE_SIZE $KEYCLOAK_HOST $KEYCLOAK_BOOTSTRAP_ADMIN $KEYCLOAK_START_MODE $DB_NODE_PORT'
+          VARS='$KUBE_NAMESPACE $DB_NAMESPACE $POSTGRES_STORAGE_SIZE $DB_NODE_PORT'
           for f in k8s/templates/infra/*.yaml; do
             envsubst "$VARS" < "$f" > "k8s/rendered-infra/$(basename "$f")"
           done
 
-      - name: Prepara file di init Postgres e lo script di init realm
-        run: |
-          mkdir -p k8s/rendered-infra/postgres-init
-          cp backend/src/db/schema.sql k8s/rendered-infra/postgres-init/01-schema.sql
-          echo 'CREATE DATABASE keycloak;' > k8s/rendered-infra/postgres-init/00-create-keycloak-db.sql
-          cp scripts/keycloak-realm-init.sh k8s/rendered-infra/keycloak-realm-init.sh
+          # Schemi dei due database, applicati da Infra sull'istanza in
+          # esecuzione. Sono idempotenti: riapplicarli su un database già
+          # popolato non tocca i dati.
+          mkdir -p k8s/rendered-infra/schema
+          cp backend/src/db/schema.sql k8s/rendered-infra/schema/app.sql
+          cp authorizer/src/db/schema.sql k8s/rendered-infra/schema/auth.sql
 
       - name: Copia i file sulla VPS via SSH
         uses: appleboy/scp-action@v0.1.7
@@ -102,30 +164,27 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
           source: "k8s/rendered-infra/*"
-          target: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubby/infra' }}
+          target: ${{ steps.ambiente.outputs.infra_path }}
           strip_components: 2
 
-      - name: Applica l'infrastruttura e inizializza il realm Keycloak
+      - name: Applica l'infrastruttura
         uses: appleboy/ssh-action@v1.2.0
         env:
-          NS: ${{ vars.KUBE_NAMESPACE }}
-          PATH_REMOTE: ${{ vars.INFRA_DEPLOY_PATH || '/opt/clubby/infra' }}
+          NS: ${{ steps.ambiente.outputs.app_namespace }}
+          DB_NS: ${{ steps.ambiente.outputs.db_namespace }}
+          PATH_REMOTE: ${{ steps.ambiente.outputs.infra_path }}
+          DB_NAME: ${{ steps.ambiente.outputs.db_name }}
+          AUTH_DB_NAME: ${{ steps.ambiente.outputs.auth_db_name }}
           DB_PASSWORD: ${{ steps.secrets.outputs.db_password }}
-          KC_BOOTSTRAP_PASSWORD: ${{ steps.secrets.outputs.kc_bootstrap_password }}
-          KC_BACKEND_SECRET: ${{ steps.secrets.outputs.kc_backend_secret }}
-          KC_BOOTSTRAP_ADMIN: ${{ vars.KEYCLOAK_BOOTSTRAP_ADMIN || 'admin' }}
-          KC_REALM: ${{ vars.KEYCLOAK_REALM || 'clubby' }}
-          KC_HOST: ${{ vars.KEYCLOAK_HOST }}
-          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          AUTH_DB_PASSWORD: ${{ steps.secrets.outputs.auth_db_password }}
+          SUPERUSER_PASSWORD: ${{ steps.superutente.outputs.password }}
           DB_NODE_PORT: ${{ vars.DB_NODE_PORT }}
-          INITIAL_ADMIN_EMAIL: ${{ inputs.initial_admin_email }}
-          INITIAL_ADMIN_PASSWORD: ${{ inputs.initial_admin_password }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ vars.SSH_PORT || 22 }}
-          envs: NS,PATH_REMOTE,DB_PASSWORD,KC_BOOTSTRAP_PASSWORD,KC_BACKEND_SECRET,KC_BOOTSTRAP_ADMIN,KC_REALM,KC_HOST,APP_DOMAIN,DB_NODE_PORT,INITIAL_ADMIN_EMAIL,INITIAL_ADMIN_PASSWORD
+          envs: NS,DB_NS,PATH_REMOTE,DB_NAME,AUTH_DB_NAME,DB_PASSWORD,AUTH_DB_PASSWORD,SUPERUSER_PASSWORD,DB_NODE_PORT
           script: |
             set -e
 
@@ -136,107 +195,180 @@ jobs:
             # esplicitamente il file preparato per l'utente di deploy.
             export KUBECONFIG="$HOME/.kube/config"
 
+            # Namespace dell'applicazione e dell'istanza Postgres. Idempotenti:
+            # se il namespace del database esiste già (creato da un altro club)
+            # non cambia nulla.
             kubectl apply -f "$PATH_REMOTE/namespace.yaml"
+            kubectl apply -f "$PATH_REMOTE/postgres-namespace.yaml"
 
-            kubectl create secret generic clubby-infra-secrets -n "$NS" \
-              --from-literal=DB_PASSWORD="$DB_PASSWORD" \
-              --from-literal=KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="$KC_BOOTSTRAP_PASSWORD" \
-              --dry-run=client -o yaml | kubectl apply -f -
-
-            kubectl create configmap postgres-init -n "$NS" \
-              --from-file="$PATH_REMOTE/postgres-init/" \
-              --dry-run=client -o yaml | kubectl apply -f -
-
-            kubectl apply -f "$PATH_REMOTE/postgres-pvc.yaml"
-            kubectl apply -f "$PATH_REMOTE/postgres-deployment.yaml"
+            # ------------------------------------------------------------
+            # Istanza Postgres: creata solo se manca
+            # ------------------------------------------------------------
+            # L'istanza può servire più club: ogni risorsa viene creata solo se
+            # assente, e mai riapplicata con i valori di questo ambiente, che
+            # potrebbero cambiarla per tutti (es. ridimensionare il volume).
+            if ! kubectl get secret postgres-superuser -n "$DB_NS" >/dev/null 2>&1; then
+              kubectl create secret generic postgres-superuser -n "$DB_NS" \
+                --from-literal=POSTGRES_PASSWORD="$SUPERUSER_PASSWORD"
+              echo "Creata la password del superutente dell'istanza (resta solo nel cluster)."
+            fi
+            if ! kubectl get pvc postgres -n "$DB_NS" >/dev/null 2>&1; then
+              kubectl apply -f "$PATH_REMOTE/postgres-pvc.yaml"
+            fi
+            if kubectl get deployment postgres -n "$DB_NS" >/dev/null 2>&1; then
+              echo "Postgres esiste già in $DB_NS: lo riuso senza modificarlo."
+            else
+              echo "Postgres non esiste in $DB_NS: lo creo."
+              kubectl apply -f "$PATH_REMOTE/postgres-deployment.yaml"
+            fi
             kubectl apply -f "$PATH_REMOTE/postgres-service.yaml"
-            kubectl rollout status deployment/clubby-postgres -n "$NS" --timeout=180s
+            kubectl rollout status deployment/postgres -n "$DB_NS" --timeout=180s
 
-            # NodePort esterno per Postgres: solo se DB_NODE_PORT è impostata
-            # (nessun default — feature opt-in, vedi README). Se non impostata,
-            # rimuove il Service se esisteva da una run precedente con la
-            # variabile poi tolta, per non lasciare porte aperte per errore.
+            # Pronto per la readinessProbe non significa sempre pronto a
+            # ricevere comandi nei primissimi istanti: attesa esplicita.
+            for i in $(seq 1 30); do
+              if kubectl exec -n "$DB_NS" deployment/postgres -- pg_isready -U postgres -q; then break; fi
+              sleep 2
+            done
+
+            # NodePort esterno: solo se DB_NODE_PORT è impostata, e mai rimosso
+            # in automatico — su un'istanza condivisa, un club senza la
+            # variabile toglierebbe l'accesso configurato da un altro (vedi il
+            # template). Il valore è unico per tutto il cluster.
             if [ -n "$DB_NODE_PORT" ]; then
               kubectl apply -f "$PATH_REMOTE/postgres-nodeport.yaml"
-            else
-              kubectl delete -f "$PATH_REMOTE/postgres-nodeport.yaml" --ignore-not-found
             fi
 
-            kubectl apply -f "$PATH_REMOTE/keycloak-deployment.yaml"
-            kubectl apply -f "$PATH_REMOTE/keycloak-service.yaml"
-            kubectl apply -f "$PATH_REMOTE/keycloak-ingress.yaml"
-            kubectl rollout status deployment/clubby-keycloak -n "$NS" --timeout=300s
+            # ------------------------------------------------------------
+            # Database e utenti del club
+            # ------------------------------------------------------------
+            # Comandi eseguiti dentro il pod sul socket locale, su cui
+            # l'immagine ufficiale di Postgres autentica in modalità trust:
+            # nessuna password del superutente transita.
+            psql_superutente() {
+              kubectl exec -i -n "$DB_NS" deployment/postgres -- \
+                psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q
+            }
 
-            kubectl create configmap keycloak-realm-init-script -n "$NS" \
-              --from-file=keycloak-realm-init.sh="$PATH_REMOTE/keycloak-realm-init.sh" \
-              --dry-run=client -o yaml | kubectl apply -f -
+            # Crea (o riallinea) utente e database omonimi, poi applica lo
+            # schema come proprietario, così le tabelle nascono sue.
+            crea_database() {
+              local nome="$1"
+              # Apici singoli raddoppiati: la password finisce in un letterale SQL.
+              local password="${2//\'/\'\'}"
+              local schema="$3"
 
-            kubectl create secret generic clubby-init-params -n "$NS" \
-              --from-literal=KEYCLOAK_URL="http://clubby-keycloak.$NS.svc.cluster.local:8080" \
-              --from-literal=REALM="$KC_REALM" \
-              --from-literal=ADMIN_USER="$KC_BOOTSTRAP_ADMIN" \
-              --from-literal=ADMIN_PASS="$KC_BOOTSTRAP_PASSWORD" \
-              --from-literal=FRONTEND_URL="https://$APP_DOMAIN" \
-              --from-literal=BACKEND_CLIENT_SECRET="$KC_BACKEND_SECRET" \
-              --from-literal=INITIAL_ADMIN_EMAIL="$INITIAL_ADMIN_EMAIL" \
-              --from-literal=INITIAL_ADMIN_PASSWORD="$INITIAL_ADMIN_PASSWORD" \
-              --dry-run=client -o yaml | kubectl apply -f -
+              psql_superutente <<SQL
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$nome') THEN
+                CREATE ROLE "$nome" LOGIN PASSWORD '$password';
+              ELSE
+                -- Riallinea la password al Secret dell'Environment.
+                ALTER ROLE "$nome" WITH LOGIN PASSWORD '$password';
+              END IF;
+            END
+            \$\$;
+            SELECT format('CREATE DATABASE %I OWNER %I', '$nome', '$nome')
+            WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$nome')\gexec
+            -- Per default ogni utente dell'istanza può collegarsi a qualunque
+            -- database: con più club sulla stessa istanza va impedito.
+            REVOKE ALL ON DATABASE "$nome" FROM PUBLIC;
+            GRANT CONNECT, TEMPORARY ON DATABASE "$nome" TO "$nome";
+            SQL
 
-            kubectl delete job keycloak-realm-init -n "$NS" --ignore-not-found
-            kubectl apply -f "$PATH_REMOTE/keycloak-init-job.yaml"
-            kubectl wait --for=condition=complete job/keycloak-realm-init -n "$NS" --timeout=180s
+              # client_min_messages=warning: riapplicando lo schema su un
+              # database esistente, ogni "already exists, skipping" finirebbe
+              # nel log come NOTICE, coprendo quello che conta.
+              kubectl exec -i -n "$DB_NS" deployment/postgres -- \
+                env PGOPTIONS='-c client_min_messages=warning' \
+                psql -U "$nome" -d "$nome" -v ON_ERROR_STOP=1 -q < "$schema"
+              echo "Database $nome pronto."
+            }
 
-            echo "--- Log del Job di inizializzazione realm ---"
-            kubectl logs job/keycloak-realm-init -n "$NS"
+            crea_database "$DB_NAME" "$DB_PASSWORD" "$PATH_REMOTE/schema/app.sql"
+            crea_database "$AUTH_DB_NAME" "$AUTH_DB_PASSWORD" "$PATH_REMOTE/schema/auth.sql"
 
-      # if: always() — gira anche se un passo precedente è fallito (es. il Job
-      # di init Keycloak): i tre secret sono già stati generati/riusati dallo
-      # step "Genera (o riusa)" a inizio job, quindi vanno comunque mostrati.
-      # Copiandoli nell'Environment ORA, la run successiva li riuserà invece
-      # di generarne di nuovi (vedi commento su quello step) — indispensabile
-      # se il fallimento è avvenuto DOPO che Postgres/Keycloak li hanno già
-      # usati per creare utenti/dati persistenti.
+            echo ""
+            echo "Postgres risponde su postgres.$DB_NS.svc.cluster.local:5432"
+            echo "(i workflow di deploy ricavano da soli questo indirizzo da DB_NAMESPACE)."
+
+      # if: always() — gira anche se un passo precedente è fallito: i secret
+      # sono già stati generati/riusati dallo step "Genera (o riusa)" a inizio
+      # job, quindi vanno comunque mostrati. Copiandoli nell'Environment ORA,
+      # la run successiva li riuserà invece di generarne di nuovi.
       - name: Riepilogo — valori da copiare nei GitHub Secrets/Variables
         if: always()
         run: |
           {
             echo "## Infra — riepilogo (${{ job.status }})"
             echo ""
-            echo "Copia questi valori nell'Environment **${{ inputs.env }}** (Settings → Environments →"
-            echo "${{ inputs.env }}), usati dalla pipeline **Build & Deploy** (sempre Environment \`dev\`,"
-            echo "quindi rilevante solo se questa run ha provisionato \`dev\`):"
+            echo "Ambiente **${{ inputs.environment }}**:"
+            echo "- namespace dell'applicazione: \`${{ steps.ambiente.outputs.app_namespace }}\`"
+            echo "- istanza Postgres: namespace \`${{ steps.ambiente.outputs.db_namespace }}\`"
+            echo "- database: \`${{ steps.ambiente.outputs.db_name }}\` e \`${{ steps.ambiente.outputs.auth_db_name }}\`, ciascuno con l'utente omonimo"
+            echo "- primo admin: \`${{ vars.INITIAL_ADMIN_EMAIL }}\` (Variable \`INITIAL_ADMIN_EMAIL\`), con la password \`INITIAL_ADMIN_PASSWORD\` qui sotto"
+            echo ""
+            echo "Copia questi valori nell'Environment **${{ inputs.environment }}** (Settings → Environments →"
+            echo "${{ inputs.environment }}): li leggono i workflow di deploy quando agiscono su questo ambiente."
             echo ""
             echo "### Secrets"
             echo '```'
             echo "DB_PASSWORD=${{ steps.secrets.outputs.db_password }}"
-            echo "KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=${{ steps.secrets.outputs.kc_bootstrap_password }}"
-            echo "KEYCLOAK_ADMIN_CLIENT_SECRET=${{ steps.secrets.outputs.kc_backend_secret }}"
+            echo "AUTH_DB_PASSWORD=${{ steps.secrets.outputs.auth_db_password }}"
+            echo "INITIAL_ADMIN_PASSWORD=${{ steps.secrets.outputs.initial_admin_password }}"
             echo '```'
+            echo ""
+            echo "La chiave privata di firma dei token è lunga e va copiata a parte:"
+            echo ""
+            echo "<details><summary>AUTH_JWT_PRIVATE_KEY (clicca per espandere)</summary>"
+            echo ""
+            echo '```'
+            echo "${{ steps.secrets.outputs.auth_jwt_key }}"
+            echo '```'
+            echo "</details>"
             echo ""
             echo "### Variables"
+            echo "Se non le hai già impostate:"
             echo '```'
-            echo "KEYCLOAK_REALM=${{ vars.KEYCLOAK_REALM || 'clubby' }}"
-            echo "KEYCLOAK_ADMIN_CLIENT_ID=clubby-backend"
-            echo "KEYCLOAK_CLIENT_ID=clubby-spa"
+            echo "APP_DOMAIN=<hostname pubblico dell'app, es. romaasd.tuodominio.it>"
+            echo "AUTH_DOMAIN=<hostname pubblico dell'authorizer, es. auth.romaasd.tuodominio.it>"
+            echo "TENANT_NAME=<nome del club mostrato nell'app>"
             echo '```'
             echo ""
-            echo "(Le ultime tre hanno comunque questi stessi valori come default: vanno impostate solo se"
-            echo "vuoi usare nomi client o un realm diversi dai default.)"
+            echo "Facoltative: \`THEME_PRIMARY\`, \`THEME_PRIMARY_TEXT\`, \`THEME_DANGER\`, \`THEME_SUCCESS\`,"
+            echo "\`THEME_NAV_BG\`, \`THEME_NAV_TEXT\`, \`LOGO_FILE\`, \`SSH_PORT\`, \`BACKEND_PORT\`, \`AUTH_PORT\`, \`DB_PORT\`."
+            echo "Il deploy richiede inoltre il Secret \`GHCR_PAT\` (non generato da Infra), oltre a \`SSH_HOST\`,"
+            echo "\`SSH_USER\` e \`SSH_PRIVATE_KEY\` già usati qui. Elenco completo nel README, sezione"
+            echo "\"Variabili e secret da configurare su GitHub\"."
             echo ""
-            echo "**Questi valori sono visibili in chiaro una sola volta, qui.** Copiali subito nei"
-            echo "GitHub Secrets: **KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD** in particolare non è mai stato"
-            echo "mostrato prima — se non lo salvi ora, alla prossima run ne verrà generato uno nuovo"
-            echo "che NON corrisponderà più a quello effettivamente impostato su Postgres/Keycloak se"
-            echo "questa run è arrivata almeno fino al loro avvio."
+            echo "**Questi valori sono visibili in chiaro una sola volta, qui.**"
+            echo ""
+            echo "La password del superutente dell'istanza Postgres **non** va copiata: resta nel Secret"
+            echo "\`postgres-superuser\` del namespace \`${{ steps.ambiente.outputs.db_namespace }}\`, e nessun club la usa."
+            echo ""
+            echo "⚠️ **AUTH_JWT_PRIVATE_KEY va conservata con particolare cura**: è la chiave con cui"
+            echo "vengono firmati i token. Se alla prossima run ne venisse generata una nuova perché"
+            echo "questa non è stata salvata, tutti i token e i refresh token in circolazione"
+            echo "smetterebbero di valere e ogni utente dovrebbe rifare l'accesso."
             echo ""
             if [ "${{ job.status }}" = "success" ]; then
-              echo "Primo accesso admin: https://${{ vars.APP_DOMAIN }} — email"
-              echo "\`${{ inputs.initial_admin_email }}\`, password temporanea (quella inserita al lancio"
-              echo "di questa pipeline), da cambiare al primo login."
+              echo "### Passi successivi"
+              echo ""
+              echo "1. Copia i valori qui sopra nell'Environment."
+              echo "2. Fai puntare il DNS di \`APP_DOMAIN\` e \`AUTH_DOMAIN\` alla VPS (serve prima del deploy:"
+              echo "   cert-manager deve poter emettere i certificati per quegli host)."
+              echo "3. Deploya i moduli: su \`development\` con **Build & Deploy**, su un club con **Promote**"
+              echo "   scegliendo l'ambiente \`${{ inputs.environment }}\`. L'authorizer creerà l'utente admin"
+              echo "   iniziale \`${{ vars.INITIAL_ADMIN_EMAIL }}\` al primo avvio, con la password temporanea"
+              echo "   generata qui sopra (\`INITIAL_ADMIN_PASSWORD\`), da sostituire al primo accesso."
+              echo ""
+              echo "L'admin iniziale viene creato **solo se il database degli utenti è ancora vuoto**:"
+              echo "su un'istanza già popolata questo passaggio non tocca nulla."
             else
               echo "⚠️ **Questa run non è completata con successo** (vedi i log degli step precedenti)."
-              echo "L'utente admin potrebbe non essere stato creato: copia comunque i secret sopra, poi"
-              echo "rilancia Infra sullo stesso Environment — riuserà questi valori invece di generarne"
-              echo "di nuovi, ripartendo da dove si era interrotto senza disallineare le credenziali."
+              echo "Copia comunque i secret sopra, poi rilancia Infra sullo stesso Environment: riuserà"
+              echo "questi valori invece di generarne di nuovi, ripartendo da dove si era interrotto"
+              echo "senza disallineare le credenziali."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

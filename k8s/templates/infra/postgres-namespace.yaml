@@ -1,0 +1,20 @@
+# Namespace dell'istanza Postgres, separato da quelli applicativi.
+#
+# Il nome è la variabile DB_NAMESPACE dell'Environment GitHub, e più club
+# possono indicare lo stesso: condividono allora l'istanza, ciascuno con i
+# propri database (<env>-clubby, <env>-auth) e il proprio utente. Tipicamente
+# i club in produzione ne condividono una, e development ne ha una a sé, così
+# un DROP sbagliato o un riavvio in sviluppo non tocca la produzione.
+#
+# Le risorse qui dentro hanno nomi neutri (postgres, postgres-superuser, ...) e
+# non legati a Clubby né a un club: l'istanza è un servizio condiviso. Ciò che
+# è specifico di un club sono solo i suoi database e i suoi utenti.
+#
+# Applicarlo è idempotente: se il namespace esiste già (creato da un altro
+# club) non cambia nulla.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${DB_NAMESPACE}
+  labels:
+    app.kubernetes.io/component: database

@@ -1,0 +1,32 @@
+meta {
+  name: Lista istruttori
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/istruttori
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (Array.isArray(data) && data.length > 0) {
+    bru.setVar("istruttore_id", data[0].id);
+  }
+}
+
+docs {
+  Gli utenti con ruolo istruttore: id, nome e cognome, presi dall'authorizer.
+
+  Accessibile a qualsiasi utente autenticato — serve a mostrare chi ha tenuto
+  un incontro. Solo per gli admin ogni riga porta anche attivita_ids, cioè le
+  attività a cui quell'istruttore è abilitato.
+
+  Salva automaticamente istruttore_id.
+}

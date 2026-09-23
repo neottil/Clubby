@@ -1,5 +1,5 @@
 meta {
-  name: Crea incontro (admin)
+  name: Crea incontro
   type: http
   seq: 3
 }
@@ -18,6 +18,8 @@ body:json {
   {
     "socio_id": "{{socio_id}}",
     "data_incontro": "2024-03-10",
+    "attivita_id": "{{attivita_id}}",
+    "istruttore_id": "{{istruttore_id}}",
     "costo": 25.00,
     "note": "Seduta di allenamento"
   }
@@ -31,8 +33,15 @@ script:post-response {
 }
 
 docs {
-  Solo admin. Crea un incontro per il socio indicato in socio_id.
-  costo deve essere >= 0.
-  data_incontro: formato YYYY-MM-DD.
+  Admin e istruttori (un socio riceve 403).
+
+  attivita_id è obbligatorio e viene da /api/attivita (la richiesta "Lista
+  attività" lo salva in automatico).
+
+  istruttore_id è facoltativo e vale solo per gli admin: la richiesta di un
+  istruttore viene comunque attribuita a lui, qualunque cosa dica il corpo, e
+  viene rifiutata se non è abilitato a quell'attività.
+
+  costo deve essere >= 0. data_incontro: formato YYYY-MM-DD.
   Salva automaticamente incontro_id per le richieste successive.
 }
