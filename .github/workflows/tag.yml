@@ -89,7 +89,6 @@ jobs:
       - name: Promuovi i moduli (solo gli scope che ne hanno bisogno)
         id: promuovi
         run: |
-          declare -A REAL_PREFIX=( [backend]=server [frontend]=client [authorizer]=auth )
           declare -A IMAGE=( [backend]=clubby-backend [frontend]=clubby-frontend [authorizer]=clubby-authorizer )
           declare -A PROMOTED=( [backend]=false [frontend]=false [authorizer]=false )
 
@@ -103,14 +102,14 @@ jobs:
 
             COMMIT=$(git rev-list -n1 "$DEPLOY_TAG")
 
-            ALREADY_PROMOTED=$(git tag --points-at "$COMMIT" | grep -E "^${REAL_PREFIX[$SCOPE]}-v[0-9]+\.[0-9]+\.[0-9]+$" || true)
+            ALREADY_PROMOTED=$(git tag --points-at "$COMMIT" | grep -E "^${$SCOPE}-v[0-9]+\.[0-9]+\.[0-9]+$" || true)
             if [ -n "$ALREADY_PROMOTED" ]; then
               echo "  $DEPLOY_TAG (commit $COMMIT) è già promosso come $ALREADY_PROMOTED: nessuna modifica, salto."
               continue
             fi
 
             VERSION=$(git show "${DEPLOY_TAG}:${SCOPE}/package.json" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).version)")
-            REAL_TAG="${REAL_PREFIX[$SCOPE]}-v${VERSION}"
+            REAL_TAG="${$SCOPE}-v${VERSION}"
 
             echo "  $DEPLOY_TAG -> commit $COMMIT, version $VERSION -> $REAL_TAG"
 
