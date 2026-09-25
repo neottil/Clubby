@@ -307,7 +307,7 @@ jobs:
   # risolte — già su ghcr.io, ma non ancora in servizio da nessuna parte.
   # always(): uno dei due resolve può essere "skipped" (quel modulo non cambia),
   # e in quel caso il suo tag arriva vuoto e il relativo database non si tocca.
-  # Se il Job fallisce, deploy-backend e deploy-authorizer non partono.
+  # Se il Job fallisce non parte nessuno dei tre deploy, frontend compreso.
   migrate-db:
     needs: [resolve-backend-image, resolve-authorizer-image]
     if: |
@@ -409,9 +409,21 @@ jobs:
   # Deployment frontend, tramite il workflow riutilizzabile (stesso usato da
   # promote.yml per la produzione). Se backend non cambia, il suo Deployment
   # non viene MAI toccato da questa run.
+  # Aspetta le migrazioni come gli altri due deploy, pur non usando il
+  # database: se la migrazione fallisce il backend resta alla versione vecchia,
+  # e mandare in servizio un frontend nuovo che chiama API non ancora deployate
+  # romperebbe l'applicazione. O si aggiorna tutto, o non si aggiorna niente.
+  #
+  # Il confronto ammette anche "skipped": quando cambia solo il frontend, i due
+  # resolve di backend e authorizer non girano e migrate-db viene saltato del
+  # tutto. Pretendere "success" bloccherebbe per sempre i deploy di solo
+  # frontend — e always() serve perché un needs saltato salterebbe anche questo.
   deploy-frontend:
-    needs: resolve-frontend-image
-    if: needs.resolve-frontend-image.result == 'success'
+    needs: [resolve-frontend-image, migrate-db]
+    if: |
+      always() &&
+      needs.resolve-frontend-image.result == 'success' &&
+      (needs.migrate-db.result == 'success' || needs.migrate-db.result == 'skipped')
     uses: ./.github/workflows/deploy-frontend.yml
     with:
       environment: development

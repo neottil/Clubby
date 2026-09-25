@@ -133,9 +133,17 @@ jobs:
       image_tag: ${{ needs.validate.outputs.backend_image_tag }}
     secrets: inherit
 
+  # Come in build-deploy.yml: il frontend non usa il database, ma se la
+  # migrazione fallisce il backend resta indietro e un frontend nuovo
+  # chiamerebbe API non ancora deployate. "skipped" è ammesso perché
+  # promuovendo il solo frontend il job delle migrazioni non gira affatto.
   deploy-frontend:
-    needs: validate
-    if: inputs.frontend_version != ''
+    needs: [validate, migrate-db]
+    if: |
+      always() &&
+      needs.validate.result == 'success' &&
+      inputs.frontend_version != '' &&
+      (needs.migrate-db.result == 'success' || needs.migrate-db.result == 'skipped')
     uses: ./.github/workflows/deploy-frontend.yml
     with:
       environment: ${{ inputs.environment }}
