@@ -1,0 +1,57 @@
+# Job che applica le migrazioni di schema a un database del club.
+#
+# Renderizzato e applicato da .github/workflows/migrate-db.yml prima del
+# rollout dei moduli applicativi. Gira sull'IMMAGINE CHE STA PER ESSERE
+# DEPLOYATA, che contiene sia lo script sia i file .sql: le migrazioni
+# applicate sono così esattamente quelle che accompagnano quel codice.
+#
+# Le credenziali arrivano da qui e non dal ConfigMap/Secret dell'applicazione:
+# quelli li applica il deploy del modulo, che gira DOPO, e su un ambiente nuovo
+# non esisterebbero ancora.
+#
+# La password fa eccezione e non è un placeholder: sta in un Secret dedicato
+# creato con "kubectl create secret --from-literal" dal workflow. Sostituirla
+# qui la scriverebbe in chiaro nel file copiato sulla VPS, e una password con
+# un doppio apice o un a capo produrrebbe per giunta YAML non valido.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clubby-migrazioni-${MIGRA_SCOPE}
+  namespace: ${KUBE_NAMESPACE}
+  labels:
+    app: clubby-migrazioni
+spec:
+  # Nessun ritentativo automatico: una migrazione che fallisce va letta, non
+  # ripetuta a vuoto. Il workflow recupera i log e ferma la pipeline, e i
+  # deploy che dipendono da questo Job non partono.
+  backoffLimit: 0
+  # Il Job resta un'ora dopo la fine: abbastanza per ispezionarlo a mano dopo
+  # un fallimento, senza accumulare oggetti a ogni deploy.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: clubby-migrazioni
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: migrazioni
+          image: ${MIGRA_IMAGE}
+          # Sostituisce il CMD dell'immagine (che avvierebbe il server).
+          command: ["sh", "/app/scripts/migra.sh"]
+          env:
+            - name: DB_HOST
+              value: "${DB_HOST}"
+            - name: DB_PORT
+              value: "${DB_PORT}"
+            - name: DB_NAME
+              value: "${MIGRA_DB_NAME}"
+            - name: DB_USER
+              value: "${MIGRA_DB_NAME}"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clubby-migrazioni-${MIGRA_SCOPE}
+                  key: DB_PASSWORD

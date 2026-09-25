@@ -86,6 +86,9 @@ jobs:
           # 404. Attivi con il valore esatto "true".
           ENABLE_MODULE_TESSERAMENTO: ${{ vars.ENABLE_MODULE_TESSERAMENTO }}
           ENABLE_MODULE_FATTURAZIONE: ${{ vars.ENABLE_MODULE_FATTURAZIONE }}
+          # Stessa Variable letta dal backend: qui serve solo a costruire il
+          # modulo di ricarica (campo libero o select dei tagli).
+          RECHARGE_MODE: ${{ vars.RECHARGE_MODE }}
         run: |
           # Il logo deve essere uno di quelli inclusi nell'immagine
           # (frontend/public/branding/): un nome sbagliato mostrerebbe
@@ -115,6 +118,7 @@ jobs:
             --arg navText "$THEME_NAV_TEXT" \
             --arg tesseramento "$ENABLE_MODULE_TESSERAMENTO" \
             --arg fatturazione "$ENABLE_MODULE_FATTURAZIONE" \
+            --arg ricarica "$RECHARGE_MODE" \
             '{
               apiBaseUrl: $api,
               authBaseUrl: $auth,
@@ -124,7 +128,9 @@ jobs:
                       success: $success, navBg: $navBg, navText: $navText}
                      | with_entries(select(.value != ""))),
               moduli: {tesseramento: ($tesseramento == "true"),
-                       fatturazione: ($fatturazione == "true")}
+                       fatturazione: ($fatturazione == "true")},
+              modalitaRicarica: (if ($ricarica == "percentage" or $ricarica == "map")
+                                 then $ricarica else "free" end)
             }')
           export FRONTEND_CONFIG_JSON
           echo "Configurazione del club: $FRONTEND_CONFIG_JSON"

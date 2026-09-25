@@ -6,6 +6,9 @@ frontend
 node_modules
 backend/node_modules
 backend/src
+# ...tranne le migrazioni di schema, che l'immagine deve contenere: le applica
+# un Job k8s che gira su questa stessa immagine (vedi backend/Dockerfile).
+!backend/src/db/migrations
 backend/k8s
 .git
 .github

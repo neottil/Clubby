@@ -221,6 +221,17 @@ export interface Tesseramento {
 
 export interface Impostazioni {
   quota_tesseramento: number;
+  /** Percentuale aggiunta a una ricarica dove RECHARGE_MODE vale "percentage". */
+  percentuale_ricarica: number;
+}
+
+/** Taglio di ricarica preconfigurato (RECHARGE_MODE = "map"). */
+export interface TaglioRicarica {
+  id: string;
+  /** Quanto paga il socio. */
+  importo: number;
+  /** Quanto gli viene accreditato sul voucher. */
+  valore: number;
 }
 
 /** Voce del listino attività, come la serve /api/attivita. */
@@ -318,6 +329,14 @@ export function createApiClient(token: string | null) {
     getImpostazioni: () => request<Impostazioni>('/api/impostazioni', {}, token),
     aggiornaImpostazioni: (body: Partial<Impostazioni>) =>
       request<Impostazioni>('/api/impostazioni', { method: 'PUT', body: JSON.stringify(body) }, token),
+
+    // Tagli di ricarica (solo admin). Esistono in ogni modalità: si possono
+    // preparare prima di attivare RECHARGE_MODE=map.
+    getTagliRicarica: () => request<TaglioRicarica[]>('/api/ricarica-tagli', {}, token),
+    creaTaglioRicarica: (body: { importo: number; valore: number }) =>
+      request<TaglioRicarica>('/api/ricarica-tagli', { method: 'POST', body: JSON.stringify(body) }, token),
+    eliminaTaglioRicarica: (id: string) =>
+      request<void>(`/api/ricarica-tagli/${id}`, { method: 'DELETE' }, token),
 
     // Scheda socio di chi sta usando l'applicazione, se un admin l'ha
     // collegata. Restituisce undefined (204) quando l'account non ne ha

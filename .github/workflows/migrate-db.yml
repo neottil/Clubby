@@ -1,0 +1,290 @@
+name: Migrate DB
+
+# Applica le migrazioni di schema ai database di un ambiente, PRIMA che i
+# deploy mettano in esecuzione il codice che le presuppone.
+#
+# Solo workflow_call, come i deploy: chi lo chiama (build-deploy.yml,
+# promote.yml) decide su quale ambiente agire, e i job di deploy lo mettono
+# fra i propri "needs" — se una migrazione fallisce, non viene deployato
+# nulla e l'ambiente resta esattamente com'era.
+#
+# ORDINE E RETROCOMPATIBILITÀ
+# ---------------------------
+# Le migrazioni girano prima dei deploy, non dopo, e devono essere SEMPRE
+# retrocompatibili con la versione dell'applicazione attualmente in esecuzione:
+# solo aggiunte (tabelle, colonne nullable, indici), mai rinomine, DROP o
+# cambi di tipo nella stessa release che introduce il codice nuovo.
+#
+# Il motivo è che i due disallineamenti possibili non si equivalgono:
+#   - database avanti, applicazione indietro (migrazione fatta, deploy fallito):
+#     innocuo, il codice vecchio ignora ciò che non conosce;
+#   - applicazione avanti, database indietro: rotto subito.
+# Rimuovere qualcosa si fa quindi in DUE release: nella prima il codice smette
+# di usarla, in una successiva una migrazione la elimina.
+#
+# COME VENGONO APPLICATE
+# ----------------------
+# Con un Job Kubernetes che gira sull'IMMAGINE CHE STA PER ESSERE DEPLOYATA:
+# quell'immagine contiene sia scripts/migra.sh sia i file .sql, quindi le
+# migrazioni applicate sono esattamente quelle che accompagnano quel codice.
+# L'immagine esiste su ghcr.io da quando il job di build l'ha pushata, molto
+# prima del rollout: eseguirci un comando non mette in servizio l'applicazione,
+# e i pod continuano a girare con la versione precedente.
+#
+# Il Job si collega al database via rete con le credenziali del club, come fa
+# l'applicazione. In particolare NON entra nel pod di Postgres: quel pod sta
+# nel namespace dell'istanza condivisa fra più club, e il suo socket locale
+# autentica in trust — entrarci significherebbe avere privilegi da superutente
+# su tutti i database di tutti i club per migrarne uno solo.
+#
+# Per lo stesso motivo qui non c'è un tool di migrazione Node (postgrator,
+# node-pg-migrate): aprirebbe una connessione TCP che da un runner GitHub non
+# è possibile, e il registro di ciò che è già stato applicato è una tabella e
+# un ciclo (vedi scripts/migra.sh).
+#
+# CONVENZIONE DEI FILE
+# --------------------
+# Un file .sql per migrazione in <modulo>/src/db/migrations/, con nome
+# ordinabile: "001_descrizione.sql". Vengono applicati in ordine alfabetico,
+# ciascuno in una transazione insieme alla riga che lo registra: o passa tutto
+# il file, o non passa niente. Un file già registrato non viene riapplicato,
+# quindi rilanciare è sicuro.
+#
+# schema.sql resta la BASELINE con cui Infra crea un database nuovo: da lì in
+# avanti ogni modifica vive solo come migrazione, e non va riportata nella
+# baseline.
+#
+# DATABASE DEGLI ACCOUNT
+# ----------------------
+# Il meccanismo è già generico sui due database, ma oggi solo l'immagine del
+# backend contiene psql e lo script (authorizer/Dockerfile ha un contesto di
+# build limitato al proprio modulo). Alla prima migrazione dell'authorizer
+# vanno aggiunti lì `postgresql-client`, scripts/migra.sh e la cartella delle
+# migrazioni, come in backend/Dockerfile.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment GitHub da usare (development o il nome di un club)'
+        required: true
+        type: string
+      backend_image_tag:
+        description: >-
+          Tag dell'immagine clubby-backend su cui eseguire le migrazioni del
+          database dell'applicazione. Vuoto = quel database non viene migrato.
+        required: false
+        default: ''
+        type: string
+      authorizer_image_tag:
+        description: >-
+          Come sopra, per il database degli account. Vuoto = non viene migrato.
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  migrate:
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verifica Variables e Secrets dell'ambiente
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          mancanti=0
+          for nome in SSH_HOST SSH_USER; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::La Variable $nome non è impostata sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          for nome in SSH_PRIVATE_KEY GHCR_PAT DB_PASSWORD; do
+            if [ -z "${!nome}" ]; then
+              echo "::error::Il Secret $nome non è impostato sull'Environment ${{ inputs.environment }}."
+              mancanti=1
+            fi
+          done
+          exit $mancanti
+
+      # Nomi dei database e indirizzo dell'istanza Postgres: stessa convenzione
+      # di Infra e dei deploy, dichiarata in .github/actions/ambiente/action.yml.
+      - name: Ricava namespace e database dall'ambiente
+        id: ambiente
+        uses: ./.github/actions/ambiente
+        with:
+          environment: ${{ inputs.environment }}
+          db_namespace: ${{ vars.DB_NAMESPACE }}
+
+      # Un database viene migrato solo se ha migrazioni nel repository E il
+      # chiamante ha indicato l'immagine su cui eseguirle. Se non ne ha, non
+      # si crea nessun Job: è l'unico salto sicuro possibile a monte, perché
+      # sapere se un ambiente è indietro richiede di leggere la sua tabella
+      # "migrazione" — cioè fare ciò che fa il Job.
+      - name: Decide quali database migrare
+        id: quali
+        env:
+          BACKEND_TAG: ${{ inputs.backend_image_tag }}
+          AUTHORIZER_TAG: ${{ inputs.authorizer_image_tag }}
+        run: |
+          ha_migrazioni() {
+            [ -d "$1" ] || return 1
+            for f in "$1"/*.sql; do [ -e "$f" ] && return 0; done
+            return 1
+          }
+
+          APP=false
+          AUTH=false
+          if [ -n "$BACKEND_TAG" ] && ha_migrazioni backend/src/db/migrations; then APP=true; fi
+          if [ -n "$AUTHORIZER_TAG" ] && ha_migrazioni authorizer/src/db/migrations; then AUTH=true; fi
+
+          echo "app=$APP"   >> "$GITHUB_OUTPUT"
+          echo "auth=$AUTH" >> "$GITHUB_OUTPUT"
+          echo "Database applicazione: $APP — database account: $AUTH"
+
+          if [ "$APP" = "false" ] && [ "$AUTH" = "false" ]; then
+            echo "Nessuna migrazione da applicare: non verrà creato alcun Job."
+          fi
+
+      - name: Renderizza i Job di migrazione
+        if: steps.quali.outputs.app == 'true' || steps.quali.outputs.auth == 'true'
+        env:
+          KUBE_NAMESPACE: ${{ steps.ambiente.outputs.app_namespace }}
+          DB_HOST: ${{ steps.ambiente.outputs.db_host }}
+          DB_PORT: ${{ vars.DB_PORT || 5432 }}
+          APP_DB_NAME: ${{ steps.ambiente.outputs.db_name }}
+          AUTH_DB_NAME: ${{ steps.ambiente.outputs.auth_db_name }}
+          AUTH_DB_PASSWORD: ${{ secrets.AUTH_DB_PASSWORD }}
+          BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/clubby-backend:${{ inputs.backend_image_tag }}
+          AUTHORIZER_IMAGE: ghcr.io/${{ github.repository_owner }}/clubby-authorizer:${{ inputs.authorizer_image_tag }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          mkdir -p k8s/rendered-migrazioni
+          # Nessuna password fra le variabili sostituite: quella arriva al Job
+          # da un Secret creato con kubectl (vedi il template).
+          VARS='$KUBE_NAMESPACE $MIGRA_SCOPE $MIGRA_IMAGE $DB_HOST $DB_PORT $MIGRA_DB_NAME'
+
+          if [ "${{ steps.quali.outputs.app }}" = "true" ]; then
+            MIGRA_SCOPE=app MIGRA_IMAGE="$BACKEND_IMAGE" MIGRA_DB_NAME="$APP_DB_NAME" \
+            envsubst "$VARS" < k8s/templates/migrazioni/job.yaml > k8s/rendered-migrazioni/job-app.yaml
+          fi
+
+          if [ "${{ steps.quali.outputs.auth }}" = "true" ]; then
+            if [ -z "$AUTH_DB_PASSWORD" ]; then
+              echo "::error::Il Secret AUTH_DB_PASSWORD non è impostato sull'Environment ${{ inputs.environment }}: serve per migrare il database degli account."
+              exit 1
+            fi
+            MIGRA_SCOPE=auth MIGRA_IMAGE="$AUTHORIZER_IMAGE" MIGRA_DB_NAME="$AUTH_DB_NAME" \
+            envsubst "$VARS" < k8s/templates/migrazioni/job.yaml > k8s/rendered-migrazioni/job-auth.yaml
+          fi
+
+          cat k8s/rendered-migrazioni/*.yaml
+
+      - name: Copia i manifest sulla VPS via SSH
+        if: steps.quali.outputs.app == 'true' || steps.quali.outputs.auth == 'true'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          source: "k8s/rendered-migrazioni/*"
+          target: ${{ steps.ambiente.outputs.infra_path }}/migrazioni
+          strip_components: 2
+
+      - name: Esegui le migrazioni e attendi l'esito
+        if: steps.quali.outputs.app == 'true' || steps.quali.outputs.auth == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          NS: ${{ steps.ambiente.outputs.app_namespace }}
+          PATH_REMOTE: ${{ steps.ambiente.outputs.infra_path }}/migrazioni
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          FAI_APP: ${{ steps.quali.outputs.app }}
+          FAI_AUTH: ${{ steps.quali.outputs.auth }}
+          APP_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          AUTH_DB_PASSWORD: ${{ secrets.AUTH_DB_PASSWORD }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT || 22 }}
+          envs: NS,PATH_REMOTE,GHCR_USER,GHCR_PAT,FAI_APP,FAI_AUTH,APP_DB_PASSWORD,AUTH_DB_PASSWORD
+          script: |
+            set -e
+            # Vedi commento gemello in infra.yml: senza KUBECONFIG esplicito,
+            # kubectl (symlink a k3s) risolve su un file leggibile solo da root.
+            export KUBECONFIG="$HOME/.kube/config"
+
+            # I package ghcr.io sono privati: senza questo Secret il pod del Job
+            # resterebbe in ImagePullBackOff. Lo creano anche i workflow di
+            # deploy, ma quelli girano DOPO: su un namespace appena creato da
+            # Infra qui non esisterebbe ancora. Idempotente.
+            kubectl create secret docker-registry ghcr-secret -n "$NS" \
+              --docker-server=ghcr.io \
+              --docker-username="$GHCR_USER" \
+              --docker-password="$GHCR_PAT" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            esegui() {
+              local scope="$1" nome="clubby-migrazioni-$1" password="$2"
+
+              # Password del database in un Secret dedicato invece che nel
+              # manifest: kubectl si occupa della codifica, quindi un valore con
+              # virgolette o a capo non rompe nulla, e la password non finisce
+              # mai in un file sul disco della VPS.
+              kubectl create secret generic "$nome" -n "$NS" \
+                --from-literal=DB_PASSWORD="$password" \
+                --dry-run=client -o yaml | kubectl apply -f -
+
+              # Un Job non è modificabile: quello della run precedente va
+              # rimosso, altrimenti "apply" fallisce su campi immutabili.
+              kubectl delete job "$nome" -n "$NS" --ignore-not-found --wait=true
+              kubectl apply -f "$PATH_REMOTE/job-$scope.yaml"
+
+              echo "Attendo il Job $nome..."
+              # Attesa esplicita invece di "kubectl wait --for=condition=complete":
+              # quello resterebbe bloccato fino al timeout anche quando il Job è
+              # già fallito, ritardando di minuti un errore già noto.
+              local esito="" i
+              for i in $(seq 1 60); do
+                if [ "$(kubectl get job "$nome" -n "$NS" -o jsonpath='{.status.succeeded}')" = "1" ]; then
+                  esito=ok; break
+                fi
+                if [ -n "$(kubectl get job "$nome" -n "$NS" -o jsonpath='{.status.failed}')" ]; then
+                  esito=ko; break
+                fi
+                sleep 5
+              done
+
+              echo "--- log di $nome ---"
+              kubectl logs "job/$nome" -n "$NS" --tail=200 || echo "(nessun log disponibile)"
+              echo "--- fine log ---"
+
+              case "$esito" in
+                ok) echo "Job $nome completato." ;;
+                ko)
+                  echo "::error::Il Job $nome è fallito: le migrazioni NON sono state applicate (vedi i log qui sopra). Il deploy non verrà eseguito."
+                  kubectl describe "job/$nome" -n "$NS" || true
+                  return 1
+                  ;;
+                *)
+                  echo "::error::Il Job $nome non è terminato entro 5 minuti."
+                  kubectl describe "job/$nome" -n "$NS" || true
+                  return 1
+                  ;;
+              esac
+            }
+
+            [ "$FAI_APP" = "true" ]  && esegui app  "$APP_DB_PASSWORD"
+            [ "$FAI_AUTH" = "true" ] && esegui auth "$AUTH_DB_PASSWORD"
+            # Ultimo comando: senza questo, un "false" dei test qui sopra
+            # farebbe uscire lo script con stato 1 pur essendo andato tutto bene.
+            true

@@ -26,10 +26,14 @@ export const handler = async (
       return ok(await leggiImpostazioni());
     }
 
-    // PUT /api/impostazioni   Body: { quota_tesseramento }
+    // PUT /api/impostazioni   Body: { quota_tesseramento?, percentuale_ricarica? }
+    // Whitelist esplicita: un campo non previsto viene ignorato, non scritto.
     if (method === 'PUT') {
       const body = corpoJson(event);
-      return ok(await aggiornaImpostazioni({ quota_tesseramento: body.quota_tesseramento }));
+      return ok(await aggiornaImpostazioni({
+        quota_tesseramento: body.quota_tesseramento,
+        percentuale_ricarica: body.percentuale_ricarica,
+      }));
     }
 
     return errorResponse(new NotFoundError('Route non trovata'));

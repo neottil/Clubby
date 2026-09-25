@@ -8,7 +8,8 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 - Gestione incontri, con note in testo semplice o in Markdown, filtrabili per attività e per periodo
 - Listino delle attività con il relativo costo, gestito dal pannello Admin
 - Attribuzione degli incontri a un istruttore, abilitato per singola attività
-- Voucher prepagati, con il credito acquistato registrato come ricarica
+- Voucher prepagati, con il credito acquistato registrato come ricarica; a scelta del club, la
+  ricarica può accreditare più di quanto pagato (percentuale fissa o tagli preconfigurati)
 - Tesseramento al club: scadenza per socio, rinnovi con storico e quota configurabile *(modulo opzionale)*
 - Fatturazione: ricariche, quote di tesseramento e incontri non coperti da voucher, con i totali del periodo *(modulo opzionale)*
 - Resoconto: un istruttore vede gli incontri che ha tenuto, con numero e costo complessivo del periodo filtrato
@@ -105,6 +106,32 @@ La pagina **Fatturazione** (solo admin) somma esattamente queste tre cose: ricar
 senza voucher, filtrabili per socio e per periodo. Restano fuori gli addebiti sul voucher — già
 fatturati con la ricarica che li copre, contarli di nuovo raddoppierebbe l'importo — e il saldo
 importato, che non è un incasso.
+
+#### Ricariche con valore extra
+
+Di norma una ricarica accredita sul voucher esattamente l'importo pagato. La variabile
+`RECHARGE_MODE` dell'ambiente permette di riconoscere al socio un valore maggiore:
+
+| `RECHARGE_MODE` | Come si registra una ricarica | Configurazione |
+|---|---|---|
+| `free` (predefinita) | Importo libero, accreditato tale e quale | nessuna |
+| `percentage` | Importo libero, accreditato con una percentuale in più | percentuale nella card **Ricariche** del pannello Admin |
+| `map` | Importo scelto fra tagli preconfigurati (es. 50 → 55, 100 → 110) | elenco dei tagli nella card **Ricariche** |
+
+**In Fatturazione compare sempre l'importo pagato**, mai il valore accreditato: il credito in più
+è uno sconto concesso al socio, non denaro incassato, e contarlo dichiarerebbe un ricavo che non
+c'è stato. Il voucher invece si muove per il valore accreditato, che è quello che il socio può
+spendere. Il movimento conserva entrambi, e la pagina Voucher mostra il credito ricevuto con sotto
+l'importo pagato quando differiscono.
+
+Quanto accreditare **lo calcola sempre il backend** a partire dalla modalità e dalla
+configurazione salvata: il browser invia solo quanto il socio paga. In modalità `map` un importo
+che non corrisponde a nessun taglio viene rifiutato.
+
+La card **Ricariche** del pannello Admin è sempre visibile: in modalità `free` spiega come attivare
+la funzionalità, così i tagli o la percentuale si possono preparare prima di accenderla. Il
+database ha comunque la tabella dei tagli e la colonna dell'importo pagato, in ogni modalità: sono
+gli stessi per tutti gli ambienti.
 
 #### Moduli opzionali
 
@@ -236,6 +263,9 @@ npx @redocly/cli lint backend/docs/openapi.yaml authorizer/docs/openapi.yaml
    ```bash
    docker compose up -d
    ```
+   Lo stesso comando avvia anche il servizio `migrazioni`, che applica le
+   [migrazioni di schema](#migrazioni-dello-schema) pendenti su entrambi i database e termina.
+   Dopo aver aggiunto un file di migrazione, senza riavviare tutto: `npm run db:migra`.
 
 2. Genera i file di configurazione:
    ```bash
@@ -344,8 +374,10 @@ di `authorizer/.env`:
 | socio2@clubby.local | clubby2026 | socio | no |
 | socio3@clubby.local | clubby2026 | socio | no |
 
-Gli schemi SQL non contengono migrazioni: per applicare una modifica allo schema si riparte da un database
-vuoto (`docker compose down -v`, `docker compose up -d`) e si riesegue il seed.
+In locale il modo più rapido di ripartire da uno schema aggiornato resta azzerare il volume
+(`docker compose down -v`, `docker compose up -d`) e rieseguire il seed. In cluster, invece, i dati ci sono
+e non si buttano: le modifiche allo schema si applicano come migrazioni (vedi
+[Migrazioni dello schema](#migrazioni-dello-schema)).
 
 ### Test delle API
 
@@ -726,15 +758,20 @@ Job (per ciascuno scope: nomi mostrati per `backend`, `frontend` è identico):
    deployare — il tag di data appena pushato se c'è stato un rebuild, altrimenti l'ultimo tag
    `backend-<branch>-*` esistente (immagine riusata, nessun rebuild). Logica specifica di questa run
    (branch, history dei tag): resta fuori dal workflow riutilizzabile di deploy al punto successivo.
-4. **deploy-backend**: chiama il workflow riutilizzabile [`deploy-backend.yml`](.github/workflows/deploy-backend.yml)
+4. **migrate-db** (se questa run deploya backend o authorizer): chiama
+   [`migrate-db.yml`](.github/workflows/migrate-db.yml) e applica le migrazioni pendenti ai due database di
+   `development`, **prima** dei deploy che le presuppongono — se fallisce, `deploy-backend` e
+   `deploy-authorizer` non partono e l'ambiente resta com'era. Vedi
+   [Migrazioni dello schema](#migrazioni-dello-schema).
+5. **deploy-backend**: chiama il workflow riutilizzabile [`deploy-backend.yml`](.github/workflows/deploy-backend.yml)
    con `environment: development` e il tag risolto al punto precedente — applica **solo** i manifest sotto
    `backend/k8s/` (`configmap.yaml`, `secret.yaml`, `deployment.yaml`, `service.yaml`, `ingress.yaml` —
    quest'ultimo possiede la richiesta TLS/cert-manager per l'host condiviso), poi `kubectl rollout status`
    sul solo Deployment backend. Lo stesso identico workflow è chiamato anche da **Promote** per i
    club (vedi sotto) — nessuna logica di deploy duplicata tra i due contesti.
-5. **register-backend-tag**: solo dopo un deploy riuscito, crea/sposta il tag `backend-<branch>-*` (vedi
+6. **register-backend-tag**: solo dopo un deploy riuscito, crea/sposta il tag `backend-<branch>-*` (vedi
    sopra "Come avanza il tag").
-6. **cleanup-registry**: dopo almeno un deploy riuscito, ripulisce dal registry le immagini taggate solo con
+7. **cleanup-registry**: dopo almeno un deploy riuscito, ripulisce dal registry le immagini taggate solo con
    la data, mantenendo le **3 più recenti** per repository immagine (`clubby-backend`,
    `clubby-frontend`), a prescindere dal branch. I tag di versione reale (`X.Y.Z`) sono sempre esclusi
    da questa pulizia. Non usa più `actions/delete-package-versions` (dismessa, girava forzata su un runtime
@@ -870,12 +907,60 @@ richiede che la versione indicata sia già stata creata da **Tag** in precedenza
    ne scavalcherebbe lo stato), poi per ciascuna versione indicata verifica che il tag
    `server-v<versione>`/`client-v<versione>`/`auth-v<versione>` esista davvero nel repo — altrimenti
    fallisce subito con un `::error::` esplicito, invece di procedere con un'immagine inesistente/sbagliata.
-2. **deploy-backend** / **deploy-frontend** / **deploy-authorizer** (a seconda degli input valorizzati):
+2. **migrate-db**: applica le migrazioni pendenti ai database del club, prima dei deploy (vedi
+   [Migrazioni dello schema](#migrazioni-dello-schema)). Un club fermo a una versione vecchia può averne
+   parecchie in una volta: vengono applicate in ordine, e quelle già presenti saltate.
+3. **deploy-backend** / **deploy-frontend** / **deploy-authorizer** (a seconda degli input valorizzati):
    chiamano i workflow riutilizzabili con l'ambiente scelto e il tag di versione validato — stesso identico
    workflow di deploy usato da `Build & Deploy` per lo sviluppo, nessuna logica duplicata.
 
 Sicuro da rilanciare più volte con lo stesso input (es. per riallineare un club dopo un incidente):
 non essendoci alcuno stato/tag da spostare, non ha effetti collaterali oltre al deploy stesso.
+
+### Migrazioni dello schema
+
+In produzione i dati non si buttano: le modifiche allo schema si applicano come **migrazioni**, file SQL
+numerati che vengono eseguiti una volta sola e registrati nella tabella `migrazione` del database su cui
+girano.
+
+- `backend/src/db/schema.sql` e `authorizer/src/db/schema.sql` restano la **baseline**: creano un database
+  nuovo da zero (lo applica [Infra](#infra)) e **non vanno più modificati**.
+- Ogni modifica successiva è un file in `backend/src/db/migrations/` o
+  `authorizer/src/db/migrations/`, con nome ordinabile (`001_descrizione.sql`).
+- Le applica il workflow riutilizzabile
+  [`migrate-db.yml`](.github/workflows/migrate-db.yml), chiamato da `Build & Deploy` e da `Promote`
+  **prima** dei deploy di backend e authorizer, che non partono se una migrazione fallisce.
+- Il meccanismo è un **Job Kubernetes che gira sull'immagine che sta per essere deployata**: quell'immagine
+  contiene sia lo script ([scripts/migra.sh](scripts/migra.sh)) sia i file `.sql`, quindi le migrazioni
+  applicate sono esattamente quelle che accompagnano quel codice. L'immagine esiste su `ghcr.io` da quando
+  è stata buildata, molto prima del rollout: eseguirci un comando non mette in servizio l'applicazione, e i
+  pod continuano a girare con la versione precedente. Il Job si collega al database via rete con le
+  credenziali del club — non entra nel pod di Postgres, che sta nel namespace dell'istanza **condivisa fra
+  più club** e il cui socket locale autentica in `trust`: entrarci darebbe privilegi da superutente su
+  tutti i loro database per migrarne uno solo.
+- Se il Job fallisce o non termina entro cinque minuti, il workflow ne stampa i log nella pipeline e si
+  ferma.
+- Ogni file è applicato in una transazione **insieme alla riga che lo registra**: o passa tutto, o non passa
+  niente, e non resta una migrazione segnata come fatta a metà. Per questo un file non deve contenere
+  `BEGIN`/`COMMIT` propri.
+
+#### Le migrazioni devono essere retrocompatibili
+
+**Solo aggiunte** — tabelle, colonne nullable o con default, indici. Mai rinomine, `DROP` o cambi di tipo
+nella stessa release che introduce il codice che li usa.
+
+Il motivo sta nell'ordine: la migrazione gira prima del deploy, e i due disallineamenti possibili non si
+equivalgono.
+
+| Situazione | Conseguenza |
+|---|---|
+| Database avanti, applicazione indietro (migrazione fatta, deploy fallito o non ancora eseguito) | Innocuo: il codice in esecuzione ignora ciò che non conosce |
+| Applicazione avanti, database indietro | Rotto subito: il codice nuovo interroga colonne che non esistono |
+
+Da qui la regola pratica: **un cambiamento distruttivo si fa in due release**. Nella prima il codice smette
+di usare la colonna (o la tabella), e va in produzione; in una release successiva una migrazione la
+elimina. Saltare il passaggio significa avere, per tutta la finestra fra migrazione e rollout — e per
+sempre, se il rollout fallisce — un'applicazione che interroga qualcosa che non c'è più.
 
 ### Struttura dei manifest k8s
 
@@ -994,6 +1079,7 @@ database vengono invece riallineate sugli utenti Postgres a ogni run di Infra.
 | `LOGO_FILE` | Nome del file SVG in `frontend/public/branding/` da usare come logo e favicon del club. Il file deve essere nel repository (e quindi nell'immagine): il deploy si ferma se non esiste | `romaasd.svg` | `-` (resta il logo di default) | deploy del frontend |
 | `ENABLE_MODULE_TESSERAMENTO` | Attiva il modulo Tesseramento: pagina Tesseramenti, quota nel pannello Admin e API `/api/tesseramenti`. Attivo **solo** con il valore esatto `true` | `true` | `-` (modulo spento) | deploy di backend e frontend |
 | `ENABLE_MODULE_FATTURAZIONE` | Attiva il modulo Fatturazione: pagina Fatturazione e API `/api/fatturazione`. Attivo **solo** con il valore esatto `true` | `true` | `-` (modulo spento) | deploy di backend e frontend |
+| `RECHARGE_MODE` | Come si registra una ricarica del voucher: `free`, `percentage` o `map` (vedi [Ricariche con valore extra](#ricariche-con-valore-extra)). Un valore non riconosciuto vale `free` | `map` | `free` | deploy di backend e frontend |
 
 I colori e il logo non richiedono una nuova build: cambiano al successivo deploy del frontend.
 

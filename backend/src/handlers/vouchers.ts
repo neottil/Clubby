@@ -25,6 +25,7 @@ import {
   getUltimaRicarica,
 } from '../service/vouchers.service.js';
 import { getSocioByViewerId } from '../service/soci.service.js';
+import { calcolaRicarica } from '../service/ricariche.service.js';
 import { intParam, paginazioneRichiesta } from '../util/paginazione.js';
 import { dataValida } from '../util/date.js';
 
@@ -154,10 +155,17 @@ export const handler = async (
       if (body.data_movimento !== undefined && body.data_movimento !== null && !dataValida(body.data_movimento)) {
         throw new BadRequestError('data_movimento deve essere una data valida nel formato YYYY-MM-DD');
       }
+      // Quanto viene accreditato sul voucher lo decide il server a partire
+      // dalla modalità dell'ambiente (RECHARGE_MODE) e dalla configurazione
+      // salvata: dal client arriva solo quanto il socio paga. Se lo mandasse
+      // lui, chi conosce l'API potrebbe accreditarsi il credito che preferisce.
+      const { valore, importoPagato } = await calcolaRicarica(body.importo);
+
       // Whitelist esplicita: incontro_id è gestito solo internamente da
       // incontri.service, non deve poter essere impostato da qui.
       return created(await createMovimento(voucherId, {
-        importo: body.importo,
+        importo: valore,
+        importo_pagato: importoPagato,
         descrizione: body.descrizione,
         tipo: 'ricarica',
         data_movimento: body.data_movimento ?? undefined,

@@ -302,14 +302,33 @@ jobs:
             echo "image_tag=${PREV#backend-}" >> "$GITHUB_OUTPUT"
           fi
 
+  # Migrazioni di schema PRIMA dei rollout, mai dopo: il codice nuovo non deve
+  # girare su uno schema vecchio. Gira su un Job k8s che usa le immagini appena
+  # risolte — già su ghcr.io, ma non ancora in servizio da nessuna parte.
+  # always(): uno dei due resolve può essere "skipped" (quel modulo non cambia),
+  # e in quel caso il suo tag arriva vuoto e il relativo database non si tocca.
+  # Se il Job fallisce, deploy-backend e deploy-authorizer non partono.
+  migrate-db:
+    needs: [resolve-backend-image, resolve-authorizer-image]
+    if: |
+      always() &&
+      (needs.resolve-backend-image.result == 'success' ||
+       needs.resolve-authorizer-image.result == 'success')
+    uses: ./.github/workflows/migrate-db.yml
+    with:
+      environment: development
+      backend_image_tag: ${{ needs.resolve-backend-image.outputs.image_tag }}
+      authorizer_image_tag: ${{ needs.resolve-authorizer-image.outputs.image_tag }}
+    secrets: inherit
+
   # Applica SOLO i manifest sotto backend/k8s/ e fa il rollout del solo
   # Deployment backend, tramite il workflow riutilizzabile (chiamato anche da
   # promote.yml per la produzione — stessa identica logica di deploy, mai
   # duplicata). Se frontend non cambia, il suo Deployment non viene MAI
   # toccato da questa run.
   deploy-backend:
-    needs: resolve-backend-image
-    if: needs.resolve-backend-image.result == 'success'
+    needs: [resolve-backend-image, migrate-db]
+    if: needs.resolve-backend-image.result == 'success' && needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-backend.yml
     with:
       environment: development
@@ -463,8 +482,8 @@ jobs:
           fi
 
   deploy-authorizer:
-    needs: resolve-authorizer-image
-    if: needs.resolve-authorizer-image.result == 'success'
+    needs: [resolve-authorizer-image, migrate-db]
+    if: needs.resolve-authorizer-image.result == 'success' && needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-authorizer.yml
     with:
       environment: development

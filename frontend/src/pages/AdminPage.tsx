@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, nomeIstruttore, DIMENSIONE_PAGINA, type Attivita, type Istruttore } from '../api/client';
+import { createApiClient, nomeIstruttore, DIMENSIONE_PAGINA, type Attivita, type Istruttore, type TaglioRicarica } from '../api/client';
 import { useElencoPaginato, type Pagina } from '../hooks/useElencoPaginato';
 import CaricaAltri from '../components/CaricaAltri';
 import TableScroll from '../components/TableScroll';
@@ -47,6 +47,10 @@ export default function AdminPage() {
   const [attivita, setAttivita]           = useState<Attivita[]>([]);
   // Quota di tesseramento, come stringa del campo di input.
   const [quotaTesseramento, setQuotaTesseramento] = useState('');
+  // Ricariche: percentuale (modalità percentage) e tagli (modalità map).
+  const [percentualeRicarica, setPercentualeRicarica] = useState('');
+  const [tagli, setTagli] = useState<TaglioRicarica[]>([]);
+  const [nuovoTaglio, setNuovoTaglio] = useState({ importo: '', valore: '' });
   const [istruttori, setIstruttori]       = useState<Istruttore[]>([]);
   // Nuova voce di listino, e riga in modifica (solo una per volta).
   const [nuovaAttivita, setNuovaAttivita] = useState({ nome: '', costo_default: '' });
@@ -87,10 +91,13 @@ export default function AdminPage() {
     try {
       // Il listino completo, disattivate comprese: è la pagina in cui si
       // riattivano.
-      const [s, at, ist, imp] = await Promise.all([
+      const [s, at, ist, imp, tg] = await Promise.all([
         api.getSoci(), api.getAttivita(true), api.getIstruttori(), api.getImpostazioni(),
+        api.getTagliRicarica(),
       ]);
       setQuotaTesseramento(Number(imp.quota_tesseramento).toFixed(2));
+      setPercentualeRicarica(String(Number(imp.percentuale_ricarica)));
+      setTagli(tg);
       setSoci(s);
       setAttivita(at);
       setIstruttori(ist);
@@ -240,6 +247,51 @@ export default function AdminPage() {
   };
 
   // -------------------------------------------------------------
+  // Ricariche
+  // -------------------------------------------------------------
+  const salvaPercentuale = async () => {
+    setError('');
+    try {
+      const imp = await api.aggiornaImpostazioni({ percentuale_ricarica: Number(percentualeRicarica) });
+      setPercentualeRicarica(String(Number(imp.percentuale_ricarica)));
+      setSuccessMsg('Percentuale di ricarica aggiornata');
+    } catch (e: any) { setError(e.message); }
+  };
+
+  const aggiungiTaglio = async () => {
+    setError('');
+    try {
+      await api.creaTaglioRicarica({
+        importo: Number(nuovoTaglio.importo),
+        valore: Number(nuovoTaglio.valore),
+      });
+      setNuovoTaglio({ importo: '', valore: '' });
+      setTagli(await api.getTagliRicarica());
+      setSuccessMsg('Taglio aggiunto');
+    } catch (e: any) { setError(e.message); }
+  };
+
+  const rimuoviTaglio = async (id: string) => {
+    setError('');
+    try {
+      await api.eliminaTaglioRicarica(id);
+      setTagli(await api.getTagliRicarica());
+      // Nessun avviso di conferma: i movimenti già registrati non cambiano,
+      // perché hanno il proprio valore scritto sulla riga.
+      setSuccessMsg('Taglio rimosso');
+    } catch (e: any) { setError(e.message); }
+  };
+
+  const taglioCompleto = Number(nuovoTaglio.importo) > 0 && Number(nuovoTaglio.valore) > 0;
+
+  // Riassunto della card chiusa: dice a colpo d'occhio se la funzionalità è
+  // attiva e come, senza doverla aprire.
+  const riepilogoRicariche =
+    config.modalitaRicarica === 'percentage' ? `+${percentualeRicarica || 0}% sul credito`
+    : config.modalitaRicarica === 'map'      ? `${tagli.length} tagli`
+    : 'non attive';
+
+  // -------------------------------------------------------------
   // Listino attività
   // -------------------------------------------------------------
   const creaAttivita = async () => {
@@ -351,6 +403,118 @@ export default function AdminPage() {
           </p>
         </Modal>
       )}
+
+      {/* Ricariche — sempre visibile, anche dove la modalità è "free": la
+          configurazione si prepara prima di attivarla, e una card che compare
+          dal nulla dopo un cambio di variabile sarebbe più difficile da
+          trovare che una che spiega come accenderla. */}
+      <CardCollassabile titolo='Ricariche' riepilogo={riepilogoRicariche}>
+        {config.modalitaRicarica === 'free' && (
+          <p style={styles.hint}>
+            Per utilizzare questa funzionalità devi abilitarla configurando <code>RECHARGE_MODE</code> a
+            <code> percentage</code> o <code>map</code>. Finché resta <code>free</code>, una ricarica
+            accredita sul voucher esattamente l'importo pagato.
+          </p>
+        )}
+
+        {config.modalitaRicarica === 'percentage' && (
+          <>
+            <p style={styles.hint}>
+              Percentuale aggiunta al credito di ogni ricarica: pagando € 100 con il 10%, il socio si
+              trova € 110 sul voucher. In Fatturazione compaiono i € 100 pagati, non il valore accreditato.
+            </p>
+            <div style={styles.row}>
+              <div style={{ flex: 1, maxWidth: 240 }}>
+                <label style={styles.label} htmlFor='percentuale-ricarica'>Percentuale (%)</label>
+                <input
+                  id='percentuale-ricarica'
+                  type='number' step='0.1' min='0' max='100'
+                  style={styles.input}
+                  value={percentualeRicarica}
+                  onChange={e => setPercentualeRicarica(e.target.value)}
+                />
+              </div>
+              <div style={{ alignSelf: 'flex-end' }}>
+                <button
+                  style={styles.btn}
+                  onClick={salvaPercentuale}
+                  disabled={percentualeRicarica === '' || Number(percentualeRicarica) < 0 || Number(percentualeRicarica) > 100}
+                >Salva</button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {config.modalitaRicarica === 'map' && (
+          <>
+            <p style={styles.hint}>
+              Tagli proposti al momento della ricarica: per ciascuno, quanto paga il socio e quanto gli
+              viene accreditato sul voucher. In Fatturazione compare l'importo pagato. I tagli sono
+              mostrati dal più economico, e rimuoverne uno non tocca le ricariche già registrate.
+            </p>
+
+            <TableScroll>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Importo pagato</th>
+                    <th style={styles.th}>Valore sul voucher</th>
+                    <th style={styles.th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tagli.map(t => (
+                    <tr key={t.id}>
+                      <td style={styles.td}>{euro(t.importo)}</td>
+                      <td style={styles.td}>{euro(t.valore)}</td>
+                      <td style={styles.td}>
+                        <button
+                          style={styles.btnTaglio}
+                          onClick={() => rimuoviTaglio(t.id)}
+                          aria-label={`Rimuovi il taglio da ${euro(t.importo)}`}
+                          title='Rimuovi'
+                        >−</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {/* Riga di inserimento in fondo alla tabella, con le stesse
+                      colonne: il "+" sta dove starà il "−" della riga una volta
+                      aggiunta. */}
+                  <tr>
+                    <td style={styles.td}>
+                      <input
+                        type='number' step='0.01' min='0' placeholder='es. 100'
+                        style={styles.input}
+                        aria-label='Importo pagato del nuovo taglio'
+                        value={nuovoTaglio.importo}
+                        onChange={e => setNuovoTaglio({ ...nuovoTaglio, importo: e.target.value })}
+                      />
+                    </td>
+                    <td style={styles.td}>
+                      <input
+                        type='number' step='0.01' min='0' placeholder='es. 110'
+                        style={styles.input}
+                        aria-label='Valore accreditato del nuovo taglio'
+                        value={nuovoTaglio.valore}
+                        onChange={e => setNuovoTaglio({ ...nuovoTaglio, valore: e.target.value })}
+                      />
+                    </td>
+                    <td style={styles.td}>
+                      <button
+                        style={{ ...styles.btnTaglio, ...styles.btnPrimarioSmall }}
+                        onClick={aggiungiTaglio}
+                        disabled={!taglioCompleto}
+                        aria-label='Aggiungi il taglio'
+                        title='Aggiungi'
+                      >+</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </TableScroll>
+          </>
+        )}
+      </CardCollassabile>
 
       {/* Tesseramento — solo se il club ha il modulo attivo: la quota
           configurata qui serve unicamente alla pagina Tesseramenti. */}
@@ -718,6 +882,12 @@ const styles: Record<string, React.CSSProperties> = {
   select: { padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, background: '#fff' },
   btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' },
   btnPrimarioSmall: { background: theme.primary, color: theme.primaryText, fontWeight: 600 },
+  // Quadrato: "+" e "−" occupano lo stesso spazio, così la riga non si sposta
+  // quando il bottone cambia di significato una volta salvato il taglio.
+  btnTaglio: {
+    width: 36, height: 36, borderRadius: 8, border: '1px solid #e5e7eb',
+    background: '#f8fafc', cursor: 'pointer', fontSize: 20, lineHeight: 1,
+  },
   table: { width: '100%', borderCollapse: 'collapse' },
   trDaCollegare: { background: '#fffbeb' },
   nonCollegato: { color: '#92400e', fontWeight: 600 },

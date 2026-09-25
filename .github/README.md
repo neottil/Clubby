@@ -43,6 +43,7 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 Namespace, nomi dei database e cartelle sulla VPS di un ambiente non sono Variables: li ricava dal nome
 dell'Environment la composite action [`actions/ambiente`](actions/ambiente/action.yml), usata da Infra e
 da tutti i workflow di deploy.
+| [`migrate-db.yml`](workflows/migrate-db.yml) | `workflow_call` da build-deploy e promote | Applica le migrazioni di schema ai due database di un ambiente, prima dei deploy. |
 | [`cleanup-build-tags.yml`](workflows/cleanup-build-tags.yml) | Manuale, o automatico dopo `tag.yml` | Ripulisce i tag Git e le immagini Docker superate di un branch. |
 
 Separazione di responsabilità: **Infra** gestisce ciò che ha un ciclo di vita lungo e stato persistente
@@ -451,6 +452,43 @@ rebuild. **Non deploya.** Se almeno uno scope è stato promosso, triggera `clean
 **Cosa fa**: vedi pattern 5. Rifiuta `development` (gestito da `build-deploy.yml`), valida che i tag di
 versione esistano, poi deploya nell'ambiente scelto tramite i workflow riutilizzabili. **Non tagga, non
 crea Release.** Sicuro da rilanciare più volte con lo stesso input.
+
+### `migrate-db.yml`
+
+**Trigger**: solo `workflow_call`, da `build-deploy.yml` e `promote.yml`. Input: `environment`,
+`backend_image_tag` e `authorizer_image_tag` (un tag vuoto = quel database non viene toccato).
+
+**Cosa fa**: crea un **Job Kubernetes che gira sull'immagine che sta per essere deployata** e applica i
+file `.sql` numerati contenuti in quell'immagine, saltando quelli già registrati nella tabella
+`migrazione`. Ogni file gira in una transazione insieme alla riga che lo registra. Il workflow attende
+l'esito del Job, ne stampa i log nella pipeline e fallisce se il Job fallisce o supera i cinque minuti.
+
+**Perché il Job usa l'immagine nuova**: quell'immagine esiste su `ghcr.io` da quando è stata buildata, e
+farci girare un comando non mette in servizio l'applicazione — i pod restano sulla versione precedente
+fino al rollout. In cambio si ottiene che le migrazioni applicate sono esattamente quelle che
+accompagnano il codice che si sta per deployare, non quelle presenti nel repository al momento della run.
+
+**Perché un Job e non `kubectl exec` nel pod di Postgres**: quel pod sta nel namespace dell'istanza
+condivisa fra più club, e il suo socket locale autentica in `trust` — entrarci significa privilegi da
+superutente su **tutti** i database di **tutti** i club per migrarne uno solo. Il Job si collega via rete
+con le credenziali del singolo club, e funziona identico con un Postgres gestito, dove non c'è nessun pod
+in cui entrare. Il Job si porta da sé ciò che gli serve (`ghcr-secret` per il pull e le credenziali del
+database) perché ConfigMap e Secret dell'applicazione li applica il deploy del modulo, che gira dopo.
+
+**Perché prima dei deploy e non dopo**: i job di deploy lo mettono fra i propri `needs`, quindi una
+migrazione fallita impedisce il rollout invece di lasciare il codice nuovo su uno schema vecchio. Il
+corollario è che le migrazioni devono essere **retrocompatibili** con la versione in esecuzione: un
+database più avanti dell'applicazione è innocuo, il contrario no. I cambiamenti distruttivi si fanno in due
+release — prima il codice smette di usare la colonna, poi una migrazione la elimina.
+
+**Perché non un tool** (`postgrator`, `node-pg-migrate`, Liquibase) in un modulo dedicato: sarebbe un
+quarto artefatto di build, con il proprio Dockerfile, job di build, tag immagine, logica "quale immagine
+uso se non è cambiato niente", cleanup del registry e versione da gestire in Promote — per un processo che
+vive due secondi. L'immagine del backend contiene già `bash` e `postgresql-client` (servivano al seed),
+quindi il Job non richiede né un artefatto né una dipendenza nuova, e il registro delle migrazioni è una
+tabella e un ciclo (vedi `scripts/migra.sh`). L'unica cosa che un tool darebbe in più è il **checksum** dei
+file già applicati, che accorge se qualcuno modifica una migrazione dopo il fatto: sono venti righe di SQL,
+se un giorno servirà.
 
 ### `cleanup-build-tags.yml`
 

@@ -16,6 +16,7 @@
  *   VITE_LOGO_FILE       logo in public/branding/ (opzionale)
  *   VITE_ENABLE_MODULE_TESSERAMENTO  "true" per attivare il modulo
  *   VITE_ENABLE_MODULE_FATTURAZIONE  "true" per attivare il modulo
+ *   VITE_RECHARGE_MODE   free | percentage | map (default free)
  *
  * Attività, costi e istruttori non sono configurazione: sono dati del club,
  * gestiti dal pannello Admin e serviti dall'API (/api/attivita,
@@ -44,6 +45,17 @@ export interface Moduli {
   fatturazione: boolean;
 }
 
+/**
+ * Come si registra una ricarica (variabile RECHARGE_MODE dell'ambiente, la
+ * stessa letta dal backend — vedi backend/src/util/ricariche.ts):
+ *   free        importo libero, accreditato tale e quale
+ *   percentage  importo libero, accreditato con una percentuale in più
+ *   map         importo scelto fra i tagli preconfigurati dall'admin
+ * Qui serve solo a costruire il modulo giusto: quanto accreditare lo decide
+ * sempre il backend.
+ */
+export type ModalitaRicarica = 'free' | 'percentage' | 'map';
+
 export interface ConfigFrontend {
   apiBaseUrl: string;
   /** URL dell'authorizer: registrazione, accesso e gestione della password. */
@@ -53,6 +65,7 @@ export interface ConfigFrontend {
   /** Percorso del logo (favicon e barra di navigazione). */
   logo: string;
   moduli: Moduli;
+  modalitaRicarica: ModalitaRicarica;
 }
 
 const LOGO_PREDEFINITO = '/logo.svg';
@@ -68,7 +81,13 @@ export const config: ConfigFrontend = {
   tema: {},
   logo: LOGO_PREDEFINITO,
   moduli: { tesseramento: false, fatturazione: false },
+  modalitaRicarica: 'free',
 };
+
+/** Valore ammesso, altrimenti 'free' — come fa il backend con RECHARGE_MODE. */
+function modalitaValida(valore: unknown): ModalitaRicarica {
+  return valore === 'percentage' || valore === 'map' ? valore : 'free';
+}
 
 /** /config.json se servito, altrimenti null (in locale non esiste). */
 async function leggiConfigJson(): Promise<Partial<ConfigFrontend> | null> {
@@ -102,6 +121,7 @@ function daVariabiliVite(): Partial<ConfigFrontend> {
       tesseramento: env.VITE_ENABLE_MODULE_TESSERAMENTO === 'true',
       fatturazione: env.VITE_ENABLE_MODULE_FATTURAZIONE === 'true',
     },
+    modalitaRicarica: modalitaValida(env.VITE_RECHARGE_MODE),
   };
 }
 
@@ -131,6 +151,7 @@ export async function caricaConfig(): Promise<void> {
       tesseramento: letta.moduli?.tesseramento === true,
       fatturazione: letta.moduli?.fatturazione === true,
     },
+    modalitaRicarica: modalitaValida(letta.modalitaRicarica),
   });
 }
 
