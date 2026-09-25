@@ -31,15 +31,15 @@ on:
         type: environment
         required: true
       backend_version:
-        description: 'Versione backend da deployare (es. 1.4.0) — deve esistere già come tag server-vX.Y.Z (creato da Tag)'
+        description: 'Versione backend da deployare (es. 1.4.0) — deve esistere già come tag backend-vX.Y.Z (creato da Tag)'
         required: false
         default: ''
       frontend_version:
-        description: 'Versione frontend da deployare (es. 1.4.0) — deve esistere già come tag client-vX.Y.Z (creato da Tag)'
+        description: 'Versione frontend da deployare (es. 1.4.0) — deve esistere già come tag frontend-vX.Y.Z (creato da Tag)'
         required: false
         default: ''
       authorizer_version:
-        description: 'Versione authorizer da deployare (es. 1.0.0) — deve esistere già come tag auth-vX.Y.Z (creato da Tag)'
+        description: 'Versione authorizer da deployare (es. 1.0.0) — deve esistere già come tag authorizer-vX.Y.Z (creato da Tag)'
         required: false
         default: ''
 
@@ -81,7 +81,7 @@ jobs:
           fi
 
           if [ -n "${{ inputs.backend_version }}" ]; then
-            TAG="server-v${{ inputs.backend_version }}"
+            TAG="backend-v${{ inputs.backend_version }}"
             if ! git tag -l "$TAG" | grep -qx "$TAG"; then
               echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
               exit 1
@@ -91,7 +91,7 @@ jobs:
           fi
 
           if [ -n "${{ inputs.frontend_version }}" ]; then
-            TAG="client-v${{ inputs.frontend_version }}"
+            TAG="frontend-v${{ inputs.frontend_version }}"
             if ! git tag -l "$TAG" | grep -qx "$TAG"; then
               echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
               exit 1
@@ -101,7 +101,7 @@ jobs:
           fi
 
           if [ -n "${{ inputs.authorizer_version }}" ]; then
-            TAG="auth-v${{ inputs.authorizer_version }}"
+            TAG="authorizer-v${{ inputs.authorizer_version }}"
             if ! git tag -l "$TAG" | grep -qx "$TAG"; then
               echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
               exit 1
