@@ -385,7 +385,7 @@ export default function VouchersPage() {
           <label style={styles.label} htmlFor='importo-ricarica'>Ricarica</label>
           <select
             id='importo-ricarica'
-            style={styles.input}
+            style={styles.selectPieno}
             value={importoRicarica}
             onChange={e => setImportoRicarica(e.target.value)}
           >
@@ -396,8 +396,10 @@ export default function VouchersPage() {
               </option>
             ))}
           </select>
+          {/* Non è un suggerimento ma un impedimento: senza tagli la ricarica
+              non si può proprio registrare, quindi va letto come un errore. */}
           {tagli.length === 0 && (
-            <p style={styles.hintCampo}>
+            <p style={styles.hintErrore}>
               Nessun taglio configurato: impostali nel pannello Admin, card Ricariche.
             </p>
           )}
@@ -439,13 +441,15 @@ export default function VouchersPage() {
               <tr key={m.id} style={styles.tr}>
                 <td style={{ ...styles.td, ...cellPad.td }}>{dataIso(m.data_movimento)}</td>
                 <td style={{ ...styles.td, ...cellPad.td }}>{ETICHETTA_TIPO[m.tipo] ?? '—'}</td>
+                {/* Ricarica con valore extra: la cifra principale è la quota
+                    realmente pagata dal socio — quella che compare in
+                    Fatturazione — e il credito accreditato, più alto, sta
+                    sotto. Senza `importo_pagato` i due valori coincidono e la
+                    riga aggiuntiva non serve. */}
                 <td style={{ ...styles.td, ...cellPad.td, fontWeight: 600, color: m.importo >= 0 ? theme.success : theme.danger }}>
-                  {m.importo >= 0 ? '+' : ''}{euro(m.importo)}
-                  {/* Ricarica con valore extra: la colonna mostra il credito
-                      ricevuto, che qui è più di quanto è stato pagato. Senza
-                      questa riga il numero non tornerebbe con la Fatturazione. */}
+                  {m.importo >= 0 ? '+' : ''}{euro(m.importo_pagato ?? m.importo)}
                   {m.importo_pagato != null && (
-                    <div style={styles.pagato}>pagati {euro(m.importo_pagato)}</div>
+                    <div style={styles.pagato}>Ricarica effettiva: {euro(m.importo)}</div>
                   )}
                 </td>
                 <td style={{ ...styles.td, ...cellPad.td }}>{m.descrizione ?? '—'}</td>
@@ -681,8 +685,10 @@ const styles: Record<string, React.CSSProperties> = {
   formTitle: { margin: '0 0 16px', fontSize: 16, fontWeight: 700 },
   hint: { fontSize: 13, color: '#666', marginTop: 0, marginBottom: 16 },
   hintCampo: { fontSize: 12, color: '#666', margin: '6px 0 0' },
+  hintErrore: { fontSize: 12, color: theme.danger, margin: '6px 0 0' },
   // Sotto l'importo di una ricarica con extra: peso e colore normali, perché
-  // il dato principale della colonna resta il credito ricevuto.
+  // la colonna mostra come cifra principale quanto è stato pagato, e questo è
+  // il valore effettivamente accreditato sul voucher.
   pagato: { fontSize: 11, color: '#666', fontWeight: 400, marginTop: 2 },
   checkboxLabel: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#333', cursor: 'pointer' },
   importaSaldo: { marginTop: 10, paddingLeft: 12, borderLeft: '3px solid #fcd34d' },

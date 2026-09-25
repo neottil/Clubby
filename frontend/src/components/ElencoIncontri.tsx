@@ -406,7 +406,7 @@ export default function ElencoIncontri({
               <label style={styles.label} htmlFor='istruttore'>Istruttore</label>
               <select
                 id='istruttore'
-                style={styles.input}
+                style={styles.selectPieno}
                 value={form.istruttore_id}
                 onChange={e => setForm({ ...form, istruttore_id: e.target.value })}
               >

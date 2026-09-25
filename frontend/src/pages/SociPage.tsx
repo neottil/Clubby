@@ -24,6 +24,31 @@ interface Socio {
 
 const emptyForm = { nome: '', cognome: '', email: '', telefono: '', note: '' };
 
+/**
+ * I campi del form, nell'ordine in cui compaiono. Tipizzati sulle chiavi di
+ * `emptyForm`: così un refuso qui è un errore di compilazione, e leggere
+ * `form[campo]` non richiede di aggirare il tipo.
+ */
+type CampoForm = keyof typeof emptyForm;
+const CAMPI: CampoForm[] = ['nome', 'cognome', 'email', 'telefono', 'note'];
+
+/** Campi il cui contenuto è un nominativo, da scrivere con le iniziali maiuscole. */
+const CAMPI_NOMINATIVO: CampoForm[] = ['nome', 'cognome'];
+
+/**
+ * Iniziale maiuscola a ogni parola: "maria grazia" → "Maria Grazia",
+ * "d'angelo" → "D'Angelo", "sanna-rossi" → "Sanna-Rossi". I nomi composti e
+ * gli apostrofi sono la norma, quindi non basta la prima lettera del campo.
+ *
+ * Le altre lettere non vengono mai toccate: chi scrive "McDonald" o una sigla
+ * se la tiene. Il prezzo è che un cognome che vuole la minuscola interna
+ * ("van der Berg") va corretto dopo il salvataggio, non durante la digitazione.
+ */
+function inizialiMaiuscole(valore: string): string {
+  return valore.replace(/(^|[\s'’-])(\p{L})/gu, (_, separatore: string, lettera: string) =>
+    separatore + lettera.toUpperCase());
+}
+
 export default function SociPage() {
   const { token, user } = useAuth();
   const api = createApiClient(token);
@@ -111,20 +136,23 @@ export default function SociPage() {
       {showForm && (
         <div style={styles.formCard}>
           <h3 style={styles.formTitle}>{editId ? 'Modifica socio' : 'Nuovo socio'}</h3>
-          {['nome', 'cognome', 'email', 'telefono', 'note'].map(field => (
-            <div key={field} style={styles.field}>
-              <label style={styles.label}>{field.charAt(0).toUpperCase() + field.slice(1)}</label>
-              {field === 'note' ? (
+          {CAMPI.map(campo => (
+            <div key={campo} style={styles.field}>
+              <label style={styles.label}>{campo.charAt(0).toUpperCase() + campo.slice(1)}</label>
+              {campo === 'note' ? (
                 <textarea
                   style={styles.textarea}
-                  value={(form as any)[field]}
-                  onChange={e => setForm({ ...form, [field]: e.target.value })}
+                  value={form[campo]}
+                  onChange={e => setForm({ ...form, [campo]: e.target.value })}
                 />
               ) : (
                 <input
                   style={styles.input}
-                  value={(form as any)[field]}
-                  onChange={e => setForm({ ...form, [field]: e.target.value })}
+                  value={form[campo]}
+                  onChange={e => setForm({
+                    ...form,
+                    [campo]: CAMPI_NOMINATIVO.includes(campo) ? inizialiMaiuscole(e.target.value) : e.target.value,
+                  })}
                 />
               )}
             </div>

@@ -879,7 +879,6 @@ const styles: Record<string, React.CSSProperties> = {
   passwordNota: { fontSize: 13, color: '#444', margin: '0 0 12px' },
   hint: { color: '#666', fontSize: 13, margin: '0 0 16px', lineHeight: 1.5 },
   row: { display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' },
-  select: { padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, background: '#fff' },
   btn: { background: theme.primary, color: theme.primaryText, border: 'none', borderRadius: 8, padding: '8px 20px', minHeight: 40, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' },
   btnPrimarioSmall: { background: theme.primary, color: theme.primaryText, fontWeight: 600 },
   // Quadrato: "+" e "−" occupano lo stesso spazio, così la riga non si sposta

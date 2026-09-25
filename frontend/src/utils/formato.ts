@@ -3,11 +3,17 @@
  */
 
 /**
- * Importo in euro con due decimali, es. "€ 12.50". Accetta anche i DECIMAL che
- * Postgres serializza come stringa.
+ * Importo in euro con due decimali nella convenzione italiana, es. "€ 12,50"
+ * e "€ 1.200,00": virgola per i decimali, punto per le migliaia. Accetta anche
+ * i DECIMAL che Postgres serializza come stringa.
  */
+const formatoImporto = new Intl.NumberFormat('it-IT', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 export function euro(valore: number | string | null | undefined): string {
-  return `€ ${Number(valore ?? 0).toFixed(2)}`;
+  return `€ ${formatoImporto.format(Number(valore ?? 0))}`;
 }
 
 /**

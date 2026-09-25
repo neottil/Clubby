@@ -75,7 +75,7 @@ export default function ResocontiAdminPage() {
               <label style={styles.label} htmlFor='resoconto-istruttore'>Istruttore</label>
               <select
                 id='resoconto-istruttore'
-                style={styles.select}
+                style={styles.selectPieno}
                 value={istruttoreId}
                 onChange={e => setIstruttoreId(e.target.value)}
               >
@@ -129,6 +129,5 @@ const styles: Record<string, React.CSSProperties> = {
   // longhand sopra uno shorthand, React lascia il bordo del colore del testo.
   tabAttiva: { color: '#222', borderBottom: `3px solid ${theme.primary}` },
   scelta: { maxWidth: 360, marginBottom: 20 },
-  select: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', minHeight: 40 },
   vuoto: { color: '#999', marginTop: 32, textAlign: 'center' },
 };

@@ -298,7 +298,6 @@ const styles: Record<string, React.CSSProperties> = {
   hint: { color: '#666', fontSize: 13, margin: '0 0 20px', maxWidth: 760, lineHeight: 1.5 },
   hintCampo: { fontSize: 12, color: '#666', margin: '6px 0 0' },
   filterInput: { flex: 1, minWidth: 220, maxWidth: 360, padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', minHeight: 40 },
-  select: { padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, background: '#fff', minHeight: 40 },
   modalInfo: { fontSize: 14, color: '#444', margin: '0 0 16px' },
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', minHeight: 40 },
 };
