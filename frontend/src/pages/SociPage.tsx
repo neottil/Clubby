@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, DIMENSIONE_PAGINA } from '../api/client';
+import { createApiClient, DIMENSIONE_PAGINA, type Socio } from '../api/client';
 import { useElencoPaginato } from '../hooks/useElencoPaginato';
 import { useOrdinamento } from '../hooks/useOrdinamento';
 import { useValoreDifferito } from '../hooks/useValoreDifferito';
@@ -10,17 +10,7 @@ import CaricaAltri from '../components/CaricaAltri';
 import IntestazioneOrdinabile from '../components/IntestazioneOrdinabile';
 import { dataIso } from '../utils/formato';
 import { ui } from '../styles/ui';
-
-interface Socio {
-  id: string;
-  nome: string;
-  cognome: string;
-  email: string | null;
-  telefono: string | null;
-  data_iscrizione: string;
-  id_viewer: string | null;
-  note: string | null;
-}
+import { messaggioErrore } from '../utils/errori';
 
 const emptyForm = { nome: '', cognome: '', email: '', telefono: '', note: '' };
 
@@ -87,8 +77,8 @@ export default function SociPage() {
       }
       setShowForm(false);
       elenco.ricarica();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(messaggioErrore(e));
     } finally {
       setSaving(false);
     }
@@ -99,8 +89,8 @@ export default function SociPage() {
     try {
       await api.deleteSocio(id);
       elenco.ricarica();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(messaggioErrore(e));
     }
   };
 

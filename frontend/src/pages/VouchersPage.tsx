@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, DIMENSIONE_PAGINA, type UltimaRicarica, type TaglioRicarica } from '../api/client';
+import { createApiClient, DIMENSIONE_PAGINA, type UltimaRicarica, type TaglioRicarica, type Socio, type Voucher, type Movimento } from '../api/client';
 import SocioSelect from '../components/SocioSelect';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useElencoPaginato } from '../hooks/useElencoPaginato';
@@ -16,33 +16,9 @@ import { MarkdownView } from '../components/MarkdownEditor';
 import { theme } from '../theme';
 import { config } from '../config';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
-interface Voucher {
-  id: string;
-  socio_id: string;
-  data_creazione: string;
-  saldo_iniziale: number;
-  saldo_residuo: number;
-  /** Nominativo del socio: presente nelle righe dell'elenco paginato. */
-  nome?: string;
-  cognome?: string;
-}
 
-interface Movimento {
-  id: string;
-  voucher_id: string;
-  incontro_id: string | null;
-  tipo: 'ricarica' | 'addebito';
-  data_movimento: string;
-  /** Valore sul voucher: è questo che muove il saldo. */
-  importo: number;
-  /**
-   * Quanto è stato pagato, se meno del valore accreditato (ricariche con
-   * extra). null quando le due cose coincidono.
-   */
-  importo_pagato: number | null;
-  descrizione: string | null;
-}
 
 interface IncontroDetail {
   id: string;
@@ -54,7 +30,6 @@ interface IncontroDetail {
   note_markdown: boolean;
 }
 
-interface Socio { id: string; nome: string; cognome: string; }
 
 
 // Lente d'ingrandimento: la colonna non mostra più un testo ma l'azione che
@@ -167,7 +142,7 @@ export default function VouchersPage() {
       setMioSocioId(socioId);
       setSoci(s);
       await caricaMioVoucher(socioId);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setLoading(false); }
   };
 
@@ -209,7 +184,7 @@ export default function VouchersPage() {
       const m = await api.getMovimenti(voucher.id, { limit: DIMENSIONE_PAGINA, offset: 0 });
       setMovimenti(m.data);
       setMovimentiTotal(m.total);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   // Il bottone "Movimenti" apre e chiude: ripremuto sullo stesso voucher
@@ -231,7 +206,7 @@ export default function VouchersPage() {
       });
       setMovimenti(prev => [...prev, ...m.data]);
       setMovimentiTotal(m.total);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setLoadingMovimenti(false); }
   };
 
@@ -239,7 +214,7 @@ export default function VouchersPage() {
     setLoadingIncontro(true);
     try {
       setIncontroDetail(await api.getIncontro(incontroId));
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setLoadingIncontro(false); }
   };
 
@@ -286,7 +261,7 @@ export default function VouchersPage() {
     try {
       const tutti = await api.getVouchers();
       setSociConVoucher(new Set(tutti.map(v => v.socio_id)));
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   const saveVoucher = async () => {
@@ -307,7 +282,7 @@ export default function VouchersPage() {
       // quindi si apre subito la ricarica. Con un saldo importato il voucher
       // è già pronto all'uso e non serve.
       if (!importato) openRicarica(nuovo);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setSaving(false); }
   };
 
@@ -344,7 +319,7 @@ export default function VouchersPage() {
       const [aggiornato] = await api.getVouchers(voucher.socio_id);
       await aggiornaSaldi();
       await openMovimenti({ ...voucher, ...aggiornato });
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setSaving(false); }
   };
 

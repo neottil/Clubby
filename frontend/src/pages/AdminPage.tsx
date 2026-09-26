@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, nomeIstruttore, DIMENSIONE_PAGINA, type Attivita, type Istruttore, type TaglioRicarica } from '../api/client';
+import { createApiClient, nomeIstruttore, DIMENSIONE_PAGINA, type Attivita, type Istruttore, type TaglioRicarica, type Socio, type Ruolo } from '../api/client';
 import { useElencoPaginato, type Pagina } from '../hooks/useElencoPaginato';
 import CaricaAltri from '../components/CaricaAltri';
 import TableScroll from '../components/TableScroll';
@@ -13,6 +13,7 @@ import Modal from '../components/Modal';
 import { theme } from '../theme';
 import { config } from '../config';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
 /** Utente come lo espone l'authorizer attraverso il backend. */
 interface UtenteRegistrato {
@@ -33,9 +34,7 @@ interface UtenteRegistrato {
   cambio_password_richiesto: boolean;
 }
 
-type Ruolo = 'socio' | 'istruttore';
 const RUOLI: Ruolo[] = ['socio', 'istruttore'];
-interface Socio { id: string; nome: string; cognome: string; email: string | null; id_viewer: string | null; }
 
 export default function AdminPage() {
   const { token, user } = useAuth();
@@ -102,7 +101,7 @@ export default function AdminPage() {
       setAttivita(at);
       setIstruttori(ist);
       setCaricato(true);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   /**
@@ -142,7 +141,7 @@ export default function AdminPage() {
       setSuccessMsg(`${collegamento.utente.email} collegato a ${socio ? `${socio.cognome} ${socio.nome}` : 'socio'}`);
       setCollegamento(null);
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setSaving(false); }
   };
 
@@ -159,7 +158,7 @@ export default function AdminPage() {
       await api.disassociaViewer(u.socio_id);
       setSuccessMsg(`${u.email}: account scollegato`);
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   /**
@@ -184,7 +183,7 @@ export default function AdminPage() {
       await api.cambiaAttivo(u.id, !u.attivo);
       setSuccessMsg(`${u.email}: account ${u.attivo ? 'disattivato' : 'riattivato'}`);
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   const cambiaRuolo = async (u: UtenteRegistrato, ruolo: Ruolo) => {
@@ -198,7 +197,7 @@ export default function AdminPage() {
       await api.impostaRuolo(u.id, ruolo);
       setSuccessMsg(`${u.email}: ruolo ${ruolo}`);
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   /**
@@ -216,7 +215,7 @@ export default function AdminPage() {
       await api.impostaAdmin(u.id, admin);
       setSuccessMsg(`${u.email}: ${admin ? 'ora è amministratore' : 'non è più amministratore'}`);
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   const resetPassword = async (u: UtenteRegistrato) => {
@@ -231,7 +230,7 @@ export default function AdminPage() {
       setPasswordTemporanea({ email: u.email, password: esito.password_temporanea });
       setSuccessMsg('');
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   // -------------------------------------------------------------
@@ -243,7 +242,7 @@ export default function AdminPage() {
       const imp = await api.aggiornaImpostazioni({ quota_tesseramento: Number(quotaTesseramento) });
       setQuotaTesseramento(Number(imp.quota_tesseramento).toFixed(2));
       setSuccessMsg('Quota di tesseramento aggiornata');
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   // -------------------------------------------------------------
@@ -255,7 +254,7 @@ export default function AdminPage() {
       const imp = await api.aggiornaImpostazioni({ percentuale_ricarica: Number(percentualeRicarica) });
       setPercentualeRicarica(String(Number(imp.percentuale_ricarica)));
       setSuccessMsg('Percentuale di ricarica aggiornata');
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   const aggiungiTaglio = async () => {
@@ -268,7 +267,7 @@ export default function AdminPage() {
       setNuovoTaglio({ importo: '', valore: '' });
       setTagli(await api.getTagliRicarica());
       setSuccessMsg('Taglio aggiunto');
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   const rimuoviTaglio = async (id: string) => {
@@ -279,7 +278,7 @@ export default function AdminPage() {
       // Nessun avviso di conferma: i movimenti già registrati non cambiano,
       // perché hanno il proprio valore scritto sulla riga.
       setSuccessMsg('Taglio rimosso');
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   const taglioCompleto = Number(nuovoTaglio.importo) > 0 && Number(nuovoTaglio.valore) > 0;
@@ -304,7 +303,7 @@ export default function AdminPage() {
       setNuovaAttivita({ nome: '', costo_default: '' });
       setSuccessMsg('Attività creata');
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   const salvaAttivita = async () => {
@@ -318,7 +317,7 @@ export default function AdminPage() {
       setAttivitaInModifica(null);
       setSuccessMsg('Attività aggiornata');
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   // Disattivare è la via normale per togliere un'attività: sparisce dalle
@@ -329,7 +328,7 @@ export default function AdminPage() {
       await api.updateAttivita(a.id, { attiva: !a.attiva });
       setSuccessMsg(a.attiva ? `"${a.nome}" disattivata` : `"${a.nome}" riattivata`);
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   // L'eliminazione è definitiva, ed è permessa solo per un'attività mai usata
@@ -346,7 +345,7 @@ export default function AdminPage() {
       await api.deleteAttivita(a.id);
       setSuccessMsg(`"${a.nome}" eliminata`);
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   /**
@@ -364,8 +363,8 @@ export default function AdminPage() {
     setIstruttori(prev => prev.map(i => (i.id === istruttore.id ? { ...i, attivita_ids: nuove } : i)));
     try {
       await api.setAbilitazioni(istruttore.id, nuove);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(messaggioErrore(e));
       load();
     }
   };

@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, DIMENSIONE_PAGINA, type VoceFatturazione } from '../api/client';
+import { createApiClient, DIMENSIONE_PAGINA, type VoceFatturazione, type Socio } from '../api/client';
 import SocioSelect from '../components/SocioSelect';
 import DateRangeFilter, { dataCompleta } from '../components/DateRangeFilter';
 import TableScroll from '../components/TableScroll';
@@ -20,8 +20,8 @@ import TotaliFiltri from '../components/TotaliFiltri';
 import Etichetta from '../components/Etichetta';
 import { euro, dataIso } from '../utils/formato';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
-interface Socio { id: string; nome: string; cognome: string; }
 
 const VOCI: Record<VoceFatturazione['tipo'], { etichetta: string; colore: string; sfondo: string }> = {
   ricarica:     { etichetta: 'Ricarica voucher', colore: '#1d4ed8', sfondo: '#eff6ff' },
@@ -52,7 +52,7 @@ export default function FatturazionePage() {
   const richiestaCorrente = useRef(0);
 
   useEffect(() => {
-    api.getSoci().then(setSoci).catch((e: any) => setError(e.message));
+    api.getSoci().then(setSoci).catch(e => setError(messaggioErrore(e)));
   }, []);
 
   const da = dataCompleta(dataDa);
@@ -70,8 +70,8 @@ export default function FatturazionePage() {
       setTotal(r.total);
       setTotaleImporto(Number(r.totale_importo ?? 0));
       setCaricato(true);
-    } catch (e: any) {
-      if (richiesta === richiestaCorrente.current) setError(e.message);
+    } catch (e) {
+      if (richiesta === richiestaCorrente.current) setError(messaggioErrore(e));
     } finally {
       if (richiesta === richiestaCorrente.current) setLoading(false);
     }
@@ -86,8 +86,8 @@ export default function FatturazionePage() {
       setVoci(prev => [...prev, ...r.data]);
       setTotal(r.total);
       setTotaleImporto(Number(r.totale_importo ?? 0));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(messaggioErrore(e));
     } finally {
       setLoadingMore(false);
     }

@@ -475,8 +475,11 @@ con le credenziali del singolo club, e funziona identico con un Postgres gestito
 in cui entrare. Il Job si porta da sé ciò che gli serve (`ghcr-secret` per il pull e le credenziali del
 database) perché ConfigMap e Secret dell'applicazione li applica il deploy del modulo, che gira dopo.
 
-**Perché prima dei deploy e non dopo**: i job di deploy lo mettono fra i propri `needs`, quindi una
-migrazione fallita impedisce il rollout invece di lasciare il codice nuovo su uno schema vecchio. Il
+**Perché prima dei deploy e non dopo**: tutti e tre i job di deploy lo mettono fra i propri `needs`,
+quindi una migrazione fallita impedisce il rollout invece di lasciare il codice nuovo su uno schema
+vecchio. Anche il frontend, che il database non lo tocca: se la migrazione fallisce il backend resta
+alla versione precedente, e un frontend nuovo che chiama API non ancora deployate sarebbe rotto
+quanto il caso che si sta evitando. O si aggiorna tutto, o non si aggiorna niente. Il
 corollario è che le migrazioni devono essere **retrocompatibili** con la versione in esecuzione: un
 database più avanti dell'applicazione è innocuo, il contrario no. I cambiamenti distruttivi si fanno in due
 release — prima il codice smette di usare la colonna, poi una migrazione la elimina.

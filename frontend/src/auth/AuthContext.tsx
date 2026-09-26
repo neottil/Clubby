@@ -1,3 +1,9 @@
+/* eslint-disable react-refresh/only-export-components --
+ * Il file esporta il provider e l'hook useAuth che lo consuma: è il modo
+ * canonico di scrivere un context React, e separarli in due file per far
+ * tacere la regola peggiorerebbe il codice. L'unico effetto è che in sviluppo
+ * l'hot reload ricarica il modulo intero invece del solo componente.
+ */
 /**
  * Contesto di autenticazione.
  *
@@ -62,22 +68,34 @@ const CHIAVE_TOKEN = 'clubby_tokens';
  * che la firma la verifica davvero — un token manomesso qui otterrebbe
  * un'interfaccia diversa, non dei permessi diversi.
  */
-function leggiClaims(token: string): Record<string, any> {
+function leggiClaims(token: string): Record<string, unknown> {
   try {
     const payload = token.split('.')[1];
-    return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    const decodificato: unknown = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    // Un payload che non è un oggetto (o è null) non ha claim da leggere:
+    // meglio trattarlo come vuoto che lasciar esplodere il primo accesso.
+    return typeof decodificato === 'object' && decodificato !== null
+      ? decodificato as Record<string, unknown>
+      : {};
   } catch {
     return {};
   }
 }
 
+// I claim arrivano da un token di cui qui non si verifica la firma: ogni
+// campo va quindi controllato, non dato per buono. È il motivo per cui il
+// tipo è `unknown` e non un'interfaccia comoda — quella descriverebbe una
+// garanzia che a questo livello non esiste.
 function utenteDa(token: string): AuthUser | null {
   const claims = leggiClaims(token);
-  if (!claims.sub) return null;
-  const groups: string[] = Array.isArray(claims.roles) ? claims.roles : [];
+  const sub = typeof claims.sub === 'string' ? claims.sub : '';
+  if (!sub) return null;
+  const groups: string[] = Array.isArray(claims.roles)
+    ? claims.roles.filter((r): r is string => typeof r === 'string')
+    : [];
   return {
-    sub: claims.sub,
-    email: claims.email ?? '',
+    sub,
+    email: typeof claims.email === 'string' ? claims.email : '',
     groups,
     isAdmin: groups.includes('admin'),
     isIstruttore: groups.includes('istruttore'),

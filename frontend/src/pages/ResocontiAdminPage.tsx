@@ -9,14 +9,14 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, nomeIstruttore, type Istruttore } from '../api/client';
+import { createApiClient, nomeIstruttore, type Istruttore, type Socio } from '../api/client';
 import ElencoIncontri from '../components/ElencoIncontri';
 import SocioSelect from '../components/SocioSelect';
 import Avviso from '../components/Avviso';
 import { theme } from '../theme';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
-interface Socio { id: string; nome: string; cognome: string; }
 
 type Scheda = 'istruttore' | 'socio';
 
@@ -42,7 +42,7 @@ export default function ResocontiAdminPage() {
         setIstruttori([...ist].sort((a, b) => nomeIstruttore(a).localeCompare(nomeIstruttore(b))));
         setSoci(s);
       })
-      .catch((e: any) => setError(e.message));
+      .catch(e => setError(messaggioErrore(e)));
   }, []);
 
   const selezione = scheda === 'istruttore' ? istruttoreId : socioId;

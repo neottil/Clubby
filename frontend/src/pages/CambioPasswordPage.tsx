@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import PasswordInput from '../components/PasswordInput';
 import Avviso from '../components/Avviso';
 import { theme } from '../theme';
+import { messaggioErrore } from '../utils/errori';
 
 /** Stessa soglia applicata dall'authorizer, vedi crypto/password.ts. */
 const LUNGHEZZA_MINIMA_PASSWORD = 10;
@@ -31,8 +32,8 @@ export default function CambioPasswordPage() {
     }
     try {
       await cambiaPassword(attuale, nuova);
-    } catch (err: any) {
-      setErrore(err.message ?? 'Cambio password non riuscito');
+    } catch (err) {
+      setErrore(messaggioErrore(err, 'Cambio password non riuscito'));
     }
   };
 

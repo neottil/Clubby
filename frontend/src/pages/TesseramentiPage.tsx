@@ -24,6 +24,7 @@ import { euro, dataIso, oggiIso } from '../utils/formato';
 import Modal from '../components/Modal';
 import { config } from '../config';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
 /** Stessa data dell'anno dopo; il 29 febbraio diventa 28 se l'anno non è bisestile. */
 function aggiungiAnno(iso: string): string {
@@ -86,7 +87,7 @@ export default function TesseramentiPage() {
   useEffect(() => {
     api.getImpostazioni()
       .then(imp => setQuota(Number(imp.quota_tesseramento)))
-      .catch((e: any) => setError(e.message));
+      .catch(e => setError(messaggioErrore(e)));
   }, []);
 
   // Elenco a pagine: ricerca, filtro per stato e ordinamento li applica il
@@ -129,9 +130,9 @@ export default function TesseramentiPage() {
       setSuccessMsg(`Tesseramento di ${rinnovo.riga.socioNome} rinnovato fino al ${rinnovo.scadenza}`);
       setRinnovo(null);
       elenco.ricarica();
-    } catch (e: any) {
+    } catch (e) {
       // Dentro la modale: è lì che si sta guardando, e i valori restano da correggere.
-      setErroreRinnovo(e.message);
+      setErroreRinnovo(messaggioErrore(e));
     } finally {
       setSaving(false);
     }
@@ -142,9 +143,9 @@ export default function TesseramentiPage() {
     try {
       const rinnovi = await api.getStoricoTesseramenti(riga.socio_id);
       setStorico(s => (s?.riga.socio_id === riga.socio_id ? { riga, rinnovi } : s));
-    } catch (e: any) {
+    } catch (e) {
       setStorico(null);
-      setError(e.message);
+      setError(messaggioErrore(e));
     }
   };
 

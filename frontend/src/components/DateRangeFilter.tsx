@@ -1,3 +1,10 @@
+/* eslint-disable react-refresh/only-export-components --
+ * Oltre al componente, il file esporta le due funzioni che ne definiscono la
+ * semantica (isInDateRange, dataCompleta): stanno qui perché chi usa il filtro
+ * usa anche quelle, e tenerle accanto è ciò che rende evidente che descrivono
+ * lo stesso intervallo. Costo: in sviluppo l'hot reload ricarica il modulo
+ * intero invece del solo componente.
+ */
 import { theme } from '../theme';
 import { dataIso } from '../utils/formato';
 
