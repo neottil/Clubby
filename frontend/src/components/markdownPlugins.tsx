@@ -1,3 +1,9 @@
+/* eslint-disable react-refresh/only-export-components --
+ * Il file esporta la configurazione dei plugin di MDXEditor, e insieme il
+ * componente di fallback che uno di quei plugin richiede: il componente esiste
+ * solo per essere passato alla configurazione, quindi separarlo lascerebbe due
+ * file che non hanno senso l'uno senza l'altro.
+ */
 import {
   headingsPlugin,
   listsPlugin,

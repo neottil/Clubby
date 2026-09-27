@@ -27,9 +27,11 @@ import { handler as tesseramentiHandler } from './handlers/tesseramenti.js';
 import { handler as fatturazioneHandler } from './handlers/fatturazione.js';
 import { handler as impostazioniHandler } from './handlers/impostazioni.js';
 import { handler as adminHandler } from './handlers/admin.js';
+import { handler as ricaricheHandler } from './handlers/ricariche.js';
 import { handler as authHandler } from './handlers/auth.js';
 import { handler as versionHandler } from './handlers/version.js';
 import { moduloAttivo, type Modulo } from './util/moduli.js';
+import { modalitaRicarica } from './util/ricariche.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0'; // 0.0.0.0 necessario nei container
@@ -65,6 +67,8 @@ const ROUTES: Array<{
   { pattern: /^\/api\/voucher\/([^/]+)\/movimenti$/, handler: vouchersHandler,  param: 'id' },
   { pattern: /^\/api\/voucher\/([^/]+)\/ultima-ricarica$/, handler: vouchersHandler, param: 'id' },
   { pattern: /^\/api\/voucher$/,                     handler: vouchersHandler,  param: null },
+  { pattern: /^\/api\/ricarica-tagli\/([^/]+)$/,     handler: ricaricheHandler, param: 'id' },
+  { pattern: /^\/api\/ricarica-tagli$/,              handler: ricaricheHandler, param: null },
   { pattern: /^\/api\/tesseramenti\/([^/]+)$/,       handler: tesseramentiHandler, param: 'id', modulo: 'tesseramento' },
   { pattern: /^\/api\/tesseramenti$/,                handler: tesseramentiHandler, param: null, modulo: 'tesseramento' },
   { pattern: /^\/api\/fatturazione$/,                handler: fatturazioneHandler, param: null, modulo: 'fatturazione' },
@@ -211,6 +215,7 @@ server.listen(PORT, HOST, () => {
   const moduli = (['tesseramento', 'fatturazione'] as const)
     .map(m => `${m}=${moduloAttivo(m) ? 'attivo' : 'spento'}`).join(', ');
   console.log(`[server] Moduli opzionali: ${moduli}`);
+  console.log(`[server] Modalità di ricarica: ${modalitaRicarica()}`);
 });
 
 // Graceful shutdown — necessario in Kubernetes per evitare richieste perse al SIGTERM

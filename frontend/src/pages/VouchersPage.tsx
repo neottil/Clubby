@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, DIMENSIONE_PAGINA, type UltimaRicarica } from '../api/client';
+import { createApiClient, DIMENSIONE_PAGINA, type UltimaRicarica, type TaglioRicarica, type Socio, type Voucher, type Movimento } from '../api/client';
 import SocioSelect from '../components/SocioSelect';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useElencoPaginato } from '../hooks/useElencoPaginato';
@@ -16,27 +16,9 @@ import { MarkdownView } from '../components/MarkdownEditor';
 import { theme } from '../theme';
 import { config } from '../config';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
-interface Voucher {
-  id: string;
-  socio_id: string;
-  data_creazione: string;
-  saldo_iniziale: number;
-  saldo_residuo: number;
-  /** Nominativo del socio: presente nelle righe dell'elenco paginato. */
-  nome?: string;
-  cognome?: string;
-}
 
-interface Movimento {
-  id: string;
-  voucher_id: string;
-  incontro_id: string | null;
-  tipo: 'ricarica' | 'addebito';
-  data_movimento: string;
-  importo: number;
-  descrizione: string | null;
-}
 
 interface IncontroDetail {
   id: string;
@@ -48,7 +30,6 @@ interface IncontroDetail {
   note_markdown: boolean;
 }
 
-interface Socio { id: string; nome: string; cognome: string; }
 
 
 // Lente d'ingrandimento: la colonna non mostra più un testo ma l'azione che
@@ -119,6 +100,10 @@ export default function VouchersPage() {
   // Proposta a oggi, modificabile per registrare una ricarica pagata in un
   // altro giorno: è la data con cui compare in movimenti e Fatturazione.
   const [dataRicarica, setDataRicarica] = useState(oggiIso());
+  // Configurazione delle ricariche, letta solo dove serve alla modalità attiva
+  // (entrambe le API sono riservate all'admin, l'unico che registra ricariche).
+  const [tagli, setTagli] = useState<TaglioRicarica[]>([]);
+  const [percentuale, setPercentuale] = useState(0);
   const [saving, setSaving]                   = useState(false);
 
   // Dettaglio incontro (aperto cliccando il chip "Incontro" su un movimento)
@@ -157,7 +142,7 @@ export default function VouchersPage() {
       setMioSocioId(socioId);
       setSoci(s);
       await caricaMioVoucher(socioId);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setLoading(false); }
   };
 
@@ -199,7 +184,7 @@ export default function VouchersPage() {
       const m = await api.getMovimenti(voucher.id, { limit: DIMENSIONE_PAGINA, offset: 0 });
       setMovimenti(m.data);
       setMovimentiTotal(m.total);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   // Il bottone "Movimenti" apre e chiude: ripremuto sullo stesso voucher
@@ -221,7 +206,7 @@ export default function VouchersPage() {
       });
       setMovimenti(prev => [...prev, ...m.data]);
       setMovimentiTotal(m.total);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setLoadingMovimenti(false); }
   };
 
@@ -229,7 +214,7 @@ export default function VouchersPage() {
     setLoadingIncontro(true);
     try {
       setIncontroDetail(await api.getIncontro(incontroId));
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setLoadingIncontro(false); }
   };
 
@@ -240,6 +225,21 @@ export default function VouchersPage() {
     setDataRicarica(oggiIso());
     setPanel({ voucher, mode: 'ricarica' });
   };
+
+  // Tagli e percentuale: caricati una volta sola all'apertura della pagina, e
+  // solo nella modalità che li usa. Un errore qui non blocca la pagina — la
+  // ricarica resta possibile, è il backend a validarla comunque.
+  useEffect(() => {
+    if (!user?.isAdmin) return;
+    if (config.modalitaRicarica === 'map') {
+      api.getTagliRicarica().then(setTagli).catch(() => setTagli([]));
+    }
+    if (config.modalitaRicarica === 'percentage') {
+      api.getImpostazioni()
+        .then(imp => setPercentuale(Number(imp.percentuale_ricarica)))
+        .catch(() => setPercentuale(0));
+    }
+  }, [user?.isAdmin]);
 
   /** Nominativo del socio di un voucher: dalla riga se c'è, altrimenti dall'elenco soci. */
   const socioLabel = (voucher: Voucher) => {
@@ -261,7 +261,7 @@ export default function VouchersPage() {
     try {
       const tutti = await api.getVouchers();
       setSociConVoucher(new Set(tutti.map(v => v.socio_id)));
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
   };
 
   const saveVoucher = async () => {
@@ -282,11 +282,24 @@ export default function VouchersPage() {
       // quindi si apre subito la ricarica. Con un saldo importato il voucher
       // è già pronto all'uso e non serve.
       if (!importato) openRicarica(nuovo);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setSaving(false); }
   };
 
   const ricaricaValida = parseFloat(importoRicarica) > 0 && !!dataRicarica;
+
+  /**
+   * Quanto finirà sul voucher, mostrato sotto il campo prima di salvare.
+   * È solo un'anteprima: il valore vero lo ricalcola il backend dalla stessa
+   * configurazione, e non viene mai inviato da qui.
+   * null quando non c'è niente da anticipare (modalità free, importo vuoto, o
+   * percentuale non configurata).
+   */
+  const valoreAccreditato = (() => {
+    const pagato = parseFloat(importoRicarica);
+    if (config.modalitaRicarica !== 'percentage' || !(pagato > 0) || !(percentuale > 0)) return null;
+    return Math.round(pagato * (1 + percentuale / 100) * 100) / 100;
+  })();
 
   const saveRicarica = async () => {
     if (panel?.mode !== 'ricarica' || !ricaricaValida) return;
@@ -306,7 +319,7 @@ export default function VouchersPage() {
       const [aggiornato] = await api.getVouchers(voucher.socio_id);
       await aggiornaSaldi();
       await openMovimenti({ ...voucher, ...aggiornato });
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(messaggioErrore(e)); }
     finally { setSaving(false); }
   };
 
@@ -332,15 +345,51 @@ export default function VouchersPage() {
       <p style={styles.hint}>
         Credito acquistato dal socio: aumenta il saldo{inFatturazione && ' e compare in Fatturazione'}. Gli addebiti
         nascono dagli incontri registrati e non si inseriscono qui.
+        {config.modalitaRicarica !== 'free' && inFatturazione &&
+          ' In Fatturazione compare l\'importo pagato, non il valore accreditato.'}
       </p>
       <div style={styles.field}>
         <label style={styles.label} htmlFor='data-ricarica'>Data</label>
         <input id='data-ricarica' type='date' style={styles.input} value={dataRicarica} onChange={e => setDataRicarica(e.target.value)} />
       </div>
-      <div style={styles.field}>
-        <label style={styles.label} htmlFor='importo-ricarica'>Importo (€)</label>
-        <input id='importo-ricarica' type='number' step='0.01' min='0.01' style={styles.input} value={importoRicarica} onChange={e => setImportoRicarica(e.target.value)} />
-      </div>
+      {/* In modalità "map" l'importo si sceglie fra i tagli configurati
+          dall'admin: un campo libero accetterebbe valori che il backend
+          rifiuta comunque, non essendoci un taglio corrispondente. */}
+      {config.modalitaRicarica === 'map' ? (
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor='importo-ricarica'>Ricarica</label>
+          <select
+            id='importo-ricarica'
+            style={styles.selectPieno}
+            value={importoRicarica}
+            onChange={e => setImportoRicarica(e.target.value)}
+          >
+            <option value=''>Scegli un taglio...</option>
+            {tagli.map(t => (
+              <option key={t.id} value={String(t.importo)}>
+                {euro(t.importo)} → {euro(t.valore)} sul voucher
+              </option>
+            ))}
+          </select>
+          {/* Non è un suggerimento ma un impedimento: senza tagli la ricarica
+              non si può proprio registrare, quindi va letto come un errore. */}
+          {tagli.length === 0 && (
+            <p style={styles.hintErrore}>
+              Nessun taglio configurato: impostali nel pannello Admin, card Ricariche.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor='importo-ricarica'>Importo pagato (€)</label>
+          <input id='importo-ricarica' type='number' step='0.01' min='0.01' style={styles.input} value={importoRicarica} onChange={e => setImportoRicarica(e.target.value)} />
+          {valoreAccreditato !== null && (
+            <p style={styles.hintCampo}>
+              Sul voucher verranno accreditati <strong>{euro(valoreAccreditato)}</strong>.
+            </p>
+          )}
+        </div>
+      )}
       <div style={styles.formActions}>
         <button style={styles.btnSecondary} onClick={() => setPanel(null)}>Annulla</button>
         <button style={styles.btn} onClick={saveRicarica} disabled={saving || !ricaricaValida}>{saving ? '...' : 'Salva'}</button>
@@ -367,8 +416,16 @@ export default function VouchersPage() {
               <tr key={m.id} style={styles.tr}>
                 <td style={{ ...styles.td, ...cellPad.td }}>{dataIso(m.data_movimento)}</td>
                 <td style={{ ...styles.td, ...cellPad.td }}>{ETICHETTA_TIPO[m.tipo] ?? '—'}</td>
+                {/* Ricarica con valore extra: la cifra principale è la quota
+                    realmente pagata dal socio — quella che compare in
+                    Fatturazione — e il credito accreditato, più alto, sta
+                    sotto. Senza `importo_pagato` i due valori coincidono e la
+                    riga aggiuntiva non serve. */}
                 <td style={{ ...styles.td, ...cellPad.td, fontWeight: 600, color: m.importo >= 0 ? theme.success : theme.danger }}>
-                  {m.importo >= 0 ? '+' : ''}{euro(m.importo)}
+                  {m.importo >= 0 ? '+' : ''}{euro(m.importo_pagato ?? m.importo)}
+                  {m.importo_pagato != null && (
+                    <div style={styles.pagato}>Ricarica effettiva: {euro(m.importo)}</div>
+                  )}
                 </td>
                 <td style={{ ...styles.td, ...cellPad.td }}>{m.descrizione ?? '—'}</td>
                 {/* Movimento manuale: nessun incontro da aprire, cella vuota */}
@@ -603,6 +660,11 @@ const styles: Record<string, React.CSSProperties> = {
   formTitle: { margin: '0 0 16px', fontSize: 16, fontWeight: 700 },
   hint: { fontSize: 13, color: '#666', marginTop: 0, marginBottom: 16 },
   hintCampo: { fontSize: 12, color: '#666', margin: '6px 0 0' },
+  hintErrore: { fontSize: 12, color: theme.danger, margin: '6px 0 0' },
+  // Sotto l'importo di una ricarica con extra: peso e colore normali, perché
+  // la colonna mostra come cifra principale quanto è stato pagato, e questo è
+  // il valore effettivamente accreditato sul voucher.
+  pagato: { fontSize: 11, color: '#666', fontWeight: 400, marginTop: 2 },
   checkboxLabel: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#333', cursor: 'pointer' },
   importaSaldo: { marginTop: 10, paddingLeft: 12, borderLeft: '3px solid #fcd34d' },
   avvisoImport: { fontSize: 13, color: '#78350f', background: '#fffbeb', padding: '8px 12px', borderRadius: 6, margin: '0 0 10px', lineHeight: 1.5 },

@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, nomeIstruttore, DIMENSIONE_PAGINA, type Attivita, type Istruttore } from '../api/client';
+import { createApiClient, nomeIstruttore, DIMENSIONE_PAGINA, type Attivita, type Istruttore, type Socio, type Voucher, type Incontro } from '../api/client';
 import SocioSelect from './SocioSelect';
 import ActivitySelect from './ActivitySelect';
 import DateRangeFilter, { dataCompleta } from './DateRangeFilter';
@@ -23,32 +23,9 @@ import { euro, dataIso, oggiIso } from '../utils/formato';
 import Modal from './Modal';
 import { MarkdownEditor, MarkdownView } from './MarkdownEditor';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
-interface Incontro {
-  id: string;
-  socio_id: string;
-  data_incontro: string;
-  attivita_id: string;
-  /** Nome dell'attività: arriva già con la riga (JOIN col listino). */
-  attivita: string;
-  /**
-   * Account dell'istruttore che ha tenuto l'incontro. null per gli incontri
-   * non attribuiti a nessuno: il nome si risolve dall'elenco istruttori,
-   * perché a database c'è solo l'identificativo.
-   */
-  istruttore_id: string | null;
-  costo: number;
-  note: string | null;
-  // Formato di "note": false = testo semplice, true = Markdown. Deciso in fase
-  // di inserimento e salvato a db, così la modale sa come renderizzare senza
-  // doverlo dedurre dal contenuto.
-  note_markdown: boolean;
-  nome?: string;
-  cognome?: string;
-}
 
-interface Socio { id: string; nome: string; cognome: string; }
-interface Voucher { id: string; socio_id: string; saldo_residuo: number; }
 
 interface ElencoIncontriProps {
   /** Omesso: nessuna intestazione né margini di pagina, per incorporare l'elenco in un'altra pagina. */
@@ -174,8 +151,8 @@ export default function ElencoIncontri({
       setAttivita(at);
       setIstruttori(ist);
       setCaricato(true);
-    } catch (e: any) {
-      if (richiesta === richiestaCorrente.current) setError(e.message);
+    } catch (e) {
+      if (richiesta === richiestaCorrente.current) setError(messaggioErrore(e));
     } finally {
       if (richiesta === richiestaCorrente.current) setLoading(false);
     }
@@ -193,8 +170,8 @@ export default function ElencoIncontri({
       setIncontri(prev => [...prev, ...i.data]);
       setTotal(i.total);
       setTotaleCosto(i.totale_costo ?? 0);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(messaggioErrore(e));
     } finally {
       setLoadingMore(false);
     }
@@ -298,8 +275,8 @@ export default function ElencoIncontri({
       else        await api.createIncontro(payload);
       setShowForm(false);
       load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(messaggioErrore(e));
     } finally {
       setSaving(false);
     }
@@ -308,7 +285,7 @@ export default function ElencoIncontri({
   const remove = async (id: string) => {
     if (!confirm('Eliminare questo incontro?')) return;
     try { await api.deleteIncontro(id); load(); }
-    catch (e: any) { setError(e.message); }
+    catch (e) { setError(messaggioErrore(e)); }
   };
 
   // Nome del socio: arriva già con la riga (il backend fa sempre la JOIN con
@@ -406,7 +383,7 @@ export default function ElencoIncontri({
               <label style={styles.label} htmlFor='istruttore'>Istruttore</label>
               <select
                 id='istruttore'
-                style={styles.input}
+                style={styles.selectPieno}
                 value={form.istruttore_id}
                 onChange={e => setForm({ ...form, istruttore_id: e.target.value })}
               >

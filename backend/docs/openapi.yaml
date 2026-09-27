@@ -768,9 +768,20 @@ paths:
       tags: [Voucher]
       summary: Registra una ricarica
       description: |
-        Solo admin; datata `data_movimento`, oppure oggi. Registra credito acquistato dal socio: importo positivo,
-        conteggiato in Fatturazione. Gli addebiti non si inseriscono da qui: nascono solo
-        dagli incontri, e un `tipo` diverso da `ricarica` è rifiutato con 400.
+        Solo admin; datata `data_movimento`, oppure oggi. Gli addebiti non si inseriscono da
+        qui: nascono solo dagli incontri, e un `tipo` diverso da `ricarica` è rifiutato con 400.
+
+        `importo` è quanto **paga** il socio. Quanto viene accreditato sul voucher lo decide
+        il server secondo la variabile d'ambiente `RECHARGE_MODE`:
+
+        - `free` (predefinita): accreditato quanto pagato;
+        - `percentage`: accreditato l'importo più la percentuale configurata
+          (`percentuale_ricarica` in `/api/impostazioni`);
+        - `map`: l'importo deve corrispondere a un taglio di `/api/ricarica-tagli`, da cui si
+          legge il valore accreditato — un importo non previsto è rifiutato con 400.
+
+        Nella risposta `importo` è il credito accreditato e `importo_pagato` quanto è stato
+        pagato, quando le due cose differiscono. La Fatturazione conta il pagato.
       requestBody:
         required: true
         content:
@@ -786,6 +797,79 @@ paths:
                 $ref: '#/components/schemas/Movimento'
         '400':
           $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+
+  /api/ricarica-tagli:
+    get:
+      tags: [Voucher]
+      summary: Tagli di ricarica configurati
+      description: |
+        Solo admin. Dal più economico: è l'ordine in cui compaiono nella select della
+        ricarica. Usati dove la variabile d'ambiente `RECHARGE_MODE` vale `map`, ma
+        configurabili anche prima di attivarla.
+      responses:
+        '200':
+          description: Tagli configurati
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaglioRicarica'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+    post:
+      tags: [Voucher]
+      summary: Aggiunge un taglio di ricarica
+      description: |
+        Solo admin. `importo` è quanto paga il socio, `valore` quanto gli viene
+        accreditato sul voucher. Rifiutato con 400 se esiste già un taglio con lo stesso
+        importo, o se il valore è inferiore all'importo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [importo, valore]
+              properties:
+                importo:
+                  $ref: '#/components/schemas/Importo'
+                valore:
+                  $ref: '#/components/schemas/Importo'
+      responses:
+        '201':
+          description: Taglio creato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaglioRicarica'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+
+  /api/ricarica-tagli/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      tags: [Voucher]
+      summary: Rimuove un taglio di ricarica
+      description: |
+        Solo admin. Le ricariche già registrate non cambiano: hanno il proprio valore
+        scritto sulla riga del movimento, non un riferimento al taglio.
+      responses:
+        '204':
+          description: Taglio rimosso
         '401':
           $ref: '#/components/responses/NonAutenticato'
         '403':
@@ -1770,7 +1854,7 @@ components:
 
     Movimento:
       type: object
-      required: [id, voucher_id, incontro_id, tipo, data_movimento, importo, descrizione, created_at]
+      required: [id, voucher_id, incontro_id, tipo, data_movimento, importo, importo_pagato, descrizione, created_at]
       properties:
         id:
           type: string
@@ -1790,8 +1874,32 @@ components:
           format: date
         importo:
           $ref: '#/components/schemas/Importo'
+        importo_pagato:
+          description: |
+            Solo per le ricariche con valore extra (`RECHARGE_MODE` `percentage` o `map`):
+            quanto ha pagato davvero il socio, quando è meno del credito accreditato in
+            `importo`. `null` quando le due cose coincidono. È questo che la Fatturazione
+            conta come incasso.
+          oneOf:
+            - $ref: '#/components/schemas/Importo'
+            - type: 'null'
         descrizione:
           type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+
+    TaglioRicarica:
+      type: object
+      required: [id, importo, valore]
+      properties:
+        id:
+          type: string
+          format: uuid
+        importo:
+          $ref: '#/components/schemas/Importo'
+        valore:
+          $ref: '#/components/schemas/Importo'
         created_at:
           type: string
           format: date-time
@@ -1941,6 +2049,13 @@ components:
           type: number
           minimum: 0
           description: Quota proposta a ogni rinnovo del tesseramento
+        percentuale_ricarica:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: |
+            Percentuale di valore aggiunto a una ricarica, usata solo dove
+            `RECHARGE_MODE` vale `percentage`. 0 = nessun extra.
 
     UtenteAmministrabile:
       type: object

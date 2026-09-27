@@ -10,6 +10,24 @@
 import type { CSSProperties } from 'react';
 import { theme } from '../theme';
 
+/**
+ * Aspetto della <select>. La freccia di sistema è attaccata al bordo, cambia
+ * da browser a browser e non è distanziabile in alcun modo: `appearance: none`
+ * la toglie e la ridisegniamo come immagine di sfondo, staccata dal bordo
+ * quanto il testo lo è dall'altro lato. Il padding destro di 36px tiene le
+ * opzioni lunghe lontane dalla freccia.
+ */
+const frecciaSelect =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
+
+const selectBase: CSSProperties = {
+  padding: '8px 36px 8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14,
+  minHeight: 40, boxSizing: 'border-box', backgroundColor: '#fff',
+  backgroundImage: frecciaSelect, backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 12px center', backgroundSize: '12px 8px',
+  appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
+};
+
 export const ui = {
   page: { padding: 32 },
   loading: { padding: 48, textAlign: 'center', color: '#666' },
@@ -25,6 +43,11 @@ export const ui = {
   field: { marginBottom: 14 },
   label: { display: 'block', fontSize: 13, color: '#555', marginBottom: 4, fontWeight: 500 },
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
+  // `select` per i menu affiancati ad altro (filtri, celle di tabella), che si
+  // dimensionano sul contenuto; `selectPieno` per i campi di un form, che
+  // occupano la riga come gli input.
+  select: selectBase,
+  selectPieno: { ...selectBase, width: '100%' },
   textarea: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, minHeight: 80, boxSizing: 'border-box' },
   formActions: { display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 },
 

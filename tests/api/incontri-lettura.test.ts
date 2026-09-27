@@ -57,6 +57,19 @@ describe('Incontri: lettura', () => {
       assert.equal(nessuno.body.total, 0);
     });
 
+    it('la ricerca confronta a inizio parola, non in mezzo', async () => {
+      // Gli incontri cercano anche sul nome dell'attività, e "duc" compare
+      // dentro "educazione_test": con il confronto per sottostringa questa
+      // ricerca restituiva gli incontri di soci che con "duc" non c'entrano.
+      const dentro = await elenco(d.sessioni.istruttore1, `q=${encodeURIComponent('_test duc')}`);
+      assert.equal(dentro.body.total, 0, 'un frammento interno non deve fare match');
+
+      // Lo stesso prefisso a inizio parola invece sì: l'attività si cerca.
+      const inizio = await elenco(d.sessioni.istruttore1, `q=${encodeURIComponent('_test educ')}`);
+      assert.ok(inizio.body.total > 0, 'a inizio parola la ricerca per attività funziona');
+      assert.ok(inizio.body.data.every((i: any) => /^educazione/i.test(i.attivita)));
+    });
+
     it('un socio non legge gli incontri altrui passando socio_id', async () => {
       const r = await elenco(d.sessioni.socio1, `socio_id=${d.soci.socio2}`);
       assertTotali(r, ATTESE.comeSocioSocio1);

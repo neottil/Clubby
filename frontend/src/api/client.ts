@@ -71,7 +71,11 @@ async function request<T>(
     try {
       const data = await res.json();
       message = data.error ?? data.message ?? message;
-    } catch {}
+    } catch {
+      // Corpo assente o non JSON (es. una pagina di errore del proxy): resta
+      // il messaggio "HTTP <status>" già preparato, che è comunque più utile
+      // di un fallimento nel gestire il fallimento.
+    }
     if (res.status === 401) {
       onUnauthorized?.();
     }
@@ -138,6 +142,142 @@ export interface IncontriQuery {
   dir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+}
+
+/**
+ * Scheda socio.
+ *
+ * I campi personali sono opzionali perché il backend non li serve a tutti: un
+ * istruttore riceve l'elenco ridotto al nominativo (`listSociRidotti` in
+ * soci.service.ts), e quei campi non escono nemmeno dal database. Dichiararli
+ * obbligatori qui descriverebbe una risposta che per metà degli utenti non
+ * arriva mai.
+ */
+export interface Socio {
+  id: string;
+  nome: string;
+  cognome: string;
+  email?: string | null;
+  telefono?: string | null;
+  data_iscrizione?: string;
+  /** Account collegato alla scheda, se un admin ne ha associato uno. */
+  id_viewer?: string | null;
+  note?: string | null;
+}
+
+/** Corpo di creazione e modifica di un socio: solo i campi scrivibili. */
+export interface SocioInput {
+  nome: string;
+  cognome: string;
+  email?: string;
+  telefono?: string;
+  data_iscrizione?: string;
+  note?: string;
+}
+
+/** Incontro, come lo servono gli elenchi e il dettaglio. */
+export interface Incontro {
+  id: string;
+  socio_id: string;
+  data_incontro: string;
+  attivita_id: string;
+  /** Nome dell'attività: arriva già con la riga (JOIN col listino). */
+  attivita: string;
+  /**
+   * Account dell'istruttore che ha tenuto l'incontro. null per gli incontri
+   * non attribuiti a nessuno: il nome si risolve dall'elenco istruttori,
+   * perché a database c'è solo l'identificativo.
+   */
+  istruttore_id: string | null;
+  costo: number;
+  note: string | null;
+  /** false = testo semplice, true = Markdown. */
+  note_markdown: boolean;
+  /** Nominativo del socio: presente nelle righe dell'elenco. */
+  nome?: string;
+  cognome?: string;
+}
+
+/** Corpo di creazione e modifica di un incontro. */
+export interface IncontroInput {
+  socio_id: string;
+  data_incontro: string;
+  attivita_id: string;
+  istruttore_id?: string;
+  costo: number;
+  note?: string;
+  note_markdown?: boolean;
+}
+
+/** Voucher prepagato di un socio. */
+export interface Voucher {
+  id: string;
+  socio_id: string;
+  data_creazione: string;
+  saldo_iniziale: number;
+  saldo_residuo: number;
+  /** Nominativo del socio: presente nelle righe dell'elenco paginato. */
+  nome?: string;
+  cognome?: string;
+}
+
+export interface VoucherInput {
+  socio_id: string;
+  /** Credito di un voucher venduto prima di Clubby; 0 per un voucher nuovo. */
+  saldo_iniziale?: number;
+}
+
+/** Movimento di un voucher: una ricarica o l'addebito di un incontro. */
+export interface Movimento {
+  id: string;
+  voucher_id: string;
+  incontro_id: string | null;
+  tipo: 'ricarica' | 'addebito';
+  data_movimento: string;
+  /** Valore sul voucher: è questo che muove il saldo. */
+  importo: number;
+  /**
+   * Quanto è stato pagato, se meno del valore accreditato (ricariche con
+   * extra). null quando le due cose coincidono.
+   */
+  importo_pagato: number | null;
+  descrizione: string | null;
+}
+
+export interface MovimentoInput {
+  tipo: 'ricarica' | 'addebito';
+  importo: number;
+  data_movimento?: string;
+  descrizione?: string;
+}
+
+/** Ruolo nel club, indipendente dal privilegio di amministrazione. */
+export type Ruolo = 'socio' | 'istruttore';
+
+/**
+ * Account, come lo serve il pannello Admin: le credenziali vengono
+ * dall'authorizer, nominativo e telefono dalla scheda socio collegata — null
+ * finché l'account non ne ha una.
+ */
+export interface AdminUser {
+  id: string;
+  email: string;
+  nome: string | null;
+  cognome: string | null;
+  telefono: string | null;
+  socio_id: string | null;
+  ruolo: Ruolo;
+  admin: boolean;
+  attivo: boolean;
+  cambio_password_richiesto: boolean;
+}
+
+/**
+ * Le azioni di amministrazione rispondono con la sola conferma testuale: chi
+ * chiama ricarica l'elenco, non legge il corpo.
+ */
+export interface Esito {
+  message: string;
 }
 
 /** Ultima ricarica di un voucher: solo quando e quanto. */
@@ -221,6 +361,17 @@ export interface Tesseramento {
 
 export interface Impostazioni {
   quota_tesseramento: number;
+  /** Percentuale aggiunta a una ricarica dove RECHARGE_MODE vale "percentage". */
+  percentuale_ricarica: number;
+}
+
+/** Taglio di ricarica preconfigurato (RECHARGE_MODE = "map"). */
+export interface TaglioRicarica {
+  id: string;
+  /** Quanto paga il socio. */
+  importo: number;
+  /** Quanto gli viene accreditato sul voucher. */
+  valore: number;
 }
 
 /** Voce del listino attività, come la serve /api/attivita. */
@@ -261,19 +412,19 @@ export function createApiClient(token: string | null) {
   return {
     // Soci
     // Elenco completo, per i menu di scelta; a pagine per la tabella Soci.
-    getSoci:        ()                    => request<any[]>('/api/soci', {}, token),
-    getSociPagina:  (params: SociQuery)   => request<Paginated<any>>(`/api/soci${qsDi(params)}`, {}, token),
-    getSocio:       (id: string)          => request<any>(`/api/soci/${id}`, {}, token),
-    createSocio:    (body: any)           => request<any>('/api/soci', { method: 'POST', body: JSON.stringify(body) }, token),
-    updateSocio:    (id: string, body: any) => request<any>(`/api/soci/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+    getSoci:        ()                    => request<Socio[]>('/api/soci', {}, token),
+    getSociPagina:  (params: SociQuery)   => request<Paginated<Socio>>(`/api/soci${qsDi(params)}`, {}, token),
+    getSocio:       (id: string)          => request<Socio>(`/api/soci/${id}`, {}, token),
+    createSocio:    (body: SocioInput)    => request<Socio>('/api/soci', { method: 'POST', body: JSON.stringify(body) }, token),
+    updateSocio:    (id: string, body: Partial<SocioInput>) => request<Socio>(`/api/soci/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
     deleteSocio:    (id: string)          => request<void>(`/api/soci/${id}`, { method: 'DELETE' }, token),
 
     // Incontri — elenco paginato: filtri e ordinamento sono applicati dal
     // backend, perché il client ne vede una pagina per volta.
-    getIncontri:    (params: IncontriQuery = {}) => request<Paginated<any>>(`/api/incontri${queryString(params as Record<string, string | number | undefined>)}`, {}, token),
-    getIncontro:    (id: string)          => request<any>(`/api/incontri/${id}`, {}, token),
-    createIncontro: (body: any)           => request<any>('/api/incontri', { method: 'POST', body: JSON.stringify(body) }, token),
-    updateIncontro: (id: string, body: any) => request<any>(`/api/incontri/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+    getIncontri:    (params: IncontriQuery = {}) => request<Paginated<Incontro>>(`/api/incontri${queryString(params as Record<string, string | number | undefined>)}`, {}, token),
+    getIncontro:    (id: string)          => request<Incontro>(`/api/incontri/${id}`, {}, token),
+    createIncontro: (body: IncontroInput) => request<Incontro>('/api/incontri', { method: 'POST', body: JSON.stringify(body) }, token),
+    updateIncontro: (id: string, body: Partial<IncontroInput>) => request<Incontro>(`/api/incontri/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
     deleteIncontro: (id: string)          => request<void>(`/api/incontri/${id}`, { method: 'DELETE' }, token),
 
     // Attività — il listino: nomi e costi proposti. Un istruttore riceve dal
@@ -289,9 +440,9 @@ export function createApiClient(token: string | null) {
       request<{ attivita_ids: string[] }>(`/api/istruttori/${istruttoreId}/attivita`, { method: 'PUT', body: JSON.stringify({ attivita_ids: attivitaIds }) }, token),
 
     // Vouchers
-    getVouchers:       (socioId?: string)    => request<any[]>(`/api/voucher${socioId ? `?socio_id=${socioId}` : ''}`, {}, token),
-    getVouchersPagina: (params: VouchersQuery) => request<Paginated<any>>(`/api/voucher${qsDi(params)}`, {}, token),
-    createVoucher:    (body: any)           => request<any>('/api/voucher', { method: 'POST', body: JSON.stringify(body) }, token),
+    getVouchers:       (socioId?: string)    => request<Voucher[]>(`/api/voucher${socioId ? `?socio_id=${socioId}` : ''}`, {}, token),
+    getVouchersPagina: (params: VouchersQuery) => request<Paginated<Voucher>>(`/api/voucher${qsDi(params)}`, {}, token),
+    createVoucher:    (body: VoucherInput)  => request<Voucher>('/api/voucher', { method: 'POST', body: JSON.stringify(body) }, token),
     // Ultima ricarica di un voucher, chiesta a parte dalla scheda del proprio
     // voucher: gli elenchi non la portano, per non calcolarla su ogni riga.
     // Restituisce undefined (204) se il voucher non ne ha ancora ricevuta una.
@@ -300,8 +451,8 @@ export function createApiClient(token: string | null) {
 
     // Movimenti
     getMovimenti:   (voucherId: string, params: { limit?: number; offset?: number } = {}) =>
-      request<Paginated<any>>(`/api/voucher/${voucherId}/movimenti${queryString(params)}`, {}, token),
-    createMovimento:(voucherId: string, body: any) => request<any>(`/api/voucher/${voucherId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
+      request<Paginated<Movimento>>(`/api/voucher/${voucherId}/movimenti${queryString(params)}`, {}, token),
+    createMovimento:(voucherId: string, body: MovimentoInput) => request<Movimento>(`/api/voucher/${voucherId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Fatturazione (solo admin), paginata come gli incontri
     getFatturazione: (params: FatturazioneQuery = {}) =>
@@ -319,29 +470,39 @@ export function createApiClient(token: string | null) {
     aggiornaImpostazioni: (body: Partial<Impostazioni>) =>
       request<Impostazioni>('/api/impostazioni', { method: 'PUT', body: JSON.stringify(body) }, token),
 
+    // Tagli di ricarica (solo admin). Esistono in ogni modalità: si possono
+    // preparare prima di attivare RECHARGE_MODE=map.
+    getTagliRicarica: () => request<TaglioRicarica[]>('/api/ricarica-tagli', {}, token),
+    creaTaglioRicarica: (body: { importo: number; valore: number }) =>
+      request<TaglioRicarica>('/api/ricarica-tagli', { method: 'POST', body: JSON.stringify(body) }, token),
+    eliminaTaglioRicarica: (id: string) =>
+      request<void>(`/api/ricarica-tagli/${id}`, { method: 'DELETE' }, token),
+
     // Scheda socio di chi sta usando l'applicazione, se un admin l'ha
     // collegata. Restituisce undefined (204) quando l'account non ne ha
     // ancora una: è uno stato normale, non un errore.
-    getStatoSocio:  ()                    => request<any>('/api/auth/socio', {}, token),
+    getStatoSocio:  ()                    => request<Socio | undefined>('/api/auth/socio', {}, token),
 
     // Admin
     getAdminUsersPagina: (params: ElencoQuery) =>
-      request<Paginated<any> & { da_collegare: number }>(`/api/admin/users${qsDi(params)}`, {}, token),
-    associaViewer:  (body: any)           => request<any>('/api/admin/associa-viewer', { method: 'POST', body: JSON.stringify(body) }, token),
+      request<Paginated<AdminUser> & { da_collegare: number }>(`/api/admin/users${qsDi(params)}`, {}, token),
+    associaViewer:  (body: { socio_id: string; utente_id: string }) =>
+      request<Esito>('/api/admin/associa-viewer', { method: 'POST', body: JSON.stringify(body) }, token),
     // Solo scollegamento: lo stato dell'account non cambia.
     disassociaViewer:(socioId: string) =>
       request<void>(`/api/admin/associa-viewer/${socioId}`, { method: 'DELETE' }, token),
     cambiaAttivo:   (utenteId: string, attivo: boolean) =>
-      request<any>('/api/admin/attivo', { method: 'POST', body: JSON.stringify({ utente_id: utenteId, attivo }) }, token),
+      request<Esito>('/api/admin/attivo', { method: 'POST', body: JSON.stringify({ utente_id: utenteId, attivo }) }, token),
     // Ruolo nel club (socio o istruttore). Il privilegio di amministrare l'app
     // è indipendente e si imposta a parte con impostaAdmin.
-    impostaRuolo:   (utenteId: string, ruolo: string) =>
-      request<any>('/api/admin/ruolo', { method: 'POST', body: JSON.stringify({ utente_id: utenteId, ruolo }) }, token),
+    impostaRuolo:   (utenteId: string, ruolo: Ruolo) =>
+      request<Esito>('/api/admin/ruolo', { method: 'POST', body: JSON.stringify({ utente_id: utenteId, ruolo }) }, token),
     impostaAdmin:   (utenteId: string, admin: boolean) =>
-      request<any>('/api/admin/amministratore', { method: 'POST', body: JSON.stringify({ utente_id: utenteId, admin }) }, token),
+      request<Esito>('/api/admin/amministratore', { method: 'POST', body: JSON.stringify({ utente_id: utenteId, admin }) }, token),
     // Restituisce la password temporanea generata: va consegnata
     // all'interessato, non viene inviata per email e non è più recuperabile.
-    resetPassword:  (body: any)           => request<{ password_temporanea: string }>('/api/admin/reset-password', { method: 'POST', body: JSON.stringify(body) }, token),
+    resetPassword:  (body: { utente_id: string }) =>
+      request<{ password_temporanea: string }>('/api/admin/reset-password', { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Versione del backend in esecuzione (pagina Info)
     getVersion:     ()                    => request<{ version: string }>('/api/version', {}, token),

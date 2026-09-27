@@ -29,7 +29,14 @@ export interface MovimentoVoucher {
   incontro_id: string | null;
   tipo: TipoMovimento;
   data_movimento: string;
+  /** Valore del movimento sul voucher: è questo che muove il saldo. */
   importo: number;
+  /**
+   * Solo per le ricariche con valore extra (vedi util/ricariche.ts): quanto ha
+   * pagato davvero il socio, quando è meno di quanto gli è stato accreditato.
+   * NULL quando le due cose coincidono. La Fatturazione conta questo.
+   */
+  importo_pagato: number | null;
   descrizione: string | null;
   created_at: string;
 }
@@ -48,6 +55,12 @@ export interface CreateVoucherInput {
 
 export interface CreateMovimentoInput {
   importo: number;
+  /**
+   * Quanto è stato pagato, se diverso da `importo` (ricariche con valore
+   * extra). Omesso o uguale a `importo`: resta NULL sulla riga. Lo calcola il
+   * server (ricariche.service), mai il client.
+   */
+  importo_pagato?: number | null;
   descrizione?: string;
   incontro_id?: string;
   /**
@@ -388,13 +401,19 @@ export async function createMovimento(
     // CAST(... AS DATE) e non "::date": il convertitore di parametri con nome
     // (db/client.ts) sostituisce ogni ":parola", quindi interpreterebbe
     // "::date" come un secondo parametro chiamato "date".
-    `INSERT INTO movimento_voucher (voucher_id, tipo, importo, descrizione, incontro_id, data_movimento)
-     VALUES (:voucherId, :tipo, :importo, :descrizione, :incontroId, COALESCE(CAST(:dataMovimento AS DATE), CURRENT_DATE))
+    `INSERT INTO movimento_voucher (voucher_id, tipo, importo, importo_pagato, descrizione, incontro_id, data_movimento)
+     VALUES (:voucherId, :tipo, :importo, :importoPagato, :descrizione, :incontroId, COALESCE(CAST(:dataMovimento AS DATE), CURRENT_DATE))
      RETURNING *`,
     {
       voucherId,
       tipo,
       importo: input.importo,
+      // NULL quando pagato e accreditato coincidono: la colonna dice "questa
+      // ricarica è costata meno di quanto vale", non ripete il valore.
+      importoPagato:
+        input.importo_pagato != null && Number(input.importo_pagato) !== Number(input.importo)
+          ? input.importo_pagato
+          : null,
       descrizione: input.descrizione ?? null,
       incontroId: input.incontro_id ?? null,
       dataMovimento: input.data_movimento ?? null,

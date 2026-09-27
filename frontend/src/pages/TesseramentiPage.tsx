@@ -24,6 +24,7 @@ import { euro, dataIso, oggiIso } from '../utils/formato';
 import Modal from '../components/Modal';
 import { config } from '../config';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
 /** Stessa data dell'anno dopo; il 29 febbraio diventa 28 se l'anno non è bisestile. */
 function aggiungiAnno(iso: string): string {
@@ -86,7 +87,7 @@ export default function TesseramentiPage() {
   useEffect(() => {
     api.getImpostazioni()
       .then(imp => setQuota(Number(imp.quota_tesseramento)))
-      .catch((e: any) => setError(e.message));
+      .catch(e => setError(messaggioErrore(e)));
   }, []);
 
   // Elenco a pagine: ricerca, filtro per stato e ordinamento li applica il
@@ -129,9 +130,9 @@ export default function TesseramentiPage() {
       setSuccessMsg(`Tesseramento di ${rinnovo.riga.socioNome} rinnovato fino al ${rinnovo.scadenza}`);
       setRinnovo(null);
       elenco.ricarica();
-    } catch (e: any) {
+    } catch (e) {
       // Dentro la modale: è lì che si sta guardando, e i valori restano da correggere.
-      setErroreRinnovo(e.message);
+      setErroreRinnovo(messaggioErrore(e));
     } finally {
       setSaving(false);
     }
@@ -142,9 +143,9 @@ export default function TesseramentiPage() {
     try {
       const rinnovi = await api.getStoricoTesseramenti(riga.socio_id);
       setStorico(s => (s?.riga.socio_id === riga.socio_id ? { riga, rinnovi } : s));
-    } catch (e: any) {
+    } catch (e) {
       setStorico(null);
-      setError(e.message);
+      setError(messaggioErrore(e));
     }
   };
 
@@ -298,7 +299,6 @@ const styles: Record<string, React.CSSProperties> = {
   hint: { color: '#666', fontSize: 13, margin: '0 0 20px', maxWidth: 760, lineHeight: 1.5 },
   hintCampo: { fontSize: 12, color: '#666', margin: '6px 0 0' },
   filterInput: { flex: 1, minWidth: 220, maxWidth: 360, padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', minHeight: 40 },
-  select: { padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, background: '#fff', minHeight: 40 },
   modalInfo: { fontSize: 14, color: '#444', margin: '0 0 16px' },
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', minHeight: 40 },
 };

@@ -37,6 +37,10 @@ spec:
               value: "${ENABLE_MODULE_TESSERAMENTO}"
             - name: ENABLE_MODULE_FATTURAZIONE
               value: "${ENABLE_MODULE_FATTURAZIONE}"
+            # Come sopra: cambia il comportamento a runtime, quindi deve far
+            # ripartire il pod quando cambia.
+            - name: RECHARGE_MODE
+              value: "${RECHARGE_MODE}"
           readinessProbe:
             httpGet:
               path: /health

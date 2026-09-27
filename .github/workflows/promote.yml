@@ -110,18 +110,40 @@ jobs:
             echo "Authorizer: $TAG trovato, verrà deployata la versione ${{ inputs.authorizer_version }}."
           fi
 
-  deploy-backend:
+  # Migrazioni di schema prima dei deploy che usano un database, come in
+  # build-deploy.yml: un club può essere fermo a una versione vecchia, quindi
+  # qui possono risultarne pendenti parecchie in una volta. Sono applicate in
+  # ordine e in transazioni separate, e quelle già presenti vengono saltate.
+  migrate-db:
     needs: validate
-    if: inputs.backend_version != ''
+    if: inputs.backend_version != '' || inputs.authorizer_version != ''
+    uses: ./.github/workflows/migrate-db.yml
+    with:
+      environment: ${{ inputs.environment }}
+      backend_image_tag: ${{ needs.validate.outputs.backend_image_tag }}
+      authorizer_image_tag: ${{ needs.validate.outputs.authorizer_image_tag }}
+    secrets: inherit
+
+  deploy-backend:
+    needs: [validate, migrate-db]
+    if: inputs.backend_version != '' && needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-backend.yml
     with:
       environment: ${{ inputs.environment }}
       image_tag: ${{ needs.validate.outputs.backend_image_tag }}
     secrets: inherit
 
+  # Come in build-deploy.yml: il frontend non usa il database, ma se la
+  # migrazione fallisce il backend resta indietro e un frontend nuovo
+  # chiamerebbe API non ancora deployate. "skipped" è ammesso perché
+  # promuovendo il solo frontend il job delle migrazioni non gira affatto.
   deploy-frontend:
-    needs: validate
-    if: inputs.frontend_version != ''
+    needs: [validate, migrate-db]
+    if: |
+      always() &&
+      needs.validate.result == 'success' &&
+      inputs.frontend_version != '' &&
+      (needs.migrate-db.result == 'success' || needs.migrate-db.result == 'skipped')
     uses: ./.github/workflows/deploy-frontend.yml
     with:
       environment: ${{ inputs.environment }}
@@ -129,8 +151,8 @@ jobs:
     secrets: inherit
 
   deploy-authorizer:
-    needs: validate
-    if: inputs.authorizer_version != ''
+    needs: [validate, migrate-db]
+    if: inputs.authorizer_version != '' && needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-authorizer.yml
     with:
       environment: ${{ inputs.environment }}

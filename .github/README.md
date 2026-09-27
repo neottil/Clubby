@@ -35,7 +35,7 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 | Workflow | Trigger | Scopo |
 |---|---|---|
 | [`infra.yml`](workflows/infra.yml) | Manuale (`workflow_dispatch`) | Provisiona/aggiorna infrastruttura condivisa e a lunga vita: namespace k8s, database, identity provider. Da lanciare una tantum per ambiente. |
-| [`build-deploy.yml`](workflows/build-deploy.yml) | Push su branch di sviluppo, o manuale (input `force_all`) | Builda le immagini Docker cambiate e le deploya in **sviluppo**, in modo condizionale e indipendente per componente. Con `force_all` ribuilda e rideploya tutto, ignorando il diff. |
+| [`build-deploy.yml`](workflows/build-deploy.yml) | Push su branch di sviluppo, o manuale (input `force_all`) | Esegue i test delle API su un database usa-e-getta, poi builda le immagini Docker cambiate e le deploya in **sviluppo**, in modo condizionale e indipendente per componente. Con `force_all` ribuilda e rideploya tutto, ignorando il diff. |
 | [`deploy-backend.yml`](workflows/deploy-backend.yml) / [`deploy-frontend.yml`](workflows/deploy-frontend.yml) / [`deploy-authorizer.yml`](workflows/deploy-authorizer.yml) | Solo `workflow_call` (riutilizzabile) | Applica i manifest k8s di un componente, verifica il rollout. Chiamati sia da `build-deploy.yml` (sviluppo) sia da `promote.yml` (club). |
 | [`tag.yml`](workflows/tag.yml) | Manuale | Promuove lo stato attualmente deployato a versione "reale" (tag Git, ri-tag Docker, GitHub Release), senza rebuild. **Non deploya nulla.** |
 | [`promote.yml`](workflows/promote.yml) | Manuale (con input `environment` e `<scope>_version`) | Deploya la versione indicata (già taggata da `tag.yml`) nell'**ambiente scelto**, cioè in un club. **Non tagga né rilascia nulla.** |
@@ -43,6 +43,7 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 Namespace, nomi dei database e cartelle sulla VPS di un ambiente non sono Variables: li ricava dal nome
 dell'Environment la composite action [`actions/ambiente`](actions/ambiente/action.yml), usata da Infra e
 da tutti i workflow di deploy.
+| [`migrate-db.yml`](workflows/migrate-db.yml) | `workflow_call` da build-deploy e promote | Applica le migrazioni di schema ai due database di un ambiente, prima dei deploy. |
 | [`cleanup-build-tags.yml`](workflows/cleanup-build-tags.yml) | Manuale, o automatico dopo `tag.yml` | Ripulisce i tag Git e le immagini Docker superate di un branch. |
 
 Separazione di responsabilità: **Infra** gestisce ciò che ha un ciclo di vita lungo e stato persistente
@@ -426,6 +427,31 @@ pattern 4, `environment: development`) → `register-<scope>-tag` (ciclo di vita
 `cleanup-registry` (pulizia immagini Docker, mantiene le N più recenti per repository indipendentemente dal
 branch).
 
+**Il job `test`** gira **dopo le build** e **blocca solo i deploy**: migrazioni e tutti e tre i deploy lo
+mettono fra i propri `needs` e pretendono `success`. Un'immagine che non passa i test resta su ghcr.io con
+il suo tag di data — non è una versione rilasciata (quelle le assegna Tag) e non la mette in servizio
+nessuno, quindi non vale la pena complicare la pipeline per impedirne la pubblicazione.
+
+Sta dopo le build perché prova **le immagini appena buildate**, non il codice sorgente ricompilato: si
+verifica l'artefatto che verrà deployato, e non si paga due volte la stessa compilazione. Per lo scope non
+ribuildato in quella run vale la stessa regola di `resolve-<scope>-image` — l'ultima immagine davvero
+deployata sul branch — perché la suite ha bisogno di entrambi i servizi anche quando ne è cambiato uno solo.
+
+Esegue la suite `tests/api/`, che è **black-box via HTTP**: il job ricostruisce quindi un ambiente completo
+da zero — un container Postgres come `service`, i due database con i rispettivi utenti, le baseline
+applicate *dal proprietario*, le migrazioni eseguite **dall'immagine del backend** con lo stesso
+`scripts/migra.sh` del Job k8s, e i due container avviati in rete host. Nasce e muore con la run: i database
+dei club vivono nel cluster e il runner non ha né credenziali né rotta per raggiungerli.
+
+Gira **sempre**, anche quando cambia solo il frontend. Il vantaggio non è solo la suite: ogni push verifica
+che baseline e migrazioni si applichino da zero su un database vuoto, cioè quel percorso che in un ambiente
+reale viene eseguito una volta sola e che nessun deploy successivo può più smentire.
+
+Due vincoli da conoscere se lo si modifica: `RECHARGE_MODE=free` è obbligatorio (in modalità `map` la
+creazione dei dati di prova viene rifiutata, non essendoci tagli configurati), e `TEST_APP_DB_URL` /
+`TEST_AUTH_DB_URL` non vanno impostate — sono le uniche variabili che potrebbero puntare una suite che
+crea e cancella righe verso un database che non è il suo.
+
 **Non tocca mai** l'infrastruttura di `infra.yml`, né la produzione.
 
 ### `deploy-backend.yml` / `deploy-frontend.yml`
@@ -451,6 +477,46 @@ rebuild. **Non deploya.** Se almeno uno scope è stato promosso, triggera `clean
 **Cosa fa**: vedi pattern 5. Rifiuta `development` (gestito da `build-deploy.yml`), valida che i tag di
 versione esistano, poi deploya nell'ambiente scelto tramite i workflow riutilizzabili. **Non tagga, non
 crea Release.** Sicuro da rilanciare più volte con lo stesso input.
+
+### `migrate-db.yml`
+
+**Trigger**: solo `workflow_call`, da `build-deploy.yml` e `promote.yml`. Input: `environment`,
+`backend_image_tag` e `authorizer_image_tag` (un tag vuoto = quel database non viene toccato).
+
+**Cosa fa**: crea un **Job Kubernetes che gira sull'immagine che sta per essere deployata** e applica i
+file `.sql` numerati contenuti in quell'immagine, saltando quelli già registrati nella tabella
+`migrazione`. Ogni file gira in una transazione insieme alla riga che lo registra. Il workflow attende
+l'esito del Job, ne stampa i log nella pipeline e fallisce se il Job fallisce o supera i cinque minuti.
+
+**Perché il Job usa l'immagine nuova**: quell'immagine esiste su `ghcr.io` da quando è stata buildata, e
+farci girare un comando non mette in servizio l'applicazione — i pod restano sulla versione precedente
+fino al rollout. In cambio si ottiene che le migrazioni applicate sono esattamente quelle che
+accompagnano il codice che si sta per deployare, non quelle presenti nel repository al momento della run.
+
+**Perché un Job e non `kubectl exec` nel pod di Postgres**: quel pod sta nel namespace dell'istanza
+condivisa fra più club, e il suo socket locale autentica in `trust` — entrarci significa privilegi da
+superutente su **tutti** i database di **tutti** i club per migrarne uno solo. Il Job si collega via rete
+con le credenziali del singolo club, e funziona identico con un Postgres gestito, dove non c'è nessun pod
+in cui entrare. Il Job si porta da sé ciò che gli serve (`ghcr-secret` per il pull e le credenziali del
+database) perché ConfigMap e Secret dell'applicazione li applica il deploy del modulo, che gira dopo.
+
+**Perché prima dei deploy e non dopo**: tutti e tre i job di deploy lo mettono fra i propri `needs`,
+quindi una migrazione fallita impedisce il rollout invece di lasciare il codice nuovo su uno schema
+vecchio. Anche il frontend, che il database non lo tocca: se la migrazione fallisce il backend resta
+alla versione precedente, e un frontend nuovo che chiama API non ancora deployate sarebbe rotto
+quanto il caso che si sta evitando. O si aggiorna tutto, o non si aggiorna niente. Il
+corollario è che le migrazioni devono essere **retrocompatibili** con la versione in esecuzione: un
+database più avanti dell'applicazione è innocuo, il contrario no. I cambiamenti distruttivi si fanno in due
+release — prima il codice smette di usare la colonna, poi una migrazione la elimina.
+
+**Perché non un tool** (`postgrator`, `node-pg-migrate`, Liquibase) in un modulo dedicato: sarebbe un
+quarto artefatto di build, con il proprio Dockerfile, job di build, tag immagine, logica "quale immagine
+uso se non è cambiato niente", cleanup del registry e versione da gestire in Promote — per un processo che
+vive due secondi. L'immagine del backend contiene già `bash` e `postgresql-client` (servivano al seed),
+quindi il Job non richiede né un artefatto né una dipendenza nuova, e il registro delle migrazioni è una
+tabella e un ciclo (vedi `scripts/migra.sh`). L'unica cosa che un tool darebbe in più è il **checksum** dei
+file già applicati, che accorge se qualcuno modifica una migrazione dopo il fatto: sono venti righe di SQL,
+se un giorno servirà.
 
 ### `cleanup-build-tags.yml`
 

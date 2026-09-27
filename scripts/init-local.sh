@@ -75,6 +75,11 @@ AUTH_INTERNAL_URL=$AUTH_BASE_URL
 ENABLE_MODULE_TESSERAMENTO=true
 ENABLE_MODULE_FATTURAZIONE=true
 
+# Come si registra una ricarica del voucher: free (importo accreditato tale e
+# quale), percentage (importo + una percentuale configurata dall'admin), map
+# (tagli preconfigurati). Deve corrispondere a VITE_RECHARGE_MODE.
+RECHARGE_MODE=free
+
 PORT=3000
 APP_VERSION=dev
 EOF
@@ -122,6 +127,9 @@ VITE_TENANT_NAME=$TENANT_NAME
 # pur essendo attive).
 VITE_ENABLE_MODULE_TESSERAMENTO=true
 VITE_ENABLE_MODULE_FATTURAZIONE=true
+
+# Deve corrispondere a RECHARGE_MODE di backend/.env.
+VITE_RECHARGE_MODE=free
 EOF
   if [ -n "$PRESERVATE" ]; then
     echo "$PRESERVATE" >> "$ROOT_DIR/frontend/.env.local"

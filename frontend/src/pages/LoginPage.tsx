@@ -4,6 +4,7 @@ import { config } from '../config';
 import PasswordInput from '../components/PasswordInput';
 import Avviso from '../components/Avviso';
 import { theme } from '../theme';
+import { messaggioErrore } from '../utils/errori';
 
 type Modalita = 'accesso' | 'registrazione';
 
@@ -71,8 +72,8 @@ export default function LoginPage() {
       } else {
         await register(form);
       }
-    } catch (err: any) {
-      setErrore(err.message ?? 'Operazione non riuscita');
+    } catch (err) {
+      setErrore(messaggioErrore(err, 'Operazione non riuscita'));
     }
   };
 

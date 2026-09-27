@@ -9,14 +9,14 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, nomeIstruttore, type Istruttore } from '../api/client';
+import { createApiClient, nomeIstruttore, type Istruttore, type Socio } from '../api/client';
 import ElencoIncontri from '../components/ElencoIncontri';
 import SocioSelect from '../components/SocioSelect';
 import Avviso from '../components/Avviso';
 import { theme } from '../theme';
 import { ui } from '../styles/ui';
+import { messaggioErrore } from '../utils/errori';
 
-interface Socio { id: string; nome: string; cognome: string; }
 
 type Scheda = 'istruttore' | 'socio';
 
@@ -42,7 +42,7 @@ export default function ResocontiAdminPage() {
         setIstruttori([...ist].sort((a, b) => nomeIstruttore(a).localeCompare(nomeIstruttore(b))));
         setSoci(s);
       })
-      .catch((e: any) => setError(e.message));
+      .catch(e => setError(messaggioErrore(e)));
   }, []);
 
   const selezione = scheda === 'istruttore' ? istruttoreId : socioId;
@@ -75,7 +75,7 @@ export default function ResocontiAdminPage() {
               <label style={styles.label} htmlFor='resoconto-istruttore'>Istruttore</label>
               <select
                 id='resoconto-istruttore'
-                style={styles.select}
+                style={styles.selectPieno}
                 value={istruttoreId}
                 onChange={e => setIstruttoreId(e.target.value)}
               >
@@ -129,6 +129,5 @@ const styles: Record<string, React.CSSProperties> = {
   // longhand sopra uno shorthand, React lascia il bordo del colore del testo.
   tabAttiva: { color: '#222', borderBottom: `3px solid ${theme.primary}` },
   scelta: { maxWidth: 360, marginBottom: 20 },
-  select: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', minHeight: 40 },
   vuoto: { color: '#999', marginTop: 32, textAlign: 'center' },
 };

@@ -37,10 +37,6 @@ spec:
               cpu: "50m"
               memory: "96Mi"
             limits:
-              # La verifica di una password con scrypt è deliberatamente
-              # costosa in CPU e memoria (circa 16 MB per tentativo): il
-              # limite deve lasciarle spazio, altrimenti i login falliscono
-              # sotto carico invece di rallentare.
               cpu: "500m"
               memory: "256Mi"
           readinessProbe:

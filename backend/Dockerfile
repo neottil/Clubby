@@ -18,7 +18,13 @@ ENV NODE_ENV=production
 # tutte nell'ambiente del pod (ConfigMap/Secret) — nessun override necessario.
 RUN apk add --no-cache bash curl jq postgresql-client
 COPY scripts/seed-demo-data.sh /app/scripts/seed-demo-data.sh
-RUN chmod +x /app/scripts/seed-demo-data.sh
+# Migrazioni di schema: applicate da un Job k8s che gira su QUESTA immagine
+# prima del rollout (vedi .github/workflows/migrate-db.yml). Stanno qui e non
+# in un artefatto a parte perché devono essere esattamente quelle che
+# accompagnano il codice di questa immagine.
+COPY scripts/migra.sh /app/scripts/migra.sh
+COPY backend/src/db/migrations /app/migrations
+RUN chmod +x /app/scripts/seed-demo-data.sh /app/scripts/migra.sh
 
 COPY backend/package*.json ./
 RUN npm ci --omit=dev

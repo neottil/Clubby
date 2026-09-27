@@ -2,7 +2,8 @@
  * Fatturazione: ciò che è stato fatturato ai soci, voce per voce.
  *
  * Tre fonti, e solo queste:
- *   ricarica      credito acquistato su un voucher (movimenti di tipo 'ricarica')
+ *   ricarica      quanto il socio ha PAGATO per una ricarica del voucher, che
+ *                 può essere meno del credito ricevuto (vedi util/ricariche.ts)
  *   tesseramento  quota di un rinnovo
  *   incontro      incontro non coperto da un voucher, quindi pagato a parte
  *
@@ -10,7 +11,9 @@
  *   - gli addebiti su un voucher: il loro valore è già stato fatturato con la
  *     ricarica che li copre, e contarli di nuovo lo raddoppierebbe;
  *   - il saldo iniziale importato di un voucher, che non è un incasso ma la
- *     configurazione iniziale del sistema.
+ *     configurazione iniziale del sistema;
+ *   - il valore extra accreditato su una ricarica: è uno sconto concesso al
+ *     socio, non denaro ricevuto.
  */
 
 import { query } from '../db/client.js';
@@ -70,9 +73,15 @@ export async function listFatturazione(options: ListFatturazioneOptions = {}): P
   // LIMIT/OFFSET, coprono l'intero risultato filtrato.
   const result = await query(
     `WITH voci AS (
+       -- COALESCE(importo_pagato, importo): dove una ricarica accredita al
+       -- socio più di quanto ha pagato (RECHARGE_MODE percentage/map), qui
+       -- conta solo il pagato — è l'unico denaro incassato. Il valore extra
+       -- vive sul voucher, e fatturarlo dichiarerebbe un ricavo inesistente.
+       -- importo_pagato è NULL quando le due cose coincidono, cioè per tutte
+       -- le ricariche registrate prima di questa funzionalità.
        SELECT m.id, 'ricarica' AS tipo, m.data_movimento AS data, b.socio_id,
               COALESCE(NULLIF(m.descrizione, ''), 'Ricarica voucher') AS descrizione,
-              m.importo, m.created_at
+              COALESCE(m.importo_pagato, m.importo) AS importo, m.created_at
        FROM movimento_voucher m
        JOIN voucher b ON b.id = m.voucher_id
        WHERE m.tipo = 'ricarica'

@@ -28,12 +28,51 @@ services:
       # eseguirebbe sul database dell'app. Ci pensa lo script qui sopra ad
       # applicarlo al database giusto.
       - ./authorizer/src/db/schema.sql:/schema/authorizer-schema.sql:ro
+      # Migrazioni: NON in /docker-entrypoint-initdb.d, perché lì girerebbero
+      # solo al primo avvio su un volume vuoto — cioè proprio quando il
+      # database nasce già dalla baseline aggiornata e non c'è niente da
+      # migrare — e mai su un volume esistente, che è l'unico caso in cui
+      # servono. Le applica il servizio "migrazioni" qui sotto.
+      - ./scripts/migra.sh:/migra/migra.sh:ro
+      - ./backend/src/db/migrations:/migra/app:ro
+      - ./authorizer/src/db/migrations:/migra/auth:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U clubby -d clubby"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  # Applica le migrazioni di schema a entrambi i database e termina: un
+  # `docker compose up -d` lascia così il database sempre allineato al codice,
+  # senza comandi da ricordare.
+  #
+  # Servizio a sé e non uno script di init di Postgres: quelli girano solo al
+  # primo avvio su un volume vuoto (vedi il commento sui volumi sopra). Qui
+  # invece parte a ogni avvio, quando Postgres è pronto — ed è idempotente,
+  # quindi senza migrazioni pendenti stampa una riga e chiude.
+  #
+  # Stessa immagine di Postgres per non scaricarne una seconda: serve solo psql.
+  # In cluster lo stesso script gira invece dentro un Job Kubernetes, sull'
+  # immagine del backend (vedi .github/workflows/migrate-db.yml).
+  migrazioni:
+    image: postgres:18.3-alpine
+    container_name: clubby-migrazioni
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./scripts/migra.sh:/migra/migra.sh:ro
+      - ./backend/src/db/migrations:/migra/app:ro
+      - ./authorizer/src/db/migrations:/migra/auth:ro
+    environment:
+      DB_HOST: postgres
+    # I due database in sequenza: il secondo parte solo se il primo è andato
+    # bene, così un errore non resta sepolto sotto l'output del successivo.
+    command: >
+      sh -c "MIGRATIONS_DIR=/migra/app  DB_NAME=clubby      DB_USER=clubby      DB_PASSWORD=clubby      sh /migra/migra.sh &&
+             MIGRATIONS_DIR=/migra/auth DB_NAME=clubby_auth DB_USER=clubby_auth DB_PASSWORD=clubby_auth sh /migra/migra.sh"
+    restart: 'no'
 
 volumes:
   postgres_data:

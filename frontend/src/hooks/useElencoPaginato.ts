@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { messaggioErrore } from '../utils/errori';
 
 /** Risposta di un elenco paginato del backend (più eventuali campi propri). */
 export interface Pagina<T> {
@@ -62,8 +63,8 @@ export function useElencoPaginato<T, R extends Pagina<T> = Pagina<T>>(
       setTotale(r.total);
       setRisposta(r);
       setCaricato(true);
-    } catch (e: any) {
-      if (richiesta === richiestaCorrente.current) onErroreRef.current(e.message);
+    } catch (e) {
+      if (richiesta === richiestaCorrente.current) onErroreRef.current(messaggioErrore(e));
     } finally {
       if (richiesta === richiestaCorrente.current) setLoading(false);
     }
@@ -80,8 +81,8 @@ export function useElencoPaginato<T, R extends Pagina<T> = Pagina<T>>(
       caricateRef.current += r.data.length;
       setTotale(r.total);
       setRisposta(r);
-    } catch (e: any) {
-      onErroreRef.current(e.message);
+    } catch (e) {
+      onErroreRef.current(messaggioErrore(e));
     } finally {
       setLoadingMore(false);
     }

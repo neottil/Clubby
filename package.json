@@ -7,6 +7,7 @@
     "dev:backend": "npm run dev --prefix backend",
     "dev:authorizer": "npm run dev --prefix authorizer",
     "dev:frontend": "npm run dev --prefix frontend",
+    "db:migra": "docker compose up migrazioni",
     "test:api": "node --test --test-concurrency=1 tests/api/*.test.ts",
     "test:api:pulizia": "node tests/api/pulizia.ts",
     "version": "npm version --no-commit-hooks --no-git-tag-version --prefix"
