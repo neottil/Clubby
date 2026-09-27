@@ -256,6 +256,219 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/clubby-authorizer:${{ needs.versions.outputs.date_tag }}
             ghcr.io/${{ github.repository_owner }}/clubby-authorizer:latest
 
+  # Test delle API contro le IMMAGINI APPENA BUILDATE, non contro il codice
+  # sorgente ricompilato: si prova l'artefatto che verrà deployato, ed è anche
+  # il motivo per cui questo job sta dopo le build e non in parallelo.
+  #
+  # Blocca SOLO i deploy. Un'immagine che non passa i test resta su ghcr.io con
+  # il suo tag di data: non è una versione rilasciata (quelle le assegna Tag) e
+  # non la mette in servizio nessuno, quindi non vale la pena complicare la
+  # pipeline per impedirne la pubblicazione.
+  #
+  # Il database è un container "service" del job: nasce vuoto, muore con la run.
+  # I database dei club vivono nel cluster e il runner non ha né credenziali né
+  # rotta per raggiungerli — ma la suite CREA e CANCELLA righe, quindi vale la
+  # pena dirlo: le uniche variabili che potrebbero puntarla altrove sono
+  # TEST_APP_DB_URL e TEST_AUTH_DB_URL, che qui non vengono impostate.
+  #
+  # Gira SEMPRE, anche quando cambia solo il frontend. Costa un paio di minuti e
+  # in cambio ogni push verifica che baseline e migrazioni si applichino da zero
+  # su un database vuoto — cosa che in un ambiente reale succede una volta sola,
+  # e che quindi nessun deploy riesce più a smentire.
+  test:
+    needs: [versions, build-backend, build-authorizer]
+    # always(): le build possono essere "skipped" quando quello scope non è
+    # cambiato, e in quel caso si prova l'immagine attualmente in servizio.
+    if: |
+      always() &&
+      needs.versions.result == 'success' &&
+      (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped') &&
+      (needs.build-authorizer.result == 'success' || needs.build-authorizer.result == 'skipped')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    services:
+      postgres:
+        image: postgres:18.3-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # Senza health check i passi successivi partirebbero mentre Postgres
+        # sta ancora inizializzando il proprio volume.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      REGISTRY: ghcr.io/${{ github.repository_owner }}
+    steps:
+      # fetch-depth: 0 per i tag, usati sotto quando uno scope non è stato
+      # ribuildato in questa run.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Node serve solo a ESEGUIRE la suite (node --test): non si compila più
+      # nulla qui, ci hanno già pensato i job di build. Le dipendenze del
+      # backend servono perché i test usano il suo driver "pg" per le due
+      # operazioni che fanno in SQL — il primo admin e la pulizia finale.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --omit=dev --prefix backend
+
+      # Stessa regola di resolve-<scope>-image: l'immagine di questa run se lo
+      # scope è stato ribuildato, altrimenti l'ultima davvero deployata su
+      # questo branch. Non si riusa il job resolve perché quello gira solo per
+      # gli scope in deploy, mentre la suite ha bisogno di ENTRAMBI i servizi
+      # anche quando ne è cambiato uno solo.
+      - name: Determina le immagini da provare
+        id: immagini
+        run: |
+          BRANCH_SLUG=$(echo '${{ github.ref_name }}' | tr '/' '-')
+          risolvi() {
+            scope="$1"; ribuildato="$2"
+            if [ "$ribuildato" = "true" ]; then
+              echo "${{ needs.versions.outputs.date_tag }}"
+              return
+            fi
+            prev=$(git tag -l "${scope}-${BRANCH_SLUG}-*" --sort=-creatordate | head -1)
+            if [ -z "$prev" ]; then
+              echo "::error::Nessuna immagine $scope su questo branch, e questa run non ne ha buildata una: impossibile eseguire i test." >&2
+              exit 1
+            fi
+            echo "${prev#${scope}-}"
+          }
+          BACKEND=$(risolvi backend    '${{ needs.versions.outputs.has_backend }}')
+          AUTH=$(risolvi    authorizer '${{ needs.versions.outputs.has_authorizer }}')
+          echo "backend=$BACKEND"   >> "$GITHUB_OUTPUT"
+          echo "authorizer=$AUTH"   >> "$GITHUB_OUTPUT"
+          echo "Backend: $BACKEND — Authorizer: $AUTH"
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Un database e un utente omonimo per modulo, come li crea Infra su un
+      # ambiente vero (vedi crea_database in infra.yml): lo schema viene poi
+      # applicato DALL'UTENTE PROPRIETARIO, così le tabelle nascono sue e i
+      # permessi sono gli stessi che avrà in produzione.
+      - name: Crea i due database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE clubby      LOGIN PASSWORD 'clubby';
+          CREATE ROLE clubby_auth LOGIN PASSWORD 'clubby_auth';
+          CREATE DATABASE clubby      OWNER clubby;
+          CREATE DATABASE clubby_auth OWNER clubby_auth;
+          SQL
+
+      # pgcrypto è un'estensione "trusted" da PostgreSQL 13: il proprietario del
+      # database può crearla senza essere superutente, ed è il motivo per cui
+      # queste due righe girano come l'utente del modulo e non come postgres.
+      - name: Applica le baseline
+        run: |
+          PGPASSWORD=clubby      psql -U clubby      -d clubby      -v ON_ERROR_STOP=1 -q -f backend/src/db/schema.sql
+          PGPASSWORD=clubby_auth psql -U clubby_auth -d clubby_auth -v ON_ERROR_STOP=1 -q -f authorizer/src/db/schema.sql
+
+      # Le migrazioni si applicano DALL'IMMAGINE del backend, con lo stesso
+      # script e lo stesso percorso del Job k8s di migrate-db.yml: sono quindi
+      # esattamente quelle che accompagnano il codice che si sta per provare,
+      # non quelle presenti nel repository.
+      - name: Applica le migrazioni
+        run: |
+          docker run --rm --network host \
+            -e DB_HOST=localhost -e DB_PORT=5432 \
+            -e DB_NAME=clubby -e DB_USER=clubby -e DB_PASSWORD=clubby \
+            "$REGISTRY/clubby-backend:${{ steps.immagini.outputs.backend }}" \
+            sh /app/scripts/migra.sh
+          # L'authorizer non ha ancora migrazioni proprie né psql nella propria
+          # immagine (vedi authorizer/src/db/migrations/README.md): finché è
+          # così, le sue si applicano dal runner.
+          DB_HOST=localhost DB_PORT=5432 DB_NAME=clubby_auth DB_USER=clubby_auth DB_PASSWORD=clubby_auth \
+            MIGRATIONS_DIR=authorizer/src/db/migrations sh scripts/migra.sh
+
+      # Un solo posto in cui è scritta la configurazione: i container la
+      # ricevono con --env-file, e i test leggono da qui i parametri di
+      # connessione per le due operazioni che fanno in SQL.
+      #
+      # RECHARGE_MODE=free è obbligatorio: in modalità "map" la creazione dei
+      # dati di prova verrebbe rifiutata, non essendoci tagli configurati.
+      # AUTH_JWT_PRIVATE_KEY è assente di proposito: l'authorizer ne genera una
+      # effimera all'avvio, che è esattamente ciò che serve a un processo che
+      # vive quanto il job.
+      - name: Scrivi i file di configurazione
+        run: |
+          cat > backend/.env <<'ENV'
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_NAME=clubby
+          DB_USER=clubby
+          DB_PASSWORD=clubby
+          AUTH_ISSUER=http://localhost:3001
+          AUTH_INTERNAL_URL=http://localhost:3001
+          ENABLE_MODULE_TESSERAMENTO=true
+          ENABLE_MODULE_FATTURAZIONE=true
+          RECHARGE_MODE=free
+          PORT=3000
+          APP_VERSION=test
+          ENV
+          cat > authorizer/.env <<'ENV'
+          PORT=3001
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_NAME=clubby_auth
+          DB_USER=clubby_auth
+          DB_PASSWORD=clubby_auth
+          AUTH_ISSUER=http://localhost:3001
+          CORS_ORIGIN=*
+          ENV
+
+      # --network host: i due container si vedono fra loro, vedono Postgres e
+      # sono raggiungibili dalla suite, che gira sul runner. Su Linux è il modo
+      # più semplice di avere un solo "localhost" per tutti.
+      #
+      # /health è l'endpoint giusto per aspettarli: non richiede autenticazione,
+      # mentre /api/version risponde 401 e farebbe fallire il controllo.
+      - name: Avvia i servizi dalle immagini
+        run: |
+          docker run -d --name authorizer --network host --env-file authorizer/.env \
+            "$REGISTRY/clubby-authorizer:${{ steps.immagini.outputs.authorizer }}"
+          docker run -d --name backend    --network host --env-file backend/.env \
+            "$REGISTRY/clubby-backend:${{ steps.immagini.outputs.backend }}"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/health > /dev/null \
+               && curl -sf http://localhost:3000/health > /dev/null; then
+              echo "Servizi pronti dopo ${i}s."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::I servizi non hanno risposto entro 30 secondi."
+          docker ps -a
+          exit 1
+
+      - name: Esegui i test delle API
+        run: npm run test:api
+
+      # I servizi girano in container: senza questo, un test fallito mostra solo
+      # l'asserzione e non il motivo lato server.
+      - name: Log dei servizi (solo se qualcosa è fallito)
+        if: failure()
+        run: |
+          echo "=== backend ==="    && docker logs --tail 50 backend    || true
+          echo "=== authorizer ===" && docker logs --tail 50 authorizer || true
+
   # Decide quale immagine backend deployare in QUESTA run (specifico di
   # questa run: branch, history dei tag — resta fuori dal workflow
   # riutilizzabile di deploy, che non deve sapere nulla di tutto questo). Se
@@ -309,9 +522,10 @@ jobs:
   # e in quel caso il suo tag arriva vuoto e il relativo database non si tocca.
   # Se il Job fallisce non parte nessuno dei tre deploy, frontend compreso.
   migrate-db:
-    needs: [resolve-backend-image, resolve-authorizer-image]
+    needs: [resolve-backend-image, resolve-authorizer-image, test]
     if: |
       always() &&
+      needs.test.result == 'success' &&
       (needs.resolve-backend-image.result == 'success' ||
        needs.resolve-authorizer-image.result == 'success')
     uses: ./.github/workflows/migrate-db.yml
@@ -327,8 +541,11 @@ jobs:
   # duplicata). Se frontend non cambia, il suo Deployment non viene MAI
   # toccato da questa run.
   deploy-backend:
-    needs: [resolve-backend-image, migrate-db]
-    if: needs.resolve-backend-image.result == 'success' && needs.migrate-db.result == 'success'
+    needs: [resolve-backend-image, migrate-db, test]
+    if: |
+      needs.test.result == 'success' &&
+      needs.resolve-backend-image.result == 'success' &&
+      needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-backend.yml
     with:
       environment: development
@@ -419,9 +636,10 @@ jobs:
   # tutto. Pretendere "success" bloccherebbe per sempre i deploy di solo
   # frontend — e always() serve perché un needs saltato salterebbe anche questo.
   deploy-frontend:
-    needs: [resolve-frontend-image, migrate-db]
+    needs: [resolve-frontend-image, migrate-db, test]
     if: |
       always() &&
+      needs.test.result == 'success' &&
       needs.resolve-frontend-image.result == 'success' &&
       (needs.migrate-db.result == 'success' || needs.migrate-db.result == 'skipped')
     uses: ./.github/workflows/deploy-frontend.yml
@@ -494,8 +712,11 @@ jobs:
           fi
 
   deploy-authorizer:
-    needs: [resolve-authorizer-image, migrate-db]
-    if: needs.resolve-authorizer-image.result == 'success' && needs.migrate-db.result == 'success'
+    needs: [resolve-authorizer-image, migrate-db, test]
+    if: |
+      needs.test.result == 'success' &&
+      needs.resolve-authorizer-image.result == 'success' &&
+      needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-authorizer.yml
     with:
       environment: development

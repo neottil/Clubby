@@ -35,7 +35,7 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 | Workflow | Trigger | Scopo |
 |---|---|---|
 | [`infra.yml`](workflows/infra.yml) | Manuale (`workflow_dispatch`) | Provisiona/aggiorna infrastruttura condivisa e a lunga vita: namespace k8s, database, identity provider. Da lanciare una tantum per ambiente. |
-| [`build-deploy.yml`](workflows/build-deploy.yml) | Push su branch di sviluppo, o manuale (input `force_all`) | Builda le immagini Docker cambiate e le deploya in **sviluppo**, in modo condizionale e indipendente per componente. Con `force_all` ribuilda e rideploya tutto, ignorando il diff. |
+| [`build-deploy.yml`](workflows/build-deploy.yml) | Push su branch di sviluppo, o manuale (input `force_all`) | Esegue i test delle API su un database usa-e-getta, poi builda le immagini Docker cambiate e le deploya in **sviluppo**, in modo condizionale e indipendente per componente. Con `force_all` ribuilda e rideploya tutto, ignorando il diff. |
 | [`deploy-backend.yml`](workflows/deploy-backend.yml) / [`deploy-frontend.yml`](workflows/deploy-frontend.yml) / [`deploy-authorizer.yml`](workflows/deploy-authorizer.yml) | Solo `workflow_call` (riutilizzabile) | Applica i manifest k8s di un componente, verifica il rollout. Chiamati sia da `build-deploy.yml` (sviluppo) sia da `promote.yml` (club). |
 | [`tag.yml`](workflows/tag.yml) | Manuale | Promuove lo stato attualmente deployato a versione "reale" (tag Git, ri-tag Docker, GitHub Release), senza rebuild. **Non deploya nulla.** |
 | [`promote.yml`](workflows/promote.yml) | Manuale (con input `environment` e `<scope>_version`) | Deploya la versione indicata (già taggata da `tag.yml`) nell'**ambiente scelto**, cioè in un club. **Non tagga né rilascia nulla.** |
@@ -426,6 +426,31 @@ quando il build collegato è stato saltato non fallito) → `deploy-<scope>` (ch
 pattern 4, `environment: development`) → `register-<scope>-tag` (ciclo di vita del tag, pattern 3) →
 `cleanup-registry` (pulizia immagini Docker, mantiene le N più recenti per repository indipendentemente dal
 branch).
+
+**Il job `test`** gira **dopo le build** e **blocca solo i deploy**: migrazioni e tutti e tre i deploy lo
+mettono fra i propri `needs` e pretendono `success`. Un'immagine che non passa i test resta su ghcr.io con
+il suo tag di data — non è una versione rilasciata (quelle le assegna Tag) e non la mette in servizio
+nessuno, quindi non vale la pena complicare la pipeline per impedirne la pubblicazione.
+
+Sta dopo le build perché prova **le immagini appena buildate**, non il codice sorgente ricompilato: si
+verifica l'artefatto che verrà deployato, e non si paga due volte la stessa compilazione. Per lo scope non
+ribuildato in quella run vale la stessa regola di `resolve-<scope>-image` — l'ultima immagine davvero
+deployata sul branch — perché la suite ha bisogno di entrambi i servizi anche quando ne è cambiato uno solo.
+
+Esegue la suite `tests/api/`, che è **black-box via HTTP**: il job ricostruisce quindi un ambiente completo
+da zero — un container Postgres come `service`, i due database con i rispettivi utenti, le baseline
+applicate *dal proprietario*, le migrazioni eseguite **dall'immagine del backend** con lo stesso
+`scripts/migra.sh` del Job k8s, e i due container avviati in rete host. Nasce e muore con la run: i database
+dei club vivono nel cluster e il runner non ha né credenziali né rotta per raggiungerli.
+
+Gira **sempre**, anche quando cambia solo il frontend. Il vantaggio non è solo la suite: ogni push verifica
+che baseline e migrazioni si applichino da zero su un database vuoto, cioè quel percorso che in un ambiente
+reale viene eseguito una volta sola e che nessun deploy successivo può più smentire.
+
+Due vincoli da conoscere se lo si modifica: `RECHARGE_MODE=free` è obbligatorio (in modalità `map` la
+creazione dei dati di prova viene rifiutata, non essendoci tagli configurati), e `TEST_APP_DB_URL` /
+`TEST_AUTH_DB_URL` non vanno impostate — sono le uniche variabili che potrebbero puntare una suite che
+crea e cancella righe verso un database che non è il suo.
 
 **Non tocca mai** l'infrastruttura di `infra.yml`, né la produzione.
 
