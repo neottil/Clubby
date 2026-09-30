@@ -1,0 +1,40 @@
+meta {
+  name: Anteprima ricevuta
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/documenti/anteprima
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "socio_id": "{{socio_id}}",
+    "causale": "educazione cinofila",
+    "voci": [
+      { "tipo": "ricarica", "id": "{{voce_id}}" }
+    ]
+  }
+}
+
+docs {
+  Solo admin. Genera il PDF e lo restituisce SENZA scrivere niente: nessun
+  documento creato, nessun numero consumato.
+
+  Risposta:
+    { pdf_base64, numero_provvisorio, anno, importo, importo_lettere, nome_file }
+
+  numero_provvisorio è quello che il documento avrebbe se confermato adesso,
+  ma non è riservato: fra l'anteprima e la conferma un altro admin può
+  emettere. Per questo il PDF definitivo viene rigenerato alla conferma.
+
+  L'importo è sempre ricalcolato dal database dalle coppie (tipo, id): un
+  totale mandato dal client viene ignorato.
+}

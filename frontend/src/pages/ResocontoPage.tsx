@@ -10,5 +10,8 @@ import ElencoIncontri from '../components/ElencoIncontri';
  * questa pagina.
  */
 export default function ResocontoPage() {
-  return <ElencoIncontri titolo='Resoconto' ambito='istruttore' mostraTotali />;
+  // `rendicontazione`: l'istruttore vede quali dei suoi incontri il club ha
+  // già rendicontato, e può nasconderli con lo switch per concentrarsi su ciò
+  // che resta. Non li marca lui — quello è l'admin.
+  return <ElencoIncontri titolo='Resoconto' ambito='istruttore' mostraTotali rendicontazione />;
 }

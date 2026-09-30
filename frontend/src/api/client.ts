@@ -138,6 +138,12 @@ export interface IncontriQuery {
   istruttore_id?: string;
   da?: string;
   a?: string;
+  /**
+   * '1' restringe agli incontri ancora da rendicontare. Assente, l'elenco li
+   * contiene tutti: la rendicontazione riguarda il compenso dell'istruttore e
+   * non deve nascondere nulla a chi sta guardando altro.
+   */
+  solo_da_rendicontare?: '1';
   sort?: string;
   dir?: 'asc' | 'desc';
   limit?: number;
@@ -193,6 +199,20 @@ export interface Incontro {
   note: string | null;
   /** false = testo semplice, true = Markdown. */
   note_markdown: boolean;
+  /**
+   * Quando l'incontro è stato rendicontato all'istruttore, null se ancora no.
+   * Non si annulla, e un incontro rendicontato non si può eliminare.
+   */
+  rendicontato_il: string | null;
+  /**
+   * La ricevuta che comprende questa riga, quando ce n'è una.
+   *
+   * Assenti a modulo ricevute spento, e sugli incontri visti da un istruttore
+   * che li ha soltanto tenuti: quel documento è di un altro socio.
+   */
+  documento_id?: string | null;
+  documento_anno?: number | null;
+  documento_numero?: number | null;
   /** Nominativo del socio: presente nelle righe dell'elenco. */
   nome?: string;
   cognome?: string;
@@ -242,6 +262,20 @@ export interface Movimento {
    */
   importo_pagato: number | null;
   descrizione: string | null;
+  /**
+   * La ricevuta che comprende questa ricarica, se ne è stata emessa una.
+   *
+   * Null su addebiti e rettifiche — non sono voci registrabili — e sulle
+   * ricariche marcate come emesse prima che l'applicazione producesse
+   * documenti.
+   */
+  documento_id: string | null;
+  /**
+   * Anno e numero della ricevuta: insieme sono il codice mostrato e il nome
+   * del file scaricato (vedi utils/ricevuta). Null quando lo è documento_id.
+   */
+  documento_anno: number | null;
+  documento_numero: number | null;
 }
 
 export interface MovimentoInput {
@@ -255,7 +289,7 @@ export interface MovimentoInput {
 export type Ruolo = 'socio' | 'istruttore';
 
 /**
- * Account, come lo serve il pannello Admin: le credenziali vengono
+ * Account, come lo serve la pagina Impostazioni: le credenziali vengono
  * dall'authorizer, nominativo e telefono dalla scheda socio collegata — null
  * finché l'account non ne ha una.
  */
@@ -287,10 +321,10 @@ export interface UltimaRicarica {
 }
 
 /**
- * Voce di Fatturazione: una ricarica di voucher, una quota di tesseramento o un
+ * Voce registrabile: una ricarica di voucher, una quota di tesseramento o un
  * incontro non coperto da voucher.
  */
-export interface VoceFatturazione {
+export interface VoceDocumento {
   id: string;
   tipo: 'ricarica' | 'tesseramento' | 'incontro';
   data: string;
@@ -299,6 +333,32 @@ export interface VoceFatturazione {
   cognome: string;
   descrizione: string;
   importo: number;
+  /**
+   * Quando è stato emesso il documento che comprende questa voce, null se
+   * ancora no. Arriva valorizzato solo chiedendo anche le voci già emesse:
+   * per default l'elenco contiene solo quelle da registrare.
+   */
+  emessa_il: string | null;
+  /**
+   * La ricevuta che comprende questa voce, se ne esiste una.
+   *
+   * Null sulle voci marcate come emesse prima che l'applicazione producesse
+   * documenti: sono storico, e nella tabella semplicemente non mostrano
+   * l'icona del PDF.
+   */
+  documento_id: string | null;
+  /**
+   * Anno e numero della ricevuta: insieme sono il codice mostrato e il nome
+   * del file scaricato (vedi utils/ricevuta). Null quando lo è documento_id.
+   */
+  documento_anno: number | null;
+  documento_numero: number | null;
+}
+
+/** Voce da marcare come registrata: la coppia che la identifica. */
+export interface RiferimentoVoce {
+  tipo: VoceDocumento['tipo'];
+  id: string;
 }
 
 /** Parametri comuni degli elenchi paginati con ricerca e ordinamento. */
@@ -332,12 +392,74 @@ export interface RigaTesseramento extends SituazioneTesseramento {
   stato: StatoTesseramento;
 }
 
-export interface FatturazioneQuery {
+export interface VociDocumentoQuery {
+  socio_id?: string;
+  da?: string;
+  a?: string;
+  /**
+   * '1' comprende anche le voci per cui un documento è già stato emesso.
+   * Assente, l'elenco contiene solo quelle ancora da registrare: è ciò che
+   * serve a chi apre la pagina.
+   */
+  includi_emesse?: '1';
+  limit?: number;
+  offset?: number;
+}
+
+/** Filtri dell'elenco delle ricevute emesse. */
+export interface DocumentiQuery {
   socio_id?: string;
   da?: string;
   a?: string;
   limit?: number;
   offset?: number;
+}
+
+/** Una ricevuta emessa, come compare nell'elenco (senza i byte del PDF). */
+export interface Documento {
+  id: string;
+  anno: number;
+  numero: number;
+  data_documento: string;
+  socio_id: string;
+  /** Nome e cognome come erano al momento dell'emissione. */
+  intestatario: string;
+  causale: string;
+  importo: number;
+  importo_lettere: string;
+  nome_file: string;
+  emesso_da: string | null;
+  created_at: string;
+  /** Dalla JOIN con socio: il nome ATTUALE, per il filtro e la ricerca. */
+  nome: string;
+  cognome: string;
+}
+
+export interface EmissioneInput {
+  socio_id: string;
+  causale: string;
+  voci: RiferimentoVoce[];
+}
+
+/** Esito dell'anteprima: il PDF da mostrare, più i dati che lo accompagnano. */
+export interface AnteprimaDocumento {
+  pdf_base64: string;
+  numero_provvisorio: number;
+  anno: number;
+  importo: number;
+  importo_lettere: string;
+  nome_file: string;
+}
+
+export interface DocumentoEmesso {
+  id: string;
+  anno: number;
+  numero: number;
+  data_documento: string;
+  importo: number;
+  importo_lettere: string;
+  nome_file: string;
+  pdf_base64: string;
 }
 
 /** Un socio con il suo ultimo rinnovo del tesseramento (null se mai tesserato). */
@@ -357,12 +479,25 @@ export interface Tesseramento {
   scadenza: string;
   importo: number;
   created_at: string;
+  /**
+   * La ricevuta che comprende questa riga, quando ce n'è una.
+   *
+   * Assenti a modulo ricevute spento, e sugli incontri visti da un istruttore
+   * che li ha soltanto tenuti: quel documento è di un altro socio.
+   */
+  documento_id?: string | null;
+  documento_anno?: number | null;
+  documento_numero?: number | null;
 }
 
 export interface Impostazioni {
   quota_tesseramento: number;
   /** Percentuale aggiunta a una ricarica dove RECHARGE_MODE vale "percentage". */
   percentuale_ricarica: number;
+  /** Testo multiriga in cima alle ricevute: denominazione, indirizzo, C.F. */
+  ricevuta_intestazione: string;
+  /** Piè di pagina delle ricevute, tipicamente la clausola sul bollo. */
+  ricevuta_pie_pagina: string;
 }
 
 /** Taglio di ricarica preconfigurato (RECHARGE_MODE = "map"). */
@@ -426,6 +561,11 @@ export function createApiClient(token: string | null) {
     createIncontro: (body: IncontroInput) => request<Incontro>('/api/incontri', { method: 'POST', body: JSON.stringify(body) }, token),
     updateIncontro: (id: string, body: Partial<IncontroInput>) => request<Incontro>(`/api/incontri/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
     deleteIncontro: (id: string)          => request<void>(`/api/incontri/${id}`, { method: 'DELETE' }, token),
+    // Segna come rendicontati gli incontri indicati (solo admin). Risponde con
+    // quanti lo sono diventati davvero: chi era già stato rendicontato da un
+    // altro admin nel frattempo non viene toccato e non viene contato.
+    rendicontaIncontri: (ids: string[]) =>
+      request<{ richiesti: number; rendicontati: number }>('/api/incontri/rendiconta', { method: 'POST', body: JSON.stringify({ ids }) }, token),
 
     // Attività — il listino: nomi e costi proposti. Un istruttore riceve dal
     // backend le sole attività a cui è abilitato, senza doverlo chiedere.
@@ -454,9 +594,38 @@ export function createApiClient(token: string | null) {
       request<Paginated<Movimento>>(`/api/voucher/${voucherId}/movimenti${queryString(params)}`, {}, token),
     createMovimento:(voucherId: string, body: MovimentoInput) => request<Movimento>(`/api/voucher/${voucherId}/movimenti`, { method: 'POST', body: JSON.stringify(body) }, token),
 
-    // Fatturazione (solo admin), paginata come gli incontri
-    getFatturazione: (params: FatturazioneQuery = {}) =>
-      request<Paginated<VoceFatturazione> & { totale_importo: number }>(`/api/fatturazione${queryString(params as Record<string, string | number | undefined>)}`, {}, token),
+    // Documenti / ricevute (solo admin, tranne il download di una ricevuta)
+    getVociDocumento: (params: VociDocumentoQuery = {}) =>
+      request<Paginated<VoceDocumento> & { totale_importo: number }>(`/api/documenti/voci${queryString(params as Record<string, string | number | undefined>)}`, {}, token),
+    getDocumenti: (params: DocumentiQuery = {}) =>
+      request<Paginated<Documento>>(`/api/documenti${queryString(params as Record<string, string | number | undefined>)}`, {}, token),
+    // Genera il PDF senza scrivere niente: il numero che torna è provvisorio,
+    // perché quello definitivo si assegna solo alla conferma.
+    anteprimaDocumento: (body: EmissioneInput) =>
+      request<AnteprimaDocumento>('/api/documenti/anteprima', { method: 'POST', body: JSON.stringify(body) }, token),
+    // Emissione definitiva. Risponde 409 se nel frattempo qualcuno ha
+    // registrato una delle voci selezionate: l'importo non sarebbe più quello
+    // visto in anteprima.
+    emettiDocumento: (body: EmissioneInput) =>
+      request<DocumentoEmesso>('/api/documenti', { method: 'POST', body: JSON.stringify(body) }, token),
+    /**
+     * Scarica il PDF conservato di una ricevuta.
+     *
+     * Non passa da `request`: quella funzione fa `res.json()`, e qui il corpo
+     * è binario. Il token viaggia in un header, quindi non basta nemmeno un
+     * link — serve fetch, e poi un blob da dare al browser.
+     */
+    getDocumentoPdf: async (id: string): Promise<Blob> => {
+      const res = await fetch(`${config.apiBaseUrl}/api/documenti/${id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        throw new ApiError(res.status, res.status === 403
+          ? 'Questa ricevuta non è intestata a te'
+          : 'Ricevuta non disponibile');
+      }
+      return res.blob();
+    },
 
     // Tesseramenti (solo admin)
     getTesseramentiPagina: (params: TesseramentiQuery) =>

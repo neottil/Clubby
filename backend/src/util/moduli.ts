@@ -1,12 +1,13 @@
 /**
  * Moduli opzionali dell'applicazione.
  *
- * Tesseramento e Fatturazione non servono a tutti i club: chi non li usa non
+ * Tesseramento e Ricevute non servono a tutti i club: chi non li usa non
  * deve vederne né le pagine né le API. Si attivano per ambiente, con una
  * variabile ciascuno.
  *
- *   ENABLE_MODULE_TESSERAMENTO   /api/tesseramenti, quota nel pannello Admin
- *   ENABLE_MODULE_FATTURAZIONE   /api/fatturazione
+ *   ENABLE_MODULE_TESSERAMENTO   /api/tesseramenti, quota nelle Impostazioni
+ *   ENABLE_MODULE_RICEVUTE       /api/documenti (voci da registrare, emissione
+ *                                e ricevute in PDF)
  *
  * Attivi SOLO con il valore esatto "true": una variabile mancante, vuota o
  * scritta male lascia il modulo spento. È la scelta prudente per una
@@ -21,11 +22,11 @@
  * di menu inutili, questo è il controllo vero.
  */
 
-export type Modulo = 'tesseramento' | 'fatturazione';
+export type Modulo = 'tesseramento' | 'ricevute';
 
 const VARIABILE: Record<Modulo, string> = {
   tesseramento: 'ENABLE_MODULE_TESSERAMENTO',
-  fatturazione: 'ENABLE_MODULE_FATTURAZIONE',
+  ricevute: 'ENABLE_MODULE_RICEVUTE',
 };
 
 /**

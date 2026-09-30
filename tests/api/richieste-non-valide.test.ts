@@ -68,5 +68,27 @@ describe('Richieste non valide', () => {
       const r = await api(d.sessioni.istruttore1, 'GET', `/api/voucher/${d.soci.socio1}`);
       assert.equal(r.status, 404);
     });
+
+    it('le vecchie scorciatoie /promuovi e /retrocedi non esistono più', async () => {
+      // Rimosse: facevano ciò che fa /api/admin/amministratore, al quale
+      // entrambe delegavano. Il test resta a segnare che la rimozione è
+      // voluta, e che nessuno le reintroduca per comodità.
+      for (const rotta of ['promuovi', 'retrocedi']) {
+        const r = await api(d.sessioni.istruttore1, 'POST', `/api/admin/${rotta}`, {
+          utente_id: d.sessioni.socio1.id,
+        });
+        assert.equal(r.status, 404, rotta);
+      }
+
+      // Il sostituto funziona, e il socio resta senza privilegio.
+      const concesso = await api(d.sessioni.istruttore1, 'POST', '/api/admin/amministratore', {
+        utente_id: d.sessioni.socio1.id, admin: true,
+      });
+      assert.equal(concesso.status, 200, JSON.stringify(concesso.body));
+      const tolto = await api(d.sessioni.istruttore1, 'POST', '/api/admin/amministratore', {
+        utente_id: d.sessioni.socio1.id, admin: false,
+      });
+      assert.equal(tolto.status, 200, JSON.stringify(tolto.body));
+    });
   });
 });

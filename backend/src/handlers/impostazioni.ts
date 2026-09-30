@@ -26,13 +26,21 @@ export const handler = async (
       return ok(await leggiImpostazioni());
     }
 
-    // PUT /api/impostazioni   Body: { quota_tesseramento?, percentuale_ricarica? }
+    // PUT /api/impostazioni
+    // Body: { quota_tesseramento?, percentuale_ricarica?,
+    //         ricevuta_intestazione?, ricevuta_pie_pagina? }
+    //
     // Whitelist esplicita: un campo non previsto viene ignorato, non scritto.
+    // Il rovescio è che una chiave nuova dimenticata qui viene scartata in
+    // silenzio, e la risposta sembra comunque un successo — quindi ogni
+    // impostazione aggiunta al servizio va aggiunta anche a questo elenco.
     if (method === 'PUT') {
       const body = corpoJson(event);
       return ok(await aggiornaImpostazioni({
         quota_tesseramento: body.quota_tesseramento,
         percentuale_ricarica: body.percentuale_ricarica,
+        ricevuta_intestazione: body.ricevuta_intestazione,
+        ricevuta_pie_pagina: body.ricevuta_pie_pagina,
       }));
     }
 

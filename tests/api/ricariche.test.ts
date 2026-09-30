@@ -46,20 +46,26 @@ describe('Ricariche', () => {
     }
   });
 
+  // Importi volutamente strani: l'importo di un taglio è unico, e valori
+  // "tondi" si scontrerebbero con quelli che il club può avere davvero
+  // configurato sul database in cui girano i test.
+  const IMPORTO_A = 1007;
+  const IMPORTO_B = 1003;
+
   it('un taglio si crea e compare nell\'elenco, ordinato per importo', async () => {
     // Creati in ordine sparso di proposito: l'ordinamento è del database.
-    assert.equal((await creaTaglio(100, 110)).status, 201);
-    assert.equal((await creaTaglio(50, 55)).status, 201);
+    assert.equal((await creaTaglio(IMPORTO_A, IMPORTO_A + 10)).status, 201);
+    assert.equal((await creaTaglio(IMPORTO_B, IMPORTO_B + 5)).status, 201);
 
     const r = await api(admin, 'GET', '/api/ricarica-tagli');
     assert.equal(r.status, 200);
     const nostri = r.body.filter((t: any) => creati.includes(t.id));
-    assert.deepEqual(nostri.map((t: any) => Number(t.importo)), [50, 100]);
-    assert.deepEqual(nostri.map((t: any) => Number(t.valore)), [55, 110]);
+    assert.deepEqual(nostri.map((t: any) => Number(t.importo)), [IMPORTO_B, IMPORTO_A]);
+    assert.deepEqual(nostri.map((t: any) => Number(t.valore)), [IMPORTO_B + 5, IMPORTO_A + 10]);
   });
 
   it('rifiuta un secondo taglio con lo stesso importo (400)', async () => {
-    const r = await creaTaglio(100, 120);
+    const r = await creaTaglio(IMPORTO_A, IMPORTO_A + 20);
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
 

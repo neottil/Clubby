@@ -36,7 +36,7 @@ interface UtenteRegistrato {
 
 const RUOLI: Ruolo[] = ['socio', 'istruttore'];
 
-export default function AdminPage() {
+export default function ImpostazioniPage() {
   const { token, user } = useAuth();
   const navigate = useNavigate();
   const api = createApiClient(token);
@@ -48,6 +48,8 @@ export default function AdminPage() {
   const [quotaTesseramento, setQuotaTesseramento] = useState('');
   // Ricariche: percentuale (modalità percentage) e tagli (modalità map).
   const [percentualeRicarica, setPercentualeRicarica] = useState('');
+  const [intestazione, setIntestazione] = useState('');
+  const [piePagina, setPiePagina] = useState('');
   const [tagli, setTagli] = useState<TaglioRicarica[]>([]);
   const [nuovoTaglio, setNuovoTaglio] = useState({ importo: '', valore: '' });
   const [istruttori, setIstruttori]       = useState<Istruttore[]>([]);
@@ -96,6 +98,8 @@ export default function AdminPage() {
       ]);
       setQuotaTesseramento(Number(imp.quota_tesseramento).toFixed(2));
       setPercentualeRicarica(String(Number(imp.percentuale_ricarica)));
+      setIntestazione(imp.ricevuta_intestazione ?? '');
+      setPiePagina(imp.ricevuta_pie_pagina ?? '');
       setTagli(tg);
       setSoci(s);
       setAttivita(at);
@@ -257,6 +261,22 @@ export default function AdminPage() {
     } catch (e) { setError(messaggioErrore(e)); }
   };
 
+  // -------------------------------------------------------------
+  // Ricevute
+  // -------------------------------------------------------------
+  const salvaTestiRicevuta = async () => {
+    setError('');
+    try {
+      const imp = await api.aggiornaImpostazioni({
+        ricevuta_intestazione: intestazione,
+        ricevuta_pie_pagina: piePagina,
+      });
+      setIntestazione(imp.ricevuta_intestazione ?? '');
+      setPiePagina(imp.ricevuta_pie_pagina ?? '');
+      setSuccessMsg('Testi delle ricevute aggiornati');
+    } catch (e) { setError(messaggioErrore(e)); }
+  };
+
   const aggiungiTaglio = async () => {
     setError('');
     try {
@@ -375,7 +395,7 @@ export default function AdminPage() {
 
   return (
     <div style={styles.page}>
-      <h2 style={styles.title}>Pannello Admin</h2>
+      <h2 style={styles.title}>Impostazioni</h2>
 
       {error      && <Avviso tipo='errore' messaggio={error} onChiudi={() => setError('')} />}
       {successMsg && <Avviso tipo='successo' messaggio={successMsg} onChiudi={() => setSuccessMsg('')} />}
@@ -420,7 +440,7 @@ export default function AdminPage() {
           <>
             <p style={styles.hint}>
               Percentuale aggiunta al credito di ogni ricarica: pagando € 100 con il 10%, il socio si
-              trova € 110 sul voucher. In Fatturazione compaiono i € 100 pagati, non il valore accreditato.
+              trova € 110 sul voucher. In Ricevute compaiono i € 100 pagati, non il valore accreditato.
             </p>
             <div style={styles.row}>
               <div style={{ flex: 1, maxWidth: 240 }}>
@@ -448,7 +468,7 @@ export default function AdminPage() {
           <>
             <p style={styles.hint}>
               Tagli proposti al momento della ricarica: per ciascuno, quanto paga il socio e quanto gli
-              viene accreditato sul voucher. In Fatturazione compare l'importo pagato. I tagli sono
+              viene accreditato sul voucher. In Ricevute compare l'importo pagato. I tagli sono
               mostrati dal più economico, e rimuoverne uno non tocca le ricariche già registrate.
             </p>
 
@@ -542,6 +562,51 @@ export default function AdminPage() {
             >Salva</button>
           </div>
         </div>
+      </CardCollassabile>
+      )}
+
+      {/* Ricevute — solo col modulo attivo, come le altre sezioni opzionali */}
+      {config.moduli.ricevute && (
+      <CardCollassabile
+        titolo='Ricevute'
+        riepilogo={intestazione.trim() ? 'intestazione configurata' : 'intestazione da configurare'}
+        attenzione={!intestazione.trim()}
+      >
+        <p style={styles.hint}>
+          Testi stampati sulle ricevute in PDF. Il <strong>logo</strong> non si configura qui: è quello
+          del club, lo stesso mostrato in testa a ogni pagina, e arriva dall'installazione.
+        </p>
+        <div style={{ ...styles.row, flexDirection: 'column', alignItems: 'stretch' }}>
+          <div>
+            <label style={styles.label} htmlFor='ricevuta-intestazione'>Intestazione (una riga per riga stampata)</label>
+            <textarea
+              id='ricevuta-intestazione'
+              style={{ ...styles.input, minHeight: 84, resize: 'vertical', fontFamily: 'inherit' }}
+              value={intestazione}
+              onChange={e => setIntestazione(e.target.value)}
+              maxLength={2000}
+              placeholder={'LA MIA ASD\nVia Roma 1, Parma - C.F. 00000000000\nIscritta al RASD n. 00000'}
+            />
+          </div>
+          <div>
+            <label style={styles.label} htmlFor='ricevuta-pie'>Piè di pagina</label>
+            <textarea
+              id='ricevuta-pie'
+              style={{ ...styles.input, minHeight: 60, resize: 'vertical', fontFamily: 'inherit' }}
+              value={piePagina}
+              onChange={e => setPiePagina(e.target.value)}
+              maxLength={2000}
+              placeholder="Operazione esente da imposta di bollo ai sensi dell'art. 27-bis della Tabella all. B al DPR 642/72."
+            />
+          </div>
+          <div>
+            <button style={styles.btn} onClick={salvaTestiRicevuta}>Salva</button>
+          </div>
+        </div>
+        <p style={styles.hint}>
+          Valgono dalla prossima ricevuta emessa: quelle già prodotte conservano il testo che avevano,
+          perché il documento consegnato al socio non deve cambiare col tempo.
+        </p>
       </CardCollassabile>
       )}
 

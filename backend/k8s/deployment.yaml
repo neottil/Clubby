@@ -35,8 +35,11 @@ spec:
           env:
             - name: ENABLE_MODULE_TESSERAMENTO
               value: "${ENABLE_MODULE_TESSERAMENTO}"
-            - name: ENABLE_MODULE_FATTURAZIONE
-              value: "${ENABLE_MODULE_FATTURAZIONE}"
+            - name: ENABLE_MODULE_RICEVUTE
+              value: "${ENABLE_MODULE_RICEVUTE}"
+            # Logo stampato sulle ricevute: stessa Variable del frontend.
+            - name: LOGO_FILE
+              value: "${LOGO_FILE}"
             # Come sopra: cambia il comportamento a runtime, quindi deve far
             # ripartire il pod quando cambia.
             - name: RECHARGE_MODE

@@ -1,10 +1,12 @@
 {
   "name": "clubby-frontend",
   "private": true,
-  "version": "2.6.0",
+  "version": "2.9.0",
   "type": "module",
   "scripts": {
+    "predev": "node ../scripts/copia-branding.mjs frontend",
     "dev": "vite",
+    "prebuild": "node ../scripts/copia-branding.mjs frontend",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

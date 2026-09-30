@@ -16,4 +16,12 @@ auth:bearer {
 
 docs {
   Viewer: ritorna solo gli incontri del proprio socio.
+
+  Col modulo ricevute attivo ogni riga porta la ricevuta che comprende
+  l'incontro: documento_id, documento_anno, documento_numero (null se non
+  documentato, tipico di chi paga con il voucher: lì la ricevuta sta sulla
+  ricarica).
+
+  I campi NON compaiono con ambito=istruttore per chi non è admin: quelli sono
+  gli incontri che ha tenuto, cioè di altri soci, e la loro ricevuta non è sua.
 }

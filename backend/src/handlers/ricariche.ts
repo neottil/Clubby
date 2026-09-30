@@ -5,7 +5,7 @@
  * quanto paga il socio e quanto gli viene accreditato sul voucher.
  *
  * Le route esistono in tutte le modalità, anche in "free": la tabella c'è
- * comunque (il database è uno solo per tutti gli ambienti) e il pannello Admin
+ * comunque (il database è uno solo per tutti gli ambienti) e la pagina Impostazioni
  * mostra la card Ricariche sempre, spiegando come attivarla. Nasconderle
  * renderebbe la configurazione impossibile da preparare prima di accendere la
  * modalità.

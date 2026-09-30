@@ -88,7 +88,12 @@ jobs:
           # backend/src/util/moduli.ts). Le stesse due Variables le legge il
           # deploy del frontend per nascondere pagine e voci di menu.
           ENABLE_MODULE_TESSERAMENTO: ${{ vars.ENABLE_MODULE_TESSERAMENTO }}
-          ENABLE_MODULE_FATTURAZIONE: ${{ vars.ENABLE_MODULE_FATTURAZIONE }}
+          ENABLE_MODULE_RICEVUTE: ${{ vars.ENABLE_MODULE_RICEVUTE }}
+          # Logo del club: la STESSA Variable che legge il deploy del
+          # frontend. Serve al backend per disegnarlo in cima alle ricevute
+          # (service/documenti/logo.ts), prendendolo da branding/ dentro
+          # l'immagine. Un valore solo per ambiente, letto da due posti.
+          LOGO_FILE: ${{ vars.LOGO_FILE }}
           # Modalità di ricarica del voucher: free (default), percentage, map.
           # La stessa Variable la legge il deploy del frontend per costruire il
           # modulo giusto; quanto accreditare lo decide comunque il backend.
@@ -96,7 +101,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered
-          VARS='$KUBE_NAMESPACE $BACKEND_IMAGE $BACKEND_PORT $DB_HOST $DB_PORT $DB_NAME $DB_USER $DB_PASSWORD $AUTH_DOMAIN $APP_DOMAIN $APP_VERSION $ENABLE_MODULE_TESSERAMENTO $ENABLE_MODULE_FATTURAZIONE $RECHARGE_MODE'
+          VARS='$KUBE_NAMESPACE $BACKEND_IMAGE $BACKEND_PORT $DB_HOST $DB_PORT $DB_NAME $DB_USER $DB_PASSWORD $AUTH_DOMAIN $APP_DOMAIN $APP_VERSION $ENABLE_MODULE_TESSERAMENTO $ENABLE_MODULE_RICEVUTE $RECHARGE_MODE $LOGO_FILE'
           # Prefisso "backend-" nel nome renderizzato: frontend usa file con lo
           # stesso nome (deployment.yaml, service.yaml, ...) nella propria
           # cartella, ma sulla VPS finiscono nella STESSA directory di deploy

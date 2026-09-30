@@ -1,9 +1,17 @@
 /**
- * Tesseramenti (solo admin): la scadenza del tesseramento di ogni socio, con
- * il rinnovo e lo storico dei rinnovi.
+ * Tesseramenti, in due viste sotto lo stesso nome:
  *
- * La quota di un rinnovo non tocca il voucher: è fatturata a parte e compare
- * in Fatturazione. Quella proposta si configura nel pannello Admin.
+ *   admin   la scadenza di ogni socio, il rinnovo e lo storico dei rinnovi
+ *   socio   la PROPRIA scadenza e i propri rinnovi, in sola lettura
+ *
+ * Una pagina sola e non due, come già fa ElencoIncontri con `ambito`: sono la
+ * stessa cosa vista da due lati, e due voci di menù direbbero il contrario.
+ * Il backend applica comunque il confine — `GET /api/tesseramenti/{socioId}`
+ * confronta il parametro con la scheda socio di chi chiama.
+ *
+ * La quota di un rinnovo non tocca il voucher: si incassa a parte e compare
+ * fra le voci della pagina Ricevute. Quella proposta si configura nella pagina
+ * Impostazioni.
  */
 
 import { useEffect, useState } from 'react';
@@ -20,6 +28,7 @@ import Avviso from '../components/Avviso';
 import CaricaAltri from '../components/CaricaAltri';
 import Etichetta from '../components/Etichetta';
 import IntestazioneOrdinabile from '../components/IntestazioneOrdinabile';
+import ApriRicevuta from '../components/ApriRicevuta';
 import { euro, dataIso, oggiIso } from '../utils/formato';
 import Modal from '../components/Modal';
 import { config } from '../config';
@@ -66,6 +75,101 @@ function rigaDa(t: RigaTesseramento): Riga {
 }
 
 export default function TesseramentiPage() {
+  const { user } = useAuth();
+  // Il ruolo decide la vista, non la rotta: un socio che arriva qui da un
+  // segnalibro trova la propria, non una pagina vuota o un errore.
+  return user?.isAdmin ? <TesseramentiAdmin /> : <MioTesseramento />;
+}
+
+/**
+ * La vista del socio: la propria scadenza e i propri rinnovi.
+ *
+ * Nessun filtro, nessuna ricerca, nessun rinnovo: è un estratto conto, non uno
+ * strumento di gestione. L'elenco non è paginato perché i rinnovi sono uno
+ * all'anno.
+ */
+function MioTesseramento() {
+  const { token } = useAuth();
+  const api = createApiClient(token);
+
+  const [rinnovi, setRinnovi] = useState<Tesseramento[] | null>(null);
+  const [senzaScheda, setSenzaScheda] = useState(false);
+  const [errore, setErrore] = useState('');
+
+  useEffect(() => {
+    api.getStatoSocio()
+      .then(socio => {
+        // Un account non ancora collegato a una scheda socio non ha
+        // tesseramenti: lo dice, invece di mostrare un elenco vuoto che
+        // sembrerebbe "non ti sei mai tesserato".
+        if (!socio) { setSenzaScheda(true); setRinnovi([]); return; }
+        return api.getStoricoTesseramenti(socio.id).then(setRinnovi);
+      })
+      .catch(e => { setErrore(messaggioErrore(e)); setRinnovi([]); });
+  }, []);
+
+  // I rinnovi arrivano dalla scadenza più lontana: la prima riga è quella che
+  // vale oggi.
+  const corrente = rinnovi?.[0];
+
+  return (
+    <div style={styles.page}>
+      <h2 style={styles.title}>Il mio tesseramento</h2>
+      {errore && <Avviso tipo='errore' messaggio={errore} onChiudi={() => setErrore('')} />}
+
+      {rinnovi === null ? (
+        <div style={styles.loading}>Caricamento...</div>
+      ) : senzaScheda ? (
+        <p style={styles.empty}>
+          Il tuo account non è ancora collegato a una scheda socio: chiedi a un amministratore di
+          collegarlo.
+        </p>
+      ) : (
+        <>
+          <p style={styles.hint}>
+            {corrente
+              ? <>Il tuo tesseramento scade il <strong>{dataIso(corrente.scadenza)}</strong>.</>
+              : 'Non risulta nessun tesseramento a tuo nome.'}
+          </p>
+
+          {rinnovi.length > 0 && (
+            <TableScroll>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {['Rinnovo', 'Scadenza', 'Quota'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    {config.moduli.ricevute && <th style={styles.th}>Ricevuta</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rinnovi.map(t => (
+                    <tr key={t.id} style={styles.tr}>
+                      <td style={styles.td}>{dataIso(t.data_rinnovo)}</td>
+                      <td style={styles.td}>{dataIso(t.scadenza)}</td>
+                      <td style={styles.td}>{euro(t.importo)}</td>
+                      {config.moduli.ricevute && (
+                        <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                          <ApriRicevuta
+                            api={api}
+                            documentoId={t.documento_id ?? null}
+                            anno={t.documento_anno ?? null}
+                            numero={t.documento_numero ?? null}
+                          />
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableScroll>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function TesseramentiAdmin() {
   const { token } = useAuth();
   const api = createApiClient(token);
   const oggi = oggiIso();
@@ -159,7 +263,7 @@ export default function TesseramentiPage() {
       <h2 style={styles.title}>Tesseramenti</h2>
       <p style={styles.hint}>
         Scadenza del tesseramento di ogni socio. Il rinnovo registra la quota, proposta dal valore
-        configurato nel pannello Admin ({euro(quota)}): non tocca il voucher{config.moduli.fatturazione && ' e compare in Fatturazione'}.
+        configurato nella pagina Impostazioni ({euro(quota)}): non tocca il voucher{config.moduli.ricevute && ' e compare fra le voci in Ricevute'}.
       </p>
       {error && <Avviso tipo='errore' messaggio={error} onChiudi={() => setError('')} />}
       {successMsg && <Avviso tipo='successo' messaggio={successMsg} onChiudi={() => setSuccessMsg('')} />}
@@ -253,7 +357,7 @@ export default function TesseramentiPage() {
             <input id='quota-rinnovo' type='number' step='0.01' min='0' style={styles.input} value={rinnovo.importo}
               onChange={e => setRinnovo({ ...rinnovo, importo: e.target.value })} />
             <p style={styles.hintCampo}>
-              {config.moduli.fatturazione && 'Registrata in Fatturazione. '}Non viene scalata dal voucher.
+              {config.moduli.ricevute && 'Compare fra le voci in Ricevute. '}Non viene scalata dal voucher.
             </p>
           </div>
         </Modal>
@@ -273,6 +377,7 @@ export default function TesseramentiPage() {
                 <thead>
                   <tr>
                     {['Rinnovo', 'Scadenza', 'Quota'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    {config.moduli.ricevute && <th style={styles.th}>Ricevuta</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -281,6 +386,16 @@ export default function TesseramentiPage() {
                       <td style={styles.td}>{dataIso(t.data_rinnovo)}</td>
                       <td style={styles.td}>{dataIso(t.scadenza)}</td>
                       <td style={styles.td}>{euro(t.importo)}</td>
+                      {config.moduli.ricevute && (
+                        <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                          <ApriRicevuta
+                            api={api}
+                            documentoId={t.documento_id ?? null}
+                            anno={t.documento_anno ?? null}
+                            numero={t.documento_numero ?? null}
+                          />
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

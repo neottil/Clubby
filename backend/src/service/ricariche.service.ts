@@ -3,7 +3,7 @@
  *
  * Il punto di tutto il file è tenere separate due quantità che prima
  * coincidevano:
- *   importoPagato   quanto il socio ha pagato: è ciò che finisce in Fatturazione
+ *   importoPagato   quanto il socio ha pagato: è ciò che finisce nelle ricevute
  *   valore          quanto entra sul voucher: pagato + eventuale extra
  *
  * Il valore lo decide SEMPRE il server, a partire dalla modalità configurata
@@ -80,7 +80,7 @@ export async function eliminaTaglio(id: string): Promise<void> {
 export interface EsitoRicarica {
   /** Va sul voucher (colonna importo del movimento). */
   valore: number;
-  /** Va in Fatturazione (colonna importo_pagato), null se uguale al valore. */
+  /** Va nelle ricevute (colonna importo_pagato), null se uguale al valore. */
   importoPagato: number | null;
 }
 
@@ -117,7 +117,7 @@ export async function calcolaRicarica(importoRichiesto: unknown): Promise<EsitoR
       const tagli = await listTagli();
       if (tagli.length === 0) {
         throw new BadRequestError(
-          'Nessun taglio di ricarica configurato: impostali nel pannello Admin, card Ricariche'
+          'Nessun taglio di ricarica configurato: impostali nelle Impostazioni, card Ricariche'
         );
       }
       const taglio = tagli.find(t => Number(t.importo) === pagato);

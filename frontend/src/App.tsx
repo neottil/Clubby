@@ -8,10 +8,10 @@ import SociPage from './pages/SociPage';
 import IncontriPage from './pages/IncontriPage';
 import VouchersPage from './pages/VouchersPage';
 import ResocontoPage from './pages/ResocontoPage';
-import AdminPage from './pages/AdminPage';
+import ImpostazioniPage from './pages/ImpostazioniPage';
 import ResocontiAdminPage from './pages/ResocontiAdminPage';
 import TesseramentiPage from './pages/TesseramentiPage';
-import FatturazionePage from './pages/FatturazionePage';
+import RicevutePage from './pages/RicevutePage';
 import InfoPage from './pages/InfoPage';
 
 function ProtectedRoutes() {
@@ -47,9 +47,13 @@ function ProtectedRoutes() {
             proprio, e /tesseramenti digitato a mano ricade sul catch-all qui
             sotto tornando alla home. Il backend risponde comunque 404 alle
             relative API (backend/src/util/moduli.ts). */}
-        {user.isAdmin && config.moduli.tesseramento && <Route path='/tesseramenti' element={<TesseramentiPage />} />}
-        {user.isAdmin && config.moduli.fatturazione && <Route path='/fatturazione' element={<FatturazionePage />} />}
-        <Route path='/admin'    element={<AdminPage />} />
+        {/* Tesseramenti non è più solo dell'admin: un socio ci trova la propria
+            scadenza e i propri rinnovi (la pagina sceglie la vista in base al
+            ruolo). Il confine lo applica il backend, che confronta il socio
+            richiesto con la scheda collegata a chi chiama. */}
+        {config.moduli.tesseramento && <Route path='/tesseramenti' element={<TesseramentiPage />} />}
+        {user.isAdmin && config.moduli.ricevute && <Route path='/ricevute' element={<RicevutePage />} />}
+        <Route path='/impostazioni' element={<ImpostazioniPage />} />
         <Route path='/info'     element={<InfoPage />} />
         <Route path='*'         element={<Navigate to={defaultRoute} replace />} />
       </Routes>

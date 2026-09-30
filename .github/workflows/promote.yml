@@ -114,6 +114,10 @@ jobs:
   # build-deploy.yml: un club può essere fermo a una versione vecchia, quindi
   # qui possono risultarne pendenti parecchie in una volta. Sono applicate in
   # ordine e in transazioni separate, e quelle già presenti vengono saltate.
+  #
+  # Qui NON serve !cancelled(): l'unico needs è validate, che non può essere
+  # saltato. Aggiungercelo toglierebbe il success() implicito, e un validate
+  # fallito non fermerebbe più le migrazioni.
   migrate-db:
     needs: validate
     if: inputs.backend_version != '' || inputs.authorizer_version != ''
@@ -124,9 +128,19 @@ jobs:
       authorizer_image_tag: ${{ needs.validate.outputs.authorizer_image_tag }}
     secrets: inherit
 
+  # !cancelled() come in build-deploy.yml: senza una funzione di stato, uno
+  # skip a monte (qui migrate-db, quando si promuove il solo frontend) salta
+  # questo job PRIMA che la condizione venga valutata. Con la funzione di
+  # stato il success() implicito sparisce, quindi "validate riuscito" va
+  # richiesto per esteso: altrimenti un validate fallito non fermerebbe più
+  # il deploy.
   deploy-backend:
     needs: [validate, migrate-db]
-    if: inputs.backend_version != '' && needs.migrate-db.result == 'success'
+    if: |
+      !cancelled() &&
+      needs.validate.result == 'success' &&
+      inputs.backend_version != '' &&
+      needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-backend.yml
     with:
       environment: ${{ inputs.environment }}
@@ -140,7 +154,7 @@ jobs:
   deploy-frontend:
     needs: [validate, migrate-db]
     if: |
-      always() &&
+      !cancelled() &&
       needs.validate.result == 'success' &&
       inputs.frontend_version != '' &&
       (needs.migrate-db.result == 'success' || needs.migrate-db.result == 'skipped')
@@ -150,9 +164,14 @@ jobs:
       image_tag: ${{ needs.validate.outputs.frontend_image_tag }}
     secrets: inherit
 
+  # Vedi commento gemello in deploy-backend.
   deploy-authorizer:
     needs: [validate, migrate-db]
-    if: inputs.authorizer_version != '' && needs.migrate-db.result == 'success'
+    if: |
+      !cancelled() &&
+      needs.validate.result == 'success' &&
+      inputs.authorizer_version != '' &&
+      needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-authorizer.yml
     with:
       environment: ${{ inputs.environment }}

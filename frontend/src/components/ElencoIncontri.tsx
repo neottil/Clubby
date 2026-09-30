@@ -19,11 +19,14 @@ import Avviso from './Avviso';
 import CaricaAltri from './CaricaAltri';
 import TotaliFiltri from './TotaliFiltri';
 import IntestazioneOrdinabile from './IntestazioneOrdinabile';
+import ApriRicevuta from './ApriRicevuta';
+import { config } from '../config';
 import { euro, dataIso, oggiIso } from '../utils/formato';
 import Modal from './Modal';
 import { MarkdownEditor, MarkdownView } from './MarkdownEditor';
 import { ui } from '../styles/ui';
 import { messaggioErrore } from '../utils/errori';
+import { useSelezione } from '../hooks/useSelezione';
 
 
 
@@ -51,6 +54,16 @@ interface ElencoIncontriProps {
   istruttoreId?: string;
   /** Nessuna creazione né modifica, qualunque sia il ruolo di chi guarda. */
   solaLettura?: boolean;
+  /**
+   * Mostra lo stato di rendicontazione: lo switch per far comparire anche gli
+   * incontri già rendicontati e, per il solo admin, le caselle con cui
+   * sceglierli e il pulsante per marcarli.
+   *
+   * Attivo in Resoconti, non nella pagina Incontri: lì l'elenco è la vista di
+   * gestione di tutti gli incontri, e nasconderne una parte in base a un fatto
+   * che riguarda il compenso dell'istruttore sarebbe fuori posto.
+   */
+  rendicontazione?: boolean;
 }
 
 const emptyForm = { socio_id: '', data_incontro: '', attivita_id: '', istruttore_id: '', costo: '', note: '', note_markdown: false };
@@ -58,9 +71,21 @@ const emptyForm = { socio_id: '', data_incontro: '', attivita_id: '', istruttore
 
 export default function ElencoIncontri({
   titolo, ambito, mostraTotali = false, socioId, istruttoreId, solaLettura = false,
+  rendicontazione = false,
 }: ElencoIncontriProps) {
   const { token, user } = useAuth();
   const api = createApiClient(token);
+
+  // Chi rendiconta è l'admin: l'istruttore vede lo stato dei propri incontri ma
+  // non lo decide, altrimenti stabilirebbe da sé quanto gli spetta.
+  const puoRendicontare = rendicontazione && !!user?.isAdmin;
+  // Default opposti di proposito: l'admin apre Resoconti per sapere che cosa
+  // resta da rendicontare, quindi parte senza i già fatti; l'istruttore apre la
+  // stessa pagina per consultare il proprio lavoro, e nascondergli metà dello
+  // storico sarebbe incomprensibile.
+  const [mostraRendicontati, setMostraRendicontati] = useState(!user?.isAdmin);
+  const [rendicontando, setRendicontando] = useState(false);
+  const [esitoRendiconto, setEsitoRendiconto] = useState('');
 
   const [incontri, setIncontri] = useState<Incontro[]>([]);
   // Quanti incontri soddisfano i filtri in tutto, non quanti ne sono caricati:
@@ -118,6 +143,9 @@ export default function ElencoIncontri({
     attivita_id: attivitaFilter || undefined,
     da: dataCompleta(dataDa),
     a: dataCompleta(dataA),
+    // Il filtro si accende solo dove la rendicontazione è in gioco: altrove
+    // l'elenco deve restare quello di sempre.
+    solo_da_rendicontare: (rendicontazione && !mostraRendicontati ? '1' : undefined) as '1' | undefined,
     sort: sortKey,
     dir: sortDir,
     limit: DIMENSIONE_PAGINA,
@@ -179,7 +207,43 @@ export default function ElencoIncontri({
 
   // Ogni cambio di filtro o di ordinamento riparte dalla prima pagina: le
   // righe già caricate rispondevano a criteri diversi.
-  useEffect(() => { load(); }, [filtroCercato, attivitaFilter, dataDa, dataA, sortKey, sortDir, socioId, istruttoreId]);
+  useEffect(() => { load(); }, [filtroCercato, attivitaFilter, dataDa, dataA, sortKey, sortDir, socioId, istruttoreId, mostraRendicontati]);
+
+  // Righe che si possono scegliere: quelle già rendicontate hanno la casella
+  // spuntata e bloccata, e non devono finire né nel conteggio del pulsante né
+  // in ciò che sceglie la casella in testata.
+  const selezionabili = useMemo(
+    () => incontri.filter(i => !i.rendicontato_il).map(i => i.id),
+    [incontri],
+  );
+  // Al variare di questa chiave la selezione si azzera: sono i filtri, non le
+  // righe caricate — "Carica altri" non deve perdere ciò che si era scelto.
+  const chiaveSelezione = JSON.stringify([
+    filtroCercato, attivitaFilter, dataDa, dataA, socioId, istruttoreId, mostraRendicontati,
+  ]);
+  const selezione = useSelezione(selezionabili, chiaveSelezione);
+
+  const rendiconta = async () => {
+    setRendicontando(true);
+    setEsitoRendiconto('');
+    try {
+      const esito = await api.rendicontaIncontri(selezione.ids);
+      // Richiesti e rendicontati differiscono se un altro admin ha marcato le
+      // stesse righe nel frattempo: dirlo evita di far credere che siano state
+      // aggiornate tutte.
+      const gia = esito.richiesti - esito.rendicontati;
+      setEsitoRendiconto(
+        `${esito.rendicontati} ${esito.rendicontati === 1 ? 'incontro rendicontato' : 'incontri rendicontati'}` +
+        (gia > 0 ? ` (${gia} lo ${gia === 1 ? 'era' : 'erano'} già)` : '') + '.'
+      );
+      selezione.azzera();
+      await load();
+    } catch (e) {
+      setError(messaggioErrore(e));
+    } finally {
+      setRendicontando(false);
+    }
+  };
 
   const toggleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -209,8 +273,27 @@ export default function ElencoIncontri({
   const puoCreare = !solaLettura && (
     (ambito === undefined && !!user?.isAdmin) ||
     (ambito === 'istruttore' && !!user?.isIstruttore));
+  // Un incontro si chiude per DUE motivi indipendenti, e in entrambi i casi il
+  // backend rifiuta modifica ed eliminazione:
+  //
+  //   rendicontato   il club ha riconosciuto il compenso all'istruttore, e il
+  //                  conteggio su cui è stato pagato deve restare ricostruibile
+  //   documentato    l'incontro è finito in una ricevuta consegnata al socio,
+  //                  che deve continuare a riferire qualcosa di immutato
+  //
+  // Sono cose diverse: un incontro può essere l'uno senza l'altro. Fino alla
+  // spec 004 l'elenco conosceva solo il primo, quindi sugli incontri
+  // documentati mostrava pulsanti che il backend poi rifiutava.
+  const documentato = (i: Incontro) => !!i.documento_id;
+  // Nel Resoconto l'istruttore vede gli incontri che ha TENUTO, di altri soci:
+  // il backend non gli manda la ricevuta e la colonna non ha senso. Per l'admin
+  // la manda anche lì, ma la colonna resterebbe comunque fuori posto in una
+  // vista che parla del compenso dell'istruttore, non degli incassi.
+  const mostraRicevute = config.moduli.ricevute && ambito !== 'istruttore';
   const puoModificare = (i: Incontro) =>
     ambito !== 'socio' &&
+    !i.rendicontato_il &&
+    !documentato(i) &&
     (!!user?.isAdmin || (!!user?.isIstruttore && i.istruttore_id === user.sub));
 
   // La ricerca per nominativo ha senso solo dove i soci sono tanti: fra gli
@@ -348,6 +431,33 @@ export default function ElencoIncontri({
         )}
       </div>
 
+      {rendicontazione && (
+        <div style={styles.barraRendiconto}>
+          <label style={styles.checkboxLabel}>
+            <input
+              type='checkbox'
+              checked={mostraRendicontati}
+              onChange={e => setMostraRendicontati(e.target.checked)}
+            />
+            Mostra anche gli incontri già rendicontati
+          </label>
+
+          {puoRendicontare && (
+            <button
+              style={{ ...styles.btn, ...(selezione.quanti === 0 ? styles.btnSpento : {}) }}
+              onClick={rendiconta}
+              disabled={selezione.quanti === 0 || rendicontando}
+            >
+              {rendicontando ? 'Salvataggio...' : `Rendiconta (${selezione.quanti})`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {esitoRendiconto && (
+        <Avviso tipo='successo' messaggio={esitoRendiconto} onChiudi={() => setEsitoRendiconto('')} />
+      )}
+
       {showForm && (
         <div style={styles.formCard}>
           <h3 style={styles.formTitle}>{editId ? 'Modifica incontro' : 'Nuovo incontro'}</h3>
@@ -370,7 +480,7 @@ export default function ElencoIncontri({
               <p style={styles.hintCampo}>
                 {user?.isIstruttore
                   ? 'Non sei abilitato a nessuna attività: chiedi a un amministratore di assegnartene.'
-                  : 'Nessuna attività in listino: creane una dal pannello Admin.'}
+                  : 'Nessuna attività in listino: creane una dalla pagina Impostazioni.'}
               </p>
             )}
           </div>
@@ -448,16 +558,51 @@ export default function ElencoIncontri({
         <table style={{ ...styles.table, opacity: loading ? 0.55 : 1 }} aria-busy={loading}>
           <thead>
             <tr>
+              {puoRendicontare && (
+                <th style={{ ...styles.th, ...styles.thScelta }}>
+                  {/* `indeterminate` non è un attributo JSX: si imposta solo
+                      sull'elemento. È lo stato "alcune sì, altre no", senza il
+                      quale la casella direbbe "nessuna selezionata" mentre
+                      metà lo sono. */}
+                  <input
+                    type='checkbox'
+                    checked={selezione.tutte}
+                    ref={el => { if (el) el.indeterminate = selezione.parziale; }}
+                    onChange={selezione.invertiTutti}
+                    disabled={selezionabili.length === 0}
+                    aria-label='Seleziona tutti gli incontri caricati'
+                  />
+                </th>
+              )}
               {colonneOrdinabili.map(([key, label]) => (
                 <IntestazioneOrdinabile key={key} etichetta={label} direzione={direzione(key)} onOrdina={() => toggleSort(key)} />
               ))}
               <th style={styles.th}>Note</th>
+              {/* La ricevuta arriva dal backend solo a chi ne è intestatario:
+                  la colonna c'è quando almeno una riga potrebbe averla, cioè
+                  col modulo attivo e fuori dal Resoconto dell'istruttore. */}
+              {mostraRicevute && <th style={styles.th}>Ricevuta</th>}
               {puoCreare && <th style={styles.th}>Azioni</th>}
             </tr>
           </thead>
           <tbody>
             {enriched.map(i => (
               <tr key={i.id} style={styles.tr}>
+                {puoRendicontare && (
+                  <td style={{ ...styles.td, ...styles.tdScelta }}>
+                    {/* Un incontro già rendicontato resta spuntato e bloccato:
+                        la rendicontazione non si annulla, quindi togliere la
+                        spunta non vorrebbe dire niente. */}
+                    <input
+                      type='checkbox'
+                      checked={!!i.rendicontato_il || selezione.contiene(i.id)}
+                      disabled={!!i.rendicontato_il}
+                      onChange={() => selezione.inverti(i.id)}
+                      title={i.rendicontato_il ? 'Già rendicontato: non si può annullare' : undefined}
+                      aria-label={`Seleziona l'incontro di ${i.socioNome} del ${dataIso(i.data_incontro)}`}
+                    />
+                  </td>
+                )}
                 <td style={styles.td}>{i.socioNome}</td>
                 <td style={styles.td}>{dataIso(i.data_incontro)}</td>
                 <td style={styles.td}>{i.attivita}</td>
@@ -468,6 +613,16 @@ export default function ElencoIncontri({
                     ? <button style={styles.btnSmall} onClick={() => setNotaAperta(i)}>Visualizza</button>
                     : '—'}
                 </td>
+                {mostraRicevute && (
+                  <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                    <ApriRicevuta
+                      api={api}
+                      documentoId={i.documento_id ?? null}
+                      anno={i.documento_anno ?? null}
+                      numero={i.documento_numero ?? null}
+                    />
+                  </td>
+                )}
                 {puoCreare && (
                   <td style={styles.td}>
                     {puoModificare(i) ? (
@@ -475,6 +630,12 @@ export default function ElencoIncontri({
                         <button style={styles.btnSmall} onClick={() => openEdit(i)}>Modifica</button>
                         <button style={{ ...styles.btnSmall, ...styles.btnDanger }} onClick={() => remove(i.id)}>Elimina</button>
                       </>
+                    ) : documentato(i) ? (
+                      // Due stati distinti e non un "Chiuso" unico: dicono due
+                      // cose diverse a chi chiede perché non può correggere.
+                      <span style={styles.chiuso} title='Compreso in una ricevuta emessa: non più modificabile'>In ricevuta</span>
+                    ) : i.rendicontato_il ? (
+                      <span style={styles.chiuso} title='Rendicontato: non più modificabile'>Rendicontato</span>
                     ) : '—'}
                   </td>
                 )}
@@ -527,6 +688,22 @@ const styles: Record<string, React.CSSProperties> = {
   hintCampo: { fontSize: 13, color: '#92400e', margin: '6px 0 0' },
   checkboxLabel: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#555', cursor: 'pointer', marginBottom: 4 },
   notaTesto: { whiteSpace: 'pre-wrap', fontSize: 14, color: '#333', lineHeight: 1.5 },
+  // Riga fra i filtri e la tabella: a sinistra lo switch, a destra l'azione.
+  // flexWrap perché su schermo stretto le due cose non ci stanno affiancate.
+  barraRendiconto: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12, flexWrap: 'wrap', marginBottom: 12,
+  },
+  // Pulsante senza nulla di selezionato: resta leggibile ma non invita a
+  // premerlo, e comunque è disabilitato.
+  btnSpento: { background: '#e5e7eb', color: '#9ca3af', cursor: 'not-allowed' },
+  // Colonna delle caselle: larghezza fissa, così non si allarga al crescere
+  // del contenuto delle altre e resta allineata fra intestazione e righe.
+  thScelta: { width: 44, textAlign: 'center' },
+  tdScelta: { width: 44, textAlign: 'center' },
+  // Al posto dei bottoni su una riga chiusa: dice perché non ci sono, invece
+  // di lasciare un trattino che sembrerebbe una mancanza di permessi.
+  chiuso: { fontSize: 12, color: '#6b7280', fontStyle: 'italic' },
   readOnlyField: { width: '100%', padding: '8px 12px', borderRadius: 6, background: '#f1f5f9', color: '#555', fontSize: 14, boxSizing: 'border-box' },
   // Contenitore dell'ActivitySelect di filtro: il bordo/padding sono ora del
   // suo input interno, qui resta solo la larghezza nella riga dei filtri.

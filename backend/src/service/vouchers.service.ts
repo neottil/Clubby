@@ -16,9 +16,9 @@ export interface Voucher {
 
 /**
  * Natura di un movimento (vedi la colonna in schema.sql):
- *   ricarica   credito acquistato dal socio (positivo), fatturato
+ *   ricarica   credito acquistato dal socio (positivo), registrabile
  *   addebito   consumo del credito (negativo): l'incontro che lo ha generato,
- *              se c'è, sta in incontro_id. Non viene fatturato, perché è già
+ *              se c'è, sta in incontro_id. Non è registrabile, perché è già
  *              coperto dalla ricarica che lo paga.
  */
 export type TipoMovimento = 'ricarica' | 'addebito';
@@ -34,11 +34,27 @@ export interface MovimentoVoucher {
   /**
    * Solo per le ricariche con valore extra (vedi util/ricariche.ts): quanto ha
    * pagato davvero il socio, quando è meno di quanto gli è stato accreditato.
-   * NULL quando le due cose coincidono. La Fatturazione conta questo.
+   * NULL quando le due cose coincidono. Le ricevute contano questo.
    */
   importo_pagato: number | null;
   descrizione: string | null;
   created_at: string;
+  /**
+   * La ricevuta che comprende questa ricarica, se ne è stata emessa una.
+   *
+   * Null su addebiti e rettifiche, che non sono voci registrabili, e sulle
+   * ricariche marcate come emesse prima della spec 003, quando l'emissione
+   * non produceva ancora un documento. All'inizio è quindi null quasi ovunque:
+   * il frontend mostra il codice solo dove c'è.
+   */
+  documento_id: string | null;
+  /**
+   * Anno e numero della ricevuta: insieme sono il codice mostrato in tabella e
+   * il nome con cui il PDF viene scaricato. Null esattamente quando lo è
+   * `documento_id`.
+   */
+  documento_anno: number | null;
+  documento_numero: number | null;
 }
 
 export interface CreateVoucherInput {
@@ -46,7 +62,7 @@ export interface CreateVoucherInput {
   /**
    * Credito importato da un voucher già in uso prima di Clubby, per la sola
    * configurazione iniziale. Omesso = 0. Non è una ricarica e non viene
-   * fatturato.
+   * registrato.
    */
   saldo_iniziale?: number;
   /** Credito acquistato attivando il voucher: registrato come prima ricarica. */
@@ -292,10 +308,22 @@ export async function listMovimenti(
     // movimenti dello stesso giorno (tipico: ricarica e addebito) avrebbero
     // altrimenti un ordine non deterministico — che con la paginazione
     // significa righe duplicate o mancanti fra una pagina e l'altra.
-    `SELECT *, COUNT(*) OVER() AS total_count
-     FROM movimento_voucher
-     WHERE voucher_id = :voucherId
-     ORDER BY data_movimento DESC, created_at DESC
+    // La JOIN con documento_emesso_voce porta la ricevuta della riga, quando
+    // c'è: il legame esiste già dalla 002, e l'indice unico (tipo,
+    // riferimento_id) lo rende una ricerca puntuale. Nessuna colonna nuova su
+    // movimento_voucher, quindi nessun dato duplicato da tenere allineato.
+    `SELECT m.*, d.documento_id, doc.anno AS documento_anno, doc.numero AS documento_numero,
+            COUNT(*) OVER() AS total_count
+     FROM movimento_voucher m
+     LEFT JOIN documento_emesso_voce d
+       ON d.tipo = 'ricarica' AND d.riferimento_id = m.id
+     -- Anno e numero: insieme sono il codice della ricevuta mostrato in
+     -- tabella. LEFT JOIN su chiave primaria, e sulle righe senza documento
+     -- (addebiti, rettifiche, ricariche marcate emesse prima della 003) non
+     -- aggiunge niente.
+     LEFT JOIN documento doc ON doc.id = d.documento_id
+     WHERE m.voucher_id = :voucherId
+     ORDER BY m.data_movimento DESC, m.created_at DESC
      LIMIT :limit OFFSET :offset`,
     { voucherId, limit, offset }
   );

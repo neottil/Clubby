@@ -73,7 +73,7 @@ AUTH_INTERNAL_URL=$AUTH_BASE_URL
 # l'applicazione senza un modulo basta mettere "false" qui e nella
 # corrispondente VITE_ di frontend/.env.local.
 ENABLE_MODULE_TESSERAMENTO=true
-ENABLE_MODULE_FATTURAZIONE=true
+ENABLE_MODULE_RICEVUTE=true
 
 # Come si registra una ricarica del voucher: free (importo accreditato tale e
 # quale), percentage (importo + una percentuale configurata dall'admin), map
@@ -126,7 +126,7 @@ VITE_TENANT_NAME=$TENANT_NAME
 # altrimenti l'applicazione mostra pagine che il backend rifiuta (o le nasconde
 # pur essendo attive).
 VITE_ENABLE_MODULE_TESSERAMENTO=true
-VITE_ENABLE_MODULE_FATTURAZIONE=true
+VITE_ENABLE_MODULE_RICEVUTE=true
 
 # Deve corrispondere a RECHARGE_MODE di backend/.env.
 VITE_RECHARGE_MODE=free

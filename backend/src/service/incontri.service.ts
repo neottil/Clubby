@@ -4,6 +4,7 @@ import { condizioniRicerca } from '../util/ricerca.js';
 import { NotFoundError, BadRequestError } from '../middleware/auth.js';
 import { getSocioById } from './soci.service.js';
 import { getAttivitaById } from './attivita.service.js';
+import { voceGiaEmessa } from './documenti/voci.service.js';
 import {
   getVoucherBySocioId,
   createMovimento,
@@ -34,6 +35,26 @@ export interface Incontro {
   costo: number;
   note: string | null;
   note_markdown: boolean;
+  /**
+   * Quando l'incontro è stato rendicontato all'istruttore; null se deve
+   * ancora esserlo. Non si annulla, e un incontro rendicontato non si può
+   * eliminare: il club ha già riconosciuto un compenso su quel numero.
+   */
+  rendicontato_il: string | null;
+  /**
+   * La ricevuta che comprende questo incontro, quando ce n'è una.
+   *
+   * Presenti solo se il modulo ricevute è attivo **e** chi chiama è
+   * l'intestatario (l'admin, o il socio dell'incontro): un istruttore che
+   * guarda gli incontri che ha tenuto non deve leggere il codice di un
+   * documento intestato a qualcun altro. Vedi `conDocumento`.
+   *
+   * Un incontro coperto da voucher non è documentato singolarmente: la
+   * ricevuta sta sulla ricarica che lo paga, quindi qui resta null.
+   */
+  documento_id?: string | null;
+  documento_anno?: number | null;
+  documento_numero?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,11 +113,44 @@ export interface ListIncontriOptions {
   /** Estremi inclusi, "YYYY-MM-DD". */
   da?: string;
   a?: string;
+  /**
+   * Restringe l'elenco agli incontri ANCORA da rendicontare.
+   *
+   * Non è il default, di proposito: la rendicontazione riguarda il compenso
+   * dell'istruttore e non dice niente al socio, che nella propria pagina
+   * Incontri deve continuare a vedere tutto il proprio storico. Lo stesso vale
+   * per la vista di gestione dell'admin. Il filtro è quindi acceso solo da chi
+   * sta effettivamente rendicontando, cioè da Resoconti.
+   */
+  soloDaRendicontare?: boolean;
+  /**
+   * Porta anche la ricevuta di ogni incontro (id, anno, numero).
+   *
+   * Lo decide il chiamante, non questo servizio, perché dipende da CHI sta
+   * guardando: l'admin e il socio dell'incontro sì, l'istruttore che ha tenuto
+   * l'incontro di un altro no — quel documento non è suo. Spento anche a
+   * modulo ricevute spento, dove i campi non devono comparire affatto.
+   */
+  conDocumento?: boolean;
   sort?: string;
   dir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
 }
+
+/**
+ * Le due giunture che portano la ricevuta di una riga.
+ *
+ * Sicure dentro una query paginata **grazie all'indice unico**
+ * `idx_documento_emesso_voce_riferimento` su (tipo, riferimento_id): al più una
+ * riga per incontro, quindi la giuntura non moltiplica le righe. Se
+ * quell'indice sparisse, `COUNT(*) OVER()` e `SUM(costo) OVER()` qui sotto
+ * comincerebbero a contare doppio senza dare errore.
+ */
+const COLONNE_DOCUMENTO = `, d.documento_id, doc.anno AS documento_anno, doc.numero AS documento_numero`;
+const JOIN_DOCUMENTO = `
+     LEFT JOIN documento_emesso_voce d ON d.tipo = 'incontro' AND d.riferimento_id = i.id
+     LEFT JOIN documento doc ON doc.id = d.documento_id`;
 
 /**
  * Colonne su cui è permesso ordinare, mappate sull'SQL corrispondente.
@@ -168,6 +222,9 @@ export async function listIncontri(options: ListIncontriOptions = {}): Promise<P
     where.push('i.istruttore_id = :istruttoreId');
     params.istruttoreId = options.istruttoreId;
   }
+  if (options.soloDaRendicontare) {
+    where.push('i.rendicontato_il IS NULL');
+  }
   // CAST(... AS DATE) e non "::date": il convertitore di parametri con nome
   // (db/client.ts) sostituisce ogni ":parola" e leggerebbe "::date" come un
   // secondo parametro chiamato "date".
@@ -198,12 +255,12 @@ export async function listIncontri(options: ListIncontriOptions = {}): Promise<P
   // stessa query non esiste il rischio che totali e righe rispondano a filtri
   // leggermente diversi.
   const result = await query(
-    `SELECT i.*, s.nome, s.cognome, a.nome AS attivita,
+    `SELECT i.*, s.nome, s.cognome, a.nome AS attivita${options.conDocumento ? COLONNE_DOCUMENTO : ''},
             COUNT(*) OVER() AS total_count,
             SUM(i.costo) OVER() AS totale_costo
      FROM incontro i
      JOIN socio s ON s.id = i.socio_id
-     JOIN attivita a ON a.id = i.attivita_id
+     JOIN attivita a ON a.id = i.attivita_id${options.conDocumento ? JOIN_DOCUMENTO : ''}
      ${whereSql}
      ORDER BY ${orderBy}
      LIMIT :limit OFFSET :offset`,
@@ -223,11 +280,21 @@ export async function listIncontri(options: ListIncontriOptions = {}): Promise<P
   return { rows, total, totaleCosto };
 }
 
-export async function getIncontroById(id: string, q: QueryFn = query): Promise<Incontro> {
+/**
+ * `conDocumento` è spento di default perché questa funzione la usano soprattutto
+ * i controlli interni (modifica, eliminazione, creazione del movimento), a cui
+ * la ricevuta non serve. La accende solo la lettura di un incontro fatta da chi
+ * ha diritto di vederne il documento.
+ */
+export async function getIncontroById(
+  id: string,
+  q: QueryFn = query,
+  conDocumento = false
+): Promise<Incontro> {
   const result = await q(
-    `SELECT i.*, a.nome AS attivita
+    `SELECT i.*, a.nome AS attivita${conDocumento ? COLONNE_DOCUMENTO : ''}
      FROM incontro i
-     JOIN attivita a ON a.id = i.attivita_id
+     JOIN attivita a ON a.id = i.attivita_id${conDocumento ? JOIN_DOCUMENTO : ''}
      WHERE i.id = :id`,
     { id }
   );
@@ -306,7 +373,28 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
  */
 export async function updateIncontro(id: string, input: UpdateIncontroInput): Promise<Incontro> {
   return withTransaction(async (q) => {
-    await getIncontroById(id, q);
+    const attuale = await getIncontroById(id, q);
+
+    // Stesso motivo per cui non si può eliminare, e vale anche per le note o
+    // la data: un incontro chiuso è la riga su cui si è pagato o registrato, e
+    // se può ancora cambiare quel numero smette di essere ricostruibile. Il
+    // controllo è sull'intera modifica e non sul solo costo di proposito —
+    // spostare la data di un incontro lo farebbe uscire dal periodo in cui è
+    // stato conteggiato, che è lo stesso danno per un'altra via.
+    if (attuale.rendicontato_il) {
+      throw new BadRequestError(
+        'Questo incontro è già stato rendicontato all\'istruttore e non può più essere modificato. ' +
+        'Per correggere un errore, registra un incontro di rettifica.'
+      );
+    }
+    // `q` e non la connessione globale: siamo dentro una transazione, e la
+    // lettura deve vedere lo stesso istante delle scritture che seguono.
+    if (await voceGiaEmessa('incontro', id, q)) {
+      throw new BadRequestError(
+        'Per questo incontro è già stata emessa una ricevuta e non può più essere modificato. ' +
+        'Per correggere un errore, registra un incontro di rettifica.'
+      );
+    }
 
     const setClauses: string[] = [];
     const params: Record<string, unknown> = { id };
@@ -385,6 +473,48 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
  * movimento_voucher.incontro_id lo garantisce nell'ambito della stessa DELETE.
  */
 export async function deleteIncontro(id: string): Promise<void> {
-  await getIncontroById(id);
+  const incontro = await getIncontroById(id);
+  // Un incontro rendicontato è già entrato in un conteggio su cui il club ha
+  // riconosciuto un compenso all'istruttore: cancellarlo renderebbe quel
+  // conteggio non più ricostruibile. Il messaggio dice il perché, perché è
+  // quello che il frontend mostra all'utente.
+  if (incontro.rendicontato_il) {
+    throw new BadRequestError(
+      'Questo incontro è già stato rendicontato all\'istruttore e non può essere eliminato. ' +
+      'Se è stato registrato per errore, correggine i dati invece di cancellarlo.'
+    );
+  }
+  // Un incontro non coperto da voucher è una voce registrabile: se è già
+  // finito in un documento emesso, cancellarlo lascerebbe quel documento a
+  // riferire qualcosa che non esiste più.
+  if (await voceGiaEmessa('incontro', id)) {
+    throw new BadRequestError(
+      'Per questo incontro è già stata emessa una ricevuta e non può essere eliminato. ' +
+      'Se è stato registrato per errore, correggine i dati invece di cancellarlo.'
+    );
+  }
   await query(`DELETE FROM incontro WHERE id = :id`, { id });
+}
+
+/**
+ * Segna come rendicontati gli incontri indicati, e risponde con quanti lo
+ * sono diventati DAVVERO in questa chiamata.
+ *
+ * `WHERE rendicontato_il IS NULL` non è una precauzione teorica: due admin che
+ * lavorano sullo stesso periodo selezionano quasi certamente righe in comune, e
+ * senza quella condizione il secondo sovrascriverebbe in silenzio la data del
+ * primo. Così invece le righe già rendicontate restano com'erano, e la
+ * differenza fra richiesti e aggiornati è ciò che l'interfaccia riporta.
+ */
+export async function rendicontaIncontri(ids: string[]): Promise<{ richiesti: number; rendicontati: number }> {
+  if (ids.length === 0) return { richiesti: 0, rendicontati: 0 };
+
+  const result = await query(
+    `UPDATE incontro
+        SET rendicontato_il = NOW(), updated_at = NOW()
+      WHERE id = ANY(:ids) AND rendicontato_il IS NULL
+      RETURNING id`,
+    { ids }
+  );
+  return { richiesti: ids.length, rendicontati: result.rows.length };
 }

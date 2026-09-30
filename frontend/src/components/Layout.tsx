@@ -1,37 +1,77 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { theme } from '../theme';
 import { config } from '../config';
+import { createApiClient } from '../api/client';
 import { MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
+/** Voce di menu: `bloccata` la spegne e spiega il perché dietro un "?". */
+interface VoceMenu {
+  to: string;
+  label: string;
+  bloccata?: string;
+}
+
+const MOTIVO_SENZA_INTESTAZIONE =
+  'Configura l\'intestazione delle ricevute nel menu Impostazioni (/impostazioni), card "Ricevute".';
+
 export default function Layout({ children }: LayoutProps) {
-  const { user, logout, socioCollegato } = useAuth();
+  const { user, logout, socioCollegato, token } = useAuth();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [spiegazioneAperta, setSpiegazioneAperta] = useState('');
+
+  // Il modulo Ricevute acceso non basta: senza intestazione la pagina
+  // produrrebbe documenti monchi e irreversibili. null = non ancora saputo,
+  // e in quel caso la voce resta attiva — spegnerla e riaccenderla a risposta
+  // arrivata sarebbe un lampeggio a ogni apertura del menu.
+  const serveIntestazione = !!user?.isAdmin && config.moduli.ricevute;
+  const [intestazioneConfigurata, setIntestazioneConfigurata] = useState<boolean | null>(null);
+
+  // Si rilegge a ogni apertura del menu, non una volta sola: l'admin che la
+  // configura in Impostazioni deve trovare la voce attiva subito dopo, senza
+  // ricaricare la pagina.
+  useEffect(() => {
+    if (!serveIntestazione || !menuOpen || !token) return;
+    let annullato = false;
+    createApiClient(token).getImpostazioni()
+      .then(i => { if (!annullato) setIntestazioneConfigurata(!!i.ricevuta_intestazione?.trim()); })
+      // Un errore qui non deve nascondere la voce: al massimo resta attiva e
+      // sarà la pagina a dire cosa non va.
+      .catch(() => { if (!annullato) setIntestazioneConfigurata(null); });
+    return () => { annullato = true; };
+  }, [serveIntestazione, menuOpen, token]);
+
+  const ricevuteBloccate = serveIntestazione && intestazioneConfigurata === false;
 
   // Voucher è la home (vedi App.tsx): primo nel menu.
   // L'istruttore ha bisogno dell'elenco soci (ne vede il solo nominativo) e
   // del proprio resoconto; l'amministrazione resta agli admin.
-  const navLinks = [
+  const navLinks: VoceMenu[] = [
     { to: '/voucher', label: 'Voucher' },
     ...(user?.isAdmin || user?.isIstruttore ? [{ to: '/soci', label: 'Soci' }] : []),
     { to: '/incontri', label: 'Incontri' },
     // Resoconto è la vista del singolo istruttore: un admin consulta gli
     // stessi dati da Resoconti, scegliendo sé stesso.
     ...(user?.isIstruttore && !user?.isAdmin ? [{ to: '/resoconto', label: 'Resoconto' }] : []),
+    // Tesseramenti è per tutti col modulo attivo: l'admin ci gestisce il club,
+    // il socio ci trova la propria scadenza e i propri rinnovi. Sta fuori dal
+    // blocco riservato all'admin proprio per questo.
+    ...(config.moduli.tesseramento ? [{ to: '/tesseramenti', label: 'Tesseramenti' }] : []),
     ...(user?.isAdmin ? [
       { to: '/resoconti', label: 'Resoconti' },
       // Moduli opzionali del club: senza, le rotte non esistono (vedi App.tsx).
-      ...(config.moduli.tesseramento ? [{ to: '/tesseramenti', label: 'Tesseramenti' }] : []),
-      ...(config.moduli.fatturazione ? [{ to: '/fatturazione', label: 'Fatturazione' }] : []),
+      ...(config.moduli.ricevute
+        ? [{ to: '/ricevute', label: 'Ricevute', bloccata: ricevuteBloccate ? MOTIVO_SENZA_INTESTAZIONE : undefined }]
+        : []),
     ] : []),
     { to: '/info',    label: 'Info' },
-    ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin' }] : []),
+    ...(user?.isAdmin ? [{ to: '/impostazioni', label: 'Impostazioni' }] : []),
   ];
 
   return (
@@ -77,7 +117,33 @@ export default function Layout({ children }: LayoutProps) {
 
         {menuOpen && (
           <div className="navbar-menu" style={styles.menu}>
-            {navLinks.map(link => (
+            {navLinks.map(link => (link.bloccata ? (
+              // Voce spenta: resta visibile perché sparire non spiegherebbe
+              // niente, e il "?" dice cosa manca. Un <div> e non un <Link>
+              // disabilitato: un'ancora disabilitata non esiste in HTML, e
+              // togliere l'href lasciando il resto confonde chi naviga da
+              // tastiera.
+              <div key={link.to} style={styles.menuVoceBloccata}>
+                <div style={styles.menuRigaBloccata}>
+                  <span style={styles.menuLabelBloccata}>{link.label}</span>
+                  <button
+                    style={styles.menuAiutoBtn}
+                    onClick={() => setSpiegazioneAperta(a => (a === link.to ? '' : link.to))}
+                    aria-expanded={spiegazioneAperta === link.to}
+                    aria-controls={`spiegazione-${link.to.slice(1)}`}
+                    aria-label={`Perché ${link.label} non è disponibile`}
+                    title={link.bloccata}
+                  >
+                    ?
+                  </button>
+                </div>
+                {spiegazioneAperta === link.to && (
+                  <p id={`spiegazione-${link.to.slice(1)}`} style={styles.menuSpiegazione}>
+                    {link.bloccata}
+                  </p>
+                )}
+              </div>
+            ) : (
               <Link
                 key={link.to}
                 to={link.to}
@@ -89,7 +155,7 @@ export default function Layout({ children }: LayoutProps) {
               >
                 {link.label}
               </Link>
-            ))}
+            )))}
             <div style={styles.menuDivider} />
             <span style={styles.menuEmail}>{user?.email}</span>
             <button
@@ -200,6 +266,32 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
   },
   linkActive: { background: theme.primary, color: theme.primaryText },
+  // Voce spenta: stessa metrica di menuLink, così l'elenco non si scompone.
+  menuVoceBloccata: { display: 'flex', flexDirection: 'column' },
+  menuRigaBloccata: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '12px 14px', minHeight: 44,
+  },
+  menuLabelBloccata: {
+    color: theme.navText, opacity: 0.45, fontSize: 15, fontWeight: 500, cursor: 'not-allowed',
+  },
+  menuAiutoBtn: {
+    width: 22, height: 22, flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'transparent', color: theme.navText,
+    border: `1px solid ${theme.navText}`, borderRadius: '50%',
+    fontSize: 13, lineHeight: 1, cursor: 'pointer', padding: 0,
+    fontFamily: 'inherit', fontWeight: 700, opacity: 0.8,
+  },
+  menuSpiegazione: {
+    margin: '0 14px 12px',
+    padding: '10px 12px',
+    background: 'rgba(255,255,255,0.10)',
+    borderRadius: 6,
+    color: theme.navText,
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
   menuDivider: {
     height: 1,
     background: 'rgba(255,255,255,0.15)',

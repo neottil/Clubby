@@ -24,7 +24,7 @@ import { handler as attivitaHandler } from './handlers/attivita.js';
 import { handler as istruttoriHandler } from './handlers/istruttori.js';
 import { handler as vouchersHandler } from './handlers/vouchers.js';
 import { handler as tesseramentiHandler } from './handlers/tesseramenti.js';
-import { handler as fatturazioneHandler } from './handlers/fatturazione.js';
+import { handler as documentiHandler } from './handlers/documenti.js';
 import { handler as impostazioniHandler } from './handlers/impostazioni.js';
 import { handler as adminHandler } from './handlers/admin.js';
 import { handler as ricaricheHandler } from './handlers/ricariche.js';
@@ -71,7 +71,13 @@ const ROUTES: Array<{
   { pattern: /^\/api\/ricarica-tagli$/,              handler: ricaricheHandler, param: null },
   { pattern: /^\/api\/tesseramenti\/([^/]+)$/,       handler: tesseramentiHandler, param: 'id', modulo: 'tesseramento' },
   { pattern: /^\/api\/tesseramenti$/,                handler: tesseramentiHandler, param: null, modulo: 'tesseramento' },
-  { pattern: /^\/api\/fatturazione$/,                handler: fatturazioneHandler, param: null, modulo: 'fatturazione' },
+  // L'ordine conta: "voci" e "anteprima" devono precedere il ramo con l'id, o
+  // il pattern generico le tratterebbe come identificativi di documento. È lo
+  // stesso inciampo già risolto con /api/incontri/rendiconta.
+  { pattern: /^\/api\/documenti\/voci$/,             handler: documentiHandler, param: null, modulo: 'ricevute' },
+  { pattern: /^\/api\/documenti\/anteprima$/,        handler: documentiHandler, param: null, modulo: 'ricevute' },
+  { pattern: /^\/api\/documenti\/([^/]+)$/,          handler: documentiHandler, param: 'id',  modulo: 'ricevute' },
+  { pattern: /^\/api\/documenti$/,                    handler: documentiHandler, param: null, modulo: 'ricevute' },
   { pattern: /^\/api\/impostazioni$/,                handler: impostazioniHandler, param: null },
   { pattern: /^\/api\/admin\/associa-viewer\/([^/]+)$/, handler: adminHandler,   param: 'socioId' },
   { pattern: /^\/api\/admin/,                          handler: adminHandler,   param: null },
@@ -190,13 +196,23 @@ const server = http.createServer(async (req, res) => {
   // Esegui handler
   try {
     const event = buildEvent(req, body, matched.params, claims);
-    const result = await matched.handler(event) as { statusCode: number; headers?: Record<string, string>; body?: string };
+    const result = await matched.handler(event) as {
+      statusCode: number;
+      headers?: Record<string, string>;
+      body?: string;
+      isBase64Encoded?: boolean;
+    };
     res.writeHead(result.statusCode ?? 200, {
       'Content-Type': 'application/json',
       ...CORS_HEADERS,
       ...result.headers,
     });
-    res.end(result.body ?? '');
+    // isBase64Encoded: il corpo è binario (i PDF delle ricevute). Senza la
+    // decodifica, res.end() scriverebbe la stringa base64 in UTF-8 e il file
+    // arriverebbe illeggibile.
+    res.end(result.isBase64Encoded && result.body
+      ? Buffer.from(result.body, 'base64')
+      : (result.body ?? ''));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Errore interno';
     console.error('[server] Unhandled error:', err);
@@ -212,7 +228,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[server] CORS origin: ${CORS_ORIGIN}`);
   // Un modulo spento fa rispondere 404 alle sue route: senza questa riga, la
   // causa sarebbe indistinguibile da un errore di routing.
-  const moduli = (['tesseramento', 'fatturazione'] as const)
+  const moduli = (['tesseramento', 'ricevute'] as const)
     .map(m => `${m}=${moduloAttivo(m) ? 'attivo' : 'spento'}`).join(', ');
   console.log(`[server] Moduli opzionali: ${moduli}`);
   console.log(`[server] Modalità di ricarica: ${modalitaRicarica()}`);

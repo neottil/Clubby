@@ -1,11 +1,11 @@
 meta {
-  name: Fatturazione
+  name: Voci da documentare
   type: http
   seq: 1
 }
 
 get {
-  url: {{base_url}}/api/fatturazione?da=2026-01-01&a=2026-12-31&limit=25&offset=0
+  url: {{base_url}}/api/documenti/voci?da=2026-01-01&a=2026-12-31&limit=25&offset=0
   body: none
   auth: bearer
 }
@@ -16,6 +16,7 @@ params:query {
   limit: 25
   offset: 0
   ~socio_id: {{socio_id}}
+  ~includi_emesse: 1
 }
 
 auth:bearer {
@@ -23,7 +24,7 @@ auth:bearer {
 }
 
 docs {
-  Solo admin. Voci fatturate ai soci, dalla più recente, paginate:
+  Solo admin. Voci incassate dai soci, dalla più recente, paginate:
     { data, total, totale_importo, limit, offset }
 
   Voci (campo tipo):
@@ -36,6 +37,10 @@ docs {
 
   Filtri: socio_id, da/a (estremi inclusi, YYYY-MM-DD). total e totale_importo
   valgono per tutte le voci filtrate, non per la sola pagina.
+
+  Per default torna solo ciò che resta da documentare. Con includi_emesse=1
+  (valore esatto) tornano anche le voci già comprese in una ricevuta, con
+  emessa_il e documento_id valorizzati.
 
   Ordinamento: prima i tesseramenti, poi le altre voci; dentro ogni gruppo
   dalla data più recente.

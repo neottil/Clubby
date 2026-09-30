@@ -13,7 +13,23 @@ export interface Impostazioni {
    * RECHARGE_MODE vale "percentage" (vedi util/ricariche.ts). 0 = nessun extra.
    */
   percentuale_ricarica: number;
+  /**
+   * Testo multiriga stampato in cima alle ricevute: denominazione, indirizzo,
+   * codice fiscale, numero di registro.
+   *
+   * Sta qui e non in un file del repository perché cambia senza un rilascio —
+   * un trasloco o un numero di registro nuovo si correggono dalla pagina
+   * Impostazioni. Il **logo** invece arriva da `branding/` nell'immagine: è un
+   * file versionato, e una seconda copia nel database finirebbe per divergere
+   * da quella mostrata in testa a ogni pagina.
+   */
+  ricevuta_intestazione: string;
+  /** Piè di pagina delle ricevute: tipicamente la clausola sul bollo. */
+  ricevuta_pie_pagina: string;
 }
+
+/** Quanto può essere lungo un testo libero delle ricevute. */
+const MAX_TESTO = 2000;
 
 export async function leggiImpostazioni(): Promise<Impostazioni> {
   const result = await query(`SELECT chiave, valore FROM impostazione`, {});
@@ -21,6 +37,8 @@ export async function leggiImpostazioni(): Promise<Impostazioni> {
   return {
     quota_tesseramento: Number(valori.get('quota_tesseramento') ?? 0),
     percentuale_ricarica: Number(valori.get('percentuale_ricarica') ?? 0),
+    ricevuta_intestazione: valori.get('ricevuta_intestazione') ?? '',
+    ricevuta_pie_pagina: valori.get('ricevuta_pie_pagina') ?? '',
   };
 }
 
@@ -48,6 +66,25 @@ export async function aggiornaImpostazioni(input: Partial<Impostazioni>): Promis
       `INSERT INTO impostazione (chiave, valore) VALUES ('percentuale_ricarica', :valore)
        ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore, updated_at = NOW()`,
       { valore: String(percentuale) }
+    );
+  }
+
+  // I due testi delle ricevute: stesso schema delle chiavi numeriche, ma
+  // l'unico vincolo è la lunghezza. Il contenuto lo decide il club, e non c'è
+  // niente da validare in una denominazione o in un riferimento di legge.
+  for (const chiave of ['ricevuta_intestazione', 'ricevuta_pie_pagina'] as const) {
+    const valore = input[chiave];
+    if (valore === undefined) continue;
+    if (typeof valore !== 'string') {
+      throw new BadRequestError(`${chiave} deve essere un testo`);
+    }
+    if (valore.length > MAX_TESTO) {
+      throw new BadRequestError(`${chiave} non può superare ${MAX_TESTO} caratteri`);
+    }
+    await query(
+      `INSERT INTO impostazione (chiave, valore) VALUES (:chiave, :valore)
+       ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore, updated_at = NOW()`,
+      { chiave, valore }
     );
   }
 

@@ -1,5 +1,5 @@
 /**
- * Paginazione degli elenchi (incontri, movimenti, fatturazione): lettura dei
+ * Paginazione degli elenchi (incontri, movimenti, ricevute): lettura dei
  * parametri dalla query string e limiti comuni.
  */
 

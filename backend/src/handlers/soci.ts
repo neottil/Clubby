@@ -41,7 +41,7 @@ export const handler = async (
       const qs = event.queryStringParameters;
 
       // Con limit/offset: elenco a pagine, filtrato e ordinato dal database,
-      // nella forma di incontri e fatturazione. Senza: l'elenco completo, che
+      // nella forma di incontri e ricevute. Senza: l'elenco completo, che
       // serve ai menu di scelta dei soci.
       if (paginazioneRichiesta(qs)) {
         const limit  = intParam(qs?.limit);

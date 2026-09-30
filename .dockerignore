@@ -10,6 +10,10 @@ backend/src
 # un Job k8s che gira su questa stessa immagine (vedi backend/Dockerfile).
 !backend/src/db/migrations
 backend/k8s
+# Copia generata da scripts/copia-branding.mjs per lo sviluppo: nell'immagine
+# la cartella arriva dalla sorgente in radice (COPY branding /app/branding),
+# quindi qui sarebbe solo un duplicato nel contesto di build.
+backend/branding
 .git
 .github
 k8s

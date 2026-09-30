@@ -1,8 +1,8 @@
 /**
  * Tesseramento al club: rinnovi con la loro scadenza e la quota pagata.
  *
- * La quota non passa dal voucher: è un importo fatturato a parte, e compare
- * solo in Fatturazione (vedi fatturazione.service.ts).
+ * La quota non passa dal voucher: è un importo incassato a parte, e compare
+ * solo fra le voci registrabili (vedi documenti/voci.service.ts).
  */
 
 import { query, withTransaction } from '../db/client.js';
@@ -20,6 +20,13 @@ export interface Tesseramento {
   scadenza: string;
   importo: number;
   created_at: string;
+  /**
+   * La ricevuta che comprende questa quota, quando ce n'è una. Presenti solo
+   * nello storico di un socio e a modulo ricevute attivo.
+   */
+  documento_id?: string | null;
+  documento_anno?: number | null;
+  documento_numero?: number | null;
 }
 
 /** Riga della tabella Tesseramenti: un socio e il suo ultimo rinnovo. */
@@ -171,10 +178,22 @@ export async function listTesseramentiPaginati(options: ListTesseramentiOptions 
 }
 
 /** Rinnovi di un socio, dal più recente. */
-export async function storicoTesseramenti(socioId: string): Promise<Tesseramento[]> {
+export async function storicoTesseramenti(
+  socioId: string,
+  conDocumento = false
+): Promise<Tesseramento[]> {
   await getSocioById(socioId);
+  // Le giunture della ricevuta si aggiungono solo a modulo attivo (lo decide
+  // il chiamante): a modulo spento i campi non devono comparire affatto.
+  // L'indice unico su (tipo, riferimento_id) garantisce al più una riga per
+  // rinnovo, quindi la giuntura non duplica lo storico.
   const result = await query(
-    `SELECT * FROM tesseramento WHERE socio_id = :socioId ORDER BY scadenza DESC, created_at DESC`,
+    `SELECT t.*${conDocumento ? ', d.documento_id, doc.anno AS documento_anno, doc.numero AS documento_numero' : ''}
+       FROM tesseramento t${conDocumento ? `
+       LEFT JOIN documento_emesso_voce d ON d.tipo = 'tesseramento' AND d.riferimento_id = t.id
+       LEFT JOIN documento doc ON doc.id = d.documento_id` : ''}
+      WHERE t.socio_id = :socioId
+      ORDER BY t.scadenza DESC, t.created_at DESC`,
     { socioId }
   );
   return result.rows as unknown as Tesseramento[];

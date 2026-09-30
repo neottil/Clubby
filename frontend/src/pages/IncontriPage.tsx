@@ -14,5 +14,15 @@ import ElencoIncontri from '../components/ElencoIncontri';
  */
 export default function IncontriPage() {
   const { user } = useAuth();
-  return <ElencoIncontri titolo='Incontri' ambito={user?.isAdmin ? undefined : 'socio'} />;
+  // I totali del periodo filtrato solo per l'admin: è la vista da cui consulta
+  // gli incontri di chiunque, e da quando Resoconti non ha più la scheda "per
+  // socio" è qui che quel numero va cercato. A un socio, che vede solo i
+  // propri, direbbe poco e occuperebbe la riga dei filtri su schermo stretto.
+  return (
+    <ElencoIncontri
+      titolo='Incontri'
+      ambito={user?.isAdmin ? undefined : 'socio'}
+      mostraTotali={!!user?.isAdmin}
+    />
+  );
 }

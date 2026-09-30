@@ -171,7 +171,7 @@ export async function abilitazioniDi(istruttoreId: string, q: QueryFn = query): 
   return result.rows.map(r => String(r.attivita_id));
 }
 
-/** Tutte le abilitazioni, per istruttore: una sola lettura per il pannello admin. */
+/** Tutte le abilitazioni, per istruttore: una sola lettura per la pagina Impostazioni. */
 export async function tutteLeAbilitazioni(): Promise<Record<string, string[]>> {
   const result = await query(
     `SELECT istruttore_id, attivita_id FROM istruttore_attivita`

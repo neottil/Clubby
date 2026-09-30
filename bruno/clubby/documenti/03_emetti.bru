@@ -1,0 +1,39 @@
+meta {
+  name: Emetti ricevuta
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/documenti
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "socio_id": "{{socio_id}}",
+    "causale": "educazione cinofila",
+    "voci": [
+      { "tipo": "ricarica", "id": "{{voce_id}}" }
+    ]
+  }
+}
+
+docs {
+  Solo admin. Assegna il numero definitivo, genera il PDF, lo conserva e lega
+  le voci al documento: tutto in un'unica transazione.
+
+  Risposta 201:
+    { id, anno, numero, data_documento, importo, importo_lettere, nome_file, pdf_base64 }
+
+  409 se una delle voci è stata documentata nel frattempo: l'importo non
+  sarebbe più quello visto in anteprima, quindi non viene emesso niente.
+
+  Una ricevuta emessa NON si annulla e NON si elimina: è per questo che esiste
+  l'anteprima.
+}

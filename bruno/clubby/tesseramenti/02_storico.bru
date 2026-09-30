@@ -15,6 +15,13 @@ auth:bearer {
 }
 
 docs {
-  Solo admin. Tutti i rinnovi di un socio, dal più recente:
+  Admin, oppure il socio stesso: è l'unica rotta dell'area aperta oltre l'admin.
+  Chiedere l'id di un altro socio risponde 403 — il confronto è con la scheda
+  collegata all'account, non con il parametro.
+
+  Tutti i rinnovi di un socio, dal più recente:
     id, socio_id, data_rinnovo, scadenza, importo, created_at
+
+  Col modulo ricevute attivo ogni riga porta anche la ricevuta della quota:
+    documento_id, documento_anno, documento_numero (null se non emessa)
 }

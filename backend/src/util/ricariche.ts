@@ -11,8 +11,8 @@
  *               (tabella ricarica_taglio): ogni taglio dichiara quanto si paga
  *               e quanto viene accreditato, es. 100 → 110.
  *
- * In tutte e tre, la Fatturazione conta SOLO l'importo pagato: il valore
- * aggiunto non è denaro incassato, e fatturarlo significherebbe dichiarare un
+ * In tutte e tre, le ricevute contano SOLO l'importo pagato: il valore
+ * aggiunto non è denaro incassato, e registrarlo significherebbe dichiarare un
  * ricavo che non c'è stato.
  *
  * Un valore sconosciuto o mancante vale 'free', cioè il comportamento che

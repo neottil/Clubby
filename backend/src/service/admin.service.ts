@@ -172,19 +172,6 @@ export async function impostaAdmin(
   });
 }
 
-export async function promuoviAdmin(riferimento: string, tokenChiamante: string): Promise<void> {
-  await impostaAdmin(riferimento, true, tokenChiamante);
-}
-
-/**
- * Retrocede un admin a viewer. Il divieto di retrocedere sé stessi è
- * applicato dall'authorizer, che conosce l'identità reale del chiamante dal
- * token: replicarlo qui sarebbe un secondo punto da tenere allineato.
- */
-export async function retrocediAdmin(riferimento: string, tokenChiamante: string): Promise<void> {
-  await impostaAdmin(riferimento, false, tokenChiamante);
-}
-
 /**
  * Azzera la password di un utente e restituisce quella temporanea generata.
  * Va consegnata all'interessato fuori dall'applicazione (non c'è invio di

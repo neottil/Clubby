@@ -13,13 +13,13 @@
  *   VITE_AUTH_BASE_URL   = http://localhost:3001   (obbligatoria)
  *   VITE_TENANT_NAME     = La mia ASD              (obbligatoria)
  *   VITE_THEME_*         colori (opzionali, vedi theme.ts)
- *   VITE_LOGO_FILE       logo in public/branding/ (opzionale)
+ *   VITE_LOGO_FILE       logo in branding/ alla radice (opzionale)
  *   VITE_ENABLE_MODULE_TESSERAMENTO  "true" per attivare il modulo
- *   VITE_ENABLE_MODULE_FATTURAZIONE  "true" per attivare il modulo
+ *   VITE_ENABLE_MODULE_RICEVUTE      "true" per attivare il modulo
  *   VITE_RECHARGE_MODE   free | percentage | map (default free)
  *
  * Attività, costi e istruttori non sono configurazione: sono dati del club,
- * gestiti dal pannello Admin e serviti dall'API (/api/attivita,
+ * gestiti dalla pagina Impostazioni e serviti dall'API (/api/attivita,
  * /api/istruttori).
  */
 
@@ -39,10 +39,10 @@ export interface Tema {
  * evita soltanto di mostrare sezioni che risponderebbero 404.
  */
 export interface Moduli {
-  /** Pagina Tesseramenti e quota di tesseramento nel pannello Admin. */
+  /** Pagina Tesseramenti e quota di tesseramento nella pagina Impostazioni. */
   tesseramento: boolean;
-  /** Pagina Fatturazione. */
-  fatturazione: boolean;
+  /** Pagina Ricevute: voci da documentare ed emissione delle ricevute. */
+  ricevute: boolean;
 }
 
 /**
@@ -80,7 +80,7 @@ export const config: ConfigFrontend = {
   tenantName: '',
   tema: {},
   logo: LOGO_PREDEFINITO,
-  moduli: { tesseramento: false, fatturazione: false },
+  moduli: { tesseramento: false, ricevute: false },
   modalitaRicarica: 'free',
 };
 
@@ -119,7 +119,7 @@ function daVariabiliVite(): Partial<ConfigFrontend> {
     logo: env.VITE_LOGO_FILE ? `/branding/${env.VITE_LOGO_FILE}` : '',
     moduli: {
       tesseramento: env.VITE_ENABLE_MODULE_TESSERAMENTO === 'true',
-      fatturazione: env.VITE_ENABLE_MODULE_FATTURAZIONE === 'true',
+      ricevute: env.VITE_ENABLE_MODULE_RICEVUTE === 'true',
     },
     modalitaRicarica: modalitaValida(env.VITE_RECHARGE_MODE),
   };
@@ -149,7 +149,7 @@ export async function caricaConfig(): Promise<void> {
     // che è il default voluto, invece di bloccare l'avvio dell'app.
     moduli: {
       tesseramento: letta.moduli?.tesseramento === true,
-      fatturazione: letta.moduli?.fatturazione === true,
+      ricevute: letta.moduli?.ricevute === true,
     },
     modalitaRicarica: modalitaValida(letta.modalitaRicarica),
   });

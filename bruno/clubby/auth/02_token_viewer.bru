@@ -12,8 +12,8 @@ post {
 
 body:json {
   {
-    "email": "mario.rossi@demo.local",
-    "password": "Demo12345!"
+    "email": "luca.moretti@clubby.dev",
+    "password": "clubby2026"
   }
 }
 
@@ -30,6 +30,7 @@ script:post-response {
 docs {
   Accesso come utente viewer: salva token_viewer e refresh_token_viewer.
 
-  Le credenziali sono quelle create da scripts/seed-demo-data.sh. Lancialo
-  prima, altrimenti l'account non esiste.
+  Le credenziali sono quelle create da scripts/seed-demo-data.sh (Luca Moretti,
+  socio, password DEMO_PASSWORD). Lancialo prima, altrimenti l'account non
+  esiste: il seed azzera il database degli account e li ricrea.
 }

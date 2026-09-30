@@ -63,10 +63,9 @@ jobs:
       # Se non è mai stata fatta una build per quello scope su questo branch
       # (nessun tag trovato), builda e deploya tutto per sicurezza.
       #
-      # Eccezione per backend: scripts/seed-demo-data.sh vive fuori da
-      # backend/ ma viene copiato dentro l'immagine da backend/Dockerfile
-      # (context di build = radice del repo) — un suo cambiamento richiede
-      # comunque un rebuild, quindi va guardato esplicitamente. Solo questo
+      # Eccezione: alcuni percorsi fuori da <scope>/ finiscono comunque
+      # nell'immagine (branding/, scripts/migra.sh) — un loro cambiamento
+      # richiede un rebuild, quindi vanno guardati esplicitamente. Solo quei
       # file, non l'intera cartella scripts/ (il resto non finisce
       # nell'immagine).
       #
@@ -101,10 +100,27 @@ jobs:
               echo "$CHANGED" | grep -qE "^${SCOPE}/k8s/" && HAS_K8S=true || true
               echo "$CHANGED" | grep -vE "^${SCOPE}/k8s/" | grep -qE "^${SCOPE}/" && HAS_CODE=true || true
 
-              if [ "$SCOPE" = "backend" ]; then
-                EXTRA_CHANGED=$(git diff --name-only "$PREV_TAG" HEAD -- "scripts/seed-demo-data.sh")
+              # Percorsi che stanno FUORI da <scope>/ ma finiscono comunque
+              # nell'immagine di quello scope: senza guardarli esplicitamente,
+              # un commit che tocca solo loro non farebbe partire nessuna
+              # build, perché il diff sopra guarda una cartella sola.
+              #
+              #   scripts/migra.sh  copiato da backend/Dockerfile (lo esegue
+              #                     il Job k8s delle migrazioni)
+              #   branding/         copiato da backend/Dockerfile (loghi delle
+              #                     ricevute) e in frontend/public/ via
+              #                     scripts/copia-branding.mjs
+              case "$SCOPE" in
+                backend)  EXTRA_PATHS="scripts/migra.sh branding/" ;;
+                frontend) EXTRA_PATHS="branding/ scripts/copia-branding.mjs" ;;
+                *)        EXTRA_PATHS="" ;;
+              esac
+              if [ -n "$EXTRA_PATHS" ]; then
+                # shellcheck disable=SC2086
+                EXTRA_CHANGED=$(git diff --name-only "$PREV_TAG" HEAD -- $EXTRA_PATHS)
                 if [ -n "$EXTRA_CHANGED" ]; then
-                  echo "[$SCOPE] scripts/seed-demo-data.sh cambiato (copiato nell'immagine): forzo rebuild."
+                  echo "[$SCOPE] cambiato fuori da ${SCOPE}/ ma dentro l'immagine: forzo rebuild."
+                  echo "$EXTRA_CHANGED"
                   HAS_CODE=true
                 fi
               fi
@@ -126,6 +142,66 @@ jobs:
           echo "auth=$(node -p "require('./authorizer/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "date_tag=${BRANCH_SLUG}-$(date -u +%Y%m%d_%H%M)" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+  # Il PDF delle ricevute non sa disegnare gli SVG: il backend cerca l'omonimo
+  # PNG o JPEG. Senza, la ricevuta uscirebbe senza logo e nessuno se ne
+  # accorgerebbe fino alla prima consegnata.
+  #
+  # Job a sé e non uno step dentro una build: l'analisi del diff ragiona per
+  # cartelle, e un commit che tocca solo branding/ farebbe partire le build
+  # solo grazie ai percorsi extra sopra — mentre questo controllo deve girare
+  # sempre, anche quando nessuna build parte. Il job resta comunque in piedi
+  # (è lo *step* a essere condizionato dal flag), così i needs a valle non
+  # incontrano mai uno "skipped".
+  valida-branding:
+    runs-on: ubuntu-24.04
+    environment: development
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ogni logo SVG ha un gemello raster
+        if: vars.ENABLE_MODULE_RICEVUTE == 'true'
+        run: |
+          mancanti=0
+          for svg in branding/*.svg; do
+            [ -e "$svg" ] || continue
+            base="${svg%.svg}"
+            if [ ! -f "$base.png" ] && [ ! -f "$base.jpg" ] && [ ! -f "$base.jpeg" ]; then
+              echo "::error file=$svg::manca $(basename "$base").png (o .jpg): le ricevute uscirebbero senza logo"
+              mancanti=1
+            fi
+          done
+          exit $mancanti
+
+      - name: I raster non sono sovradimensionati
+        if: vars.ENABLE_MODULE_RICEVUTE == 'true'
+        # Il PDF disegna il logo a 3,2 cm ma incorpora i byte ORIGINALI: un
+        # raster enorme non si vede più grande, si paga — su ogni ricevuta, e
+        # le ricevute restano archiviate per anni. Le dimensioni in pixel si
+        # leggono dall'header IHDR del PNG; per il JPEG basta il peso.
+        run: |
+          node -e '
+            const fs = require("fs"), path = require("path");
+            const MAX_LATO = 1000, MAX_BYTE = 200 * 1024;
+            let ko = 0;
+            for (const f of fs.readdirSync("branding")) {
+              if (!/\.(png|jpe?g)$/i.test(f)) continue;
+              const p = path.join("branding", f);
+              const buf = fs.readFileSync(p);
+              if (buf.length > MAX_BYTE) {
+                console.log(`::error file=${p}::${(buf.length / 1024) | 0} KB, oltre il limite di ${MAX_BYTE / 1024} KB`);
+                ko = 1;
+              }
+              if (buf.subarray(1, 4).toString() === "PNG") {
+                const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+                if (Math.max(w, h) > MAX_LATO) {
+                  console.log(`::error file=${p}::${w}x${h} px, lato lungo oltre ${MAX_LATO} px (consigliati 400)`);
+                  ko = 1;
+                }
+              }
+            }
+            process.exit(ko);
+          '
 
   build-backend:
     needs: versions
@@ -162,7 +238,7 @@ jobs:
       # (server-vX.Y.Z) viene aggiunto dal workflow Tag dopo un deploy riuscito.
       #
       # Context = radice del repo (non ./backend): backend/Dockerfile copia
-      # anche scripts/seed-demo-data.sh, condiviso con l'uso in locale (vedi
+      # anche scripts/migra.sh e branding/, che stanno fuori da backend/ (vedi
       # commento in backend/Dockerfile e .dockerignore alla radice).
       - uses: docker/build-push-action@v7
         with:
@@ -277,10 +353,10 @@ jobs:
   # e che quindi nessun deploy riesce più a smentire.
   test:
     needs: [versions, build-backend, build-authorizer]
-    # always(): le build possono essere "skipped" quando quello scope non è
+    # !cancelled(): le build possono essere "skipped" quando quello scope non è
     # cambiato, e in quel caso si prova l'immagine attualmente in servizio.
     if: |
-      always() &&
+      !cancelled() &&
       needs.versions.result == 'success' &&
       (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped') &&
       (needs.build-authorizer.result == 'success' || needs.build-authorizer.result == 'skipped')
@@ -418,7 +494,7 @@ jobs:
           AUTH_ISSUER=http://localhost:3001
           AUTH_INTERNAL_URL=http://localhost:3001
           ENABLE_MODULE_TESSERAMENTO=true
-          ENABLE_MODULE_FATTURAZIONE=true
+          ENABLE_MODULE_RICEVUTE=true
           RECHARGE_MODE=free
           PORT=3000
           APP_VERSION=test
@@ -479,12 +555,12 @@ jobs:
   # successo su questo branch — e riusa quella, senza rebuild.
   resolve-backend-image:
     needs: [versions, build-backend]
-    # always() perché build-backend può essere "skipped" (non "success")
+    # !cancelled() perché build-backend può essere "skipped" (non "success")
     # quando has_backend è false — di norma GitHub Actions salterebbe anche
     # questo job in quel caso, ma qui deve girare comunque se è cambiato solo
     # un manifest sotto backend/k8s/ (deploy_backend=true, build-backend skipped).
     if: |
-      always() &&
+      !cancelled() &&
       needs.versions.outputs.deploy_backend == 'true' &&
       needs.versions.result == 'success' &&
       (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped')
@@ -518,13 +594,13 @@ jobs:
   # Migrazioni di schema PRIMA dei rollout, mai dopo: il codice nuovo non deve
   # girare su uno schema vecchio. Gira su un Job k8s che usa le immagini appena
   # risolte — già su ghcr.io, ma non ancora in servizio da nessuna parte.
-  # always(): uno dei due resolve può essere "skipped" (quel modulo non cambia),
+  # !cancelled(): uno dei due resolve può essere "skipped" (quel modulo non cambia),
   # e in quel caso il suo tag arriva vuoto e il relativo database non si tocca.
   # Se il Job fallisce non parte nessuno dei tre deploy, frontend compreso.
   migrate-db:
     needs: [resolve-backend-image, resolve-authorizer-image, test]
     if: |
-      always() &&
+      !cancelled() &&
       needs.test.result == 'success' &&
       (needs.resolve-backend-image.result == 'success' ||
        needs.resolve-authorizer-image.result == 'success')
@@ -541,8 +617,16 @@ jobs:
   # duplicata). Se frontend non cambia, il suo Deployment non viene MAI
   # toccato da questa run.
   deploy-backend:
-    needs: [resolve-backend-image, migrate-db, test]
+    needs: [resolve-backend-image, migrate-db, test, valida-branding]
+    # !cancelled() obbligatorio, e non per i needs diretti (che qui devono essere
+    # tutti "success"): lo skip si propaga in modo TRANSITIVO lungo il grafo.
+    # build-authorizer è "skipped" ogni volta che l'authorizer non cambia, e
+    # senza !cancelled() quello skip scende fino a qui attraverso test — che gira
+    # comunque solo perché il suo !cancelled() lo protegge — saltando il deploy
+    # anche con build, test e migrazioni tutti verdi.
     if: |
+      !cancelled() &&
+      needs.valida-branding.result == 'success' &&
       needs.test.result == 'success' &&
       needs.resolve-backend-image.result == 'success' &&
       needs.migrate-db.result == 'success'
@@ -562,7 +646,12 @@ jobs:
   # questa run, non generica "deploya questo tag su questo ambiente".
   register-backend-tag:
     needs: [versions, resolve-backend-image, deploy-backend]
-    if: needs.deploy-backend.result == 'success'
+    # !cancelled(): vedi deploy-backend. La condizione resta stretta — si registra
+    # il tag solo a deploy riuscito — ma senza !cancelled() il job verrebbe saltato
+    # prima ancora di valutarla.
+    if: |
+      !cancelled() &&
+      needs.deploy-backend.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -592,7 +681,7 @@ jobs:
   resolve-frontend-image:
     needs: [versions, build-frontend]
     if: |
-      always() &&
+      !cancelled() &&
       needs.versions.outputs.deploy_frontend == 'true' &&
       needs.versions.result == 'success' &&
       (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
@@ -634,11 +723,12 @@ jobs:
   # Il confronto ammette anche "skipped": quando cambia solo il frontend, i due
   # resolve di backend e authorizer non girano e migrate-db viene saltato del
   # tutto. Pretendere "success" bloccherebbe per sempre i deploy di solo
-  # frontend — e always() serve perché un needs saltato salterebbe anche questo.
+  # frontend — e !cancelled() serve perché un needs saltato salterebbe anche questo.
   deploy-frontend:
-    needs: [resolve-frontend-image, migrate-db, test]
+    needs: [resolve-frontend-image, migrate-db, test, valida-branding]
     if: |
-      always() &&
+      !cancelled() &&
+      needs.valida-branding.result == 'success' &&
       needs.test.result == 'success' &&
       needs.resolve-frontend-image.result == 'success' &&
       (needs.migrate-db.result == 'success' || needs.migrate-db.result == 'skipped')
@@ -651,7 +741,10 @@ jobs:
   # Vedi commento gemello in register-backend-tag.
   register-frontend-tag:
     needs: [versions, resolve-frontend-image, deploy-frontend]
-    if: needs.deploy-frontend.result == 'success'
+    # Vedi commento gemello in register-backend-tag.
+    if: |
+      !cancelled() &&
+      needs.deploy-frontend.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -681,7 +774,7 @@ jobs:
   resolve-authorizer-image:
     needs: [versions, build-authorizer]
     if: |
-      always() &&
+      !cancelled() &&
       needs.versions.outputs.deploy_authorizer == 'true' &&
       needs.versions.result == 'success' &&
       (needs.build-authorizer.result == 'success' || needs.build-authorizer.result == 'skipped')
@@ -713,7 +806,10 @@ jobs:
 
   deploy-authorizer:
     needs: [resolve-authorizer-image, migrate-db, test]
+    # Vedi commento gemello in deploy-backend: senza !cancelled() lo skip di una
+    # build a monte si propaga fin qui.
     if: |
+      !cancelled() &&
       needs.test.result == 'success' &&
       needs.resolve-authorizer-image.result == 'success' &&
       needs.migrate-db.result == 'success'
@@ -726,7 +822,10 @@ jobs:
   # Vedi commento gemello in register-backend-tag.
   register-authorizer-tag:
     needs: [versions, resolve-authorizer-image, deploy-authorizer]
-    if: needs.deploy-authorizer.result == 'success'
+    # Vedi commento gemello in register-backend-tag.
+    if: |
+      !cancelled() &&
+      needs.deploy-authorizer.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -764,7 +863,7 @@ jobs:
   cleanup-registry:
     needs: [versions, deploy-backend, deploy-frontend, deploy-authorizer]
     if: |
-      always() &&
+      !cancelled() &&
       needs.versions.result == 'success' &&
       (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped') &&
       (needs.deploy-frontend.result == 'success' || needs.deploy-frontend.result == 'skipped') &&

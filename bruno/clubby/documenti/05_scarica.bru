@@ -1,0 +1,27 @@
+meta {
+  name: Scarica ricevuta
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/documenti/{{documento_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Il PDF conservato, con Content-Type: application/pdf.
+
+  È l'UNICA rotta dell'area aperta oltre l'admin: la può leggere anche il socio
+  a cui la ricevuta è intestata, perché è ciò che rende utile l'icona nei suoi
+  movimenti.
+
+  Il controllo non è "sei un socio" ma "sei IL socio": confronta socio_id del
+  documento con la scheda di chi chiama. Un socio che prova l'id della ricevuta
+  di un altro riceve 403.
+}

@@ -1,0 +1,35 @@
+meta {
+  name: Ricevute emesse
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/documenti?limit=25&offset=0
+  body: none
+  auth: bearer
+}
+
+params:query {
+  limit: 25
+  offset: 0
+  ~socio_id: {{socio_id}}
+  ~da: 2026-01-01
+  ~a: 2026-12-31
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+docs {
+  Solo admin. Elenco paginato delle ricevute emesse, dalla più recente
+  (anno e numero decrescenti).
+
+  NON contiene i byte dei PDF: un elenco di venticinque righe trascinerebbe
+  altrettanti documenti per mostrare cinque colonne di testo. Il PDF si scarica
+  uno alla volta da GET /api/documenti/{id}.
+
+  intestatario è il nome come era al momento dell'emissione; nome e cognome
+  sono invece quelli attuali del socio.
+}

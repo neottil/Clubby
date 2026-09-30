@@ -9,6 +9,7 @@ import { useValoreDifferito } from '../hooks/useValoreDifferito';
 import TableScroll from '../components/TableScroll';
 import Avviso from '../components/Avviso';
 import CaricaAltri from '../components/CaricaAltri';
+import ApriRicevuta from '../components/ApriRicevuta';
 import IntestazioneOrdinabile from '../components/IntestazioneOrdinabile';
 import { euro, dataIso, dataItaliana, oggiIso } from '../utils/formato';
 import Modal from '../components/Modal';
@@ -59,9 +60,9 @@ export default function VouchersPage() {
   const { token, user } = useAuth();
   const api = createApiClient(token);
   const isMobile = useIsMobile();
-  // Le spiegazioni sulle ricariche rimandano alla pagina Fatturazione: senza
+  // Le spiegazioni sulle ricariche rimandano alla pagina Ricevute: senza
   // quel modulo la pagina non esiste, e citarla confonderebbe.
-  const inFatturazione = config.moduli.fatturazione;
+  const inRicevute = config.moduli.ricevute;
 
   // Su schermo stretto i 16px di padding orizzontale per cella costano 128px
   // sui 375px disponibili — più di un terzo della larghezza spesa in spazio
@@ -98,7 +99,7 @@ export default function VouchersPage() {
   // inseriscono a mano (il backend li rifiuta).
   const [importoRicarica, setImportoRicarica] = useState('');
   // Proposta a oggi, modificabile per registrare una ricarica pagata in un
-  // altro giorno: è la data con cui compare in movimenti e Fatturazione.
+  // altro giorno: è la data con cui compare in movimenti e in Ricevute.
   const [dataRicarica, setDataRicarica] = useState(oggiIso());
   // Configurazione delle ricariche, letta solo dove serve alla modalità attiva
   // (entrambe le API sono riservate all'admin, l'unico che registra ricariche).
@@ -270,7 +271,7 @@ export default function VouchersPage() {
       const saldoImportato = parseFloat(voucherForm.saldo_iniziale);
       const importato = voucherForm.importaSaldo && saldoImportato > 0;
       // Il voucher nasce senza credito acquistato: quello si registra con una
-      // ricarica, l'unica voce che finisce in Fatturazione. Il saldo importato
+      // ricarica, l'unica voce che finisce in Ricevute. Il saldo importato
       // parte solo se l'admin ha scelto esplicitamente di importarlo.
       const nuovo = await api.createVoucher({
         socio_id: voucherForm.socio_id,
@@ -307,7 +308,7 @@ export default function VouchersPage() {
     setSaving(true);
     try {
       // Descrizione fissa: identifica la voce nell'elenco movimenti e in
-      // Fatturazione.
+      // Ricevute.
       await api.createMovimento(voucher.id, {
         tipo: 'ricarica',
         importo: parseFloat(importoRicarica),
@@ -343,10 +344,10 @@ export default function VouchersPage() {
         <h3 style={styles.movTitle}>{titoloPannello('Ricarica', panel.voucher)}</h3>
       </div>
       <p style={styles.hint}>
-        Credito acquistato dal socio: aumenta il saldo{inFatturazione && ' e compare in Fatturazione'}. Gli addebiti
+        Credito acquistato dal socio: aumenta il saldo{inRicevute && ' e compare in Ricevute'}. Gli addebiti
         nascono dagli incontri registrati e non si inseriscono qui.
-        {config.modalitaRicarica !== 'free' && inFatturazione &&
-          ' In Fatturazione compare l\'importo pagato, non il valore accreditato.'}
+        {config.modalitaRicarica !== 'free' && inRicevute &&
+          ' In Ricevute compare l\'importo pagato, non il valore accreditato.'}
       </p>
       <div style={styles.field}>
         <label style={styles.label} htmlFor='data-ricarica'>Data</label>
@@ -375,7 +376,7 @@ export default function VouchersPage() {
               non si può proprio registrare, quindi va letto come un errore. */}
           {tagli.length === 0 && (
             <p style={styles.hintErrore}>
-              Nessun taglio configurato: impostali nel pannello Admin, card Ricariche.
+              Nessun taglio configurato: impostali nelle Impostazioni, card Ricariche.
             </p>
           )}
         </div>
@@ -409,6 +410,10 @@ export default function VouchersPage() {
           <thead>
             <tr>
               {['Data', 'Tipo', 'Importo', 'Descrizione', 'Dettagli'].map(h => <th key={h} style={{ ...styles.th, ...cellPad.th }}>{h}</th>)}
+              {/* Colonna delle ricevute: c'è solo col modulo attivo, e resta
+                  vuota su addebiti, rettifiche e ricariche marcate emesse prima
+                  che l'applicazione producesse documenti. */}
+              {inRicevute && <th style={{ ...styles.th, ...cellPad.th }}>Ricevuta</th>}
             </tr>
           </thead>
           <tbody>
@@ -418,7 +423,7 @@ export default function VouchersPage() {
                 <td style={{ ...styles.td, ...cellPad.td }}>{ETICHETTA_TIPO[m.tipo] ?? '—'}</td>
                 {/* Ricarica con valore extra: la cifra principale è la quota
                     realmente pagata dal socio — quella che compare in
-                    Fatturazione — e il credito accreditato, più alto, sta
+                    Ricevute — e il credito accreditato, più alto, sta
                     sotto. Senza `importo_pagato` i due valori coincidono e la
                     riga aggiuntiva non serve. */}
                 <td style={{ ...styles.td, ...cellPad.td, fontWeight: 600, color: m.importo >= 0 ? theme.success : theme.danger }}>
@@ -441,6 +446,16 @@ export default function VouchersPage() {
                     </button>
                   )}
                 </td>
+                {inRicevute && (
+                  <td style={{ ...styles.td, ...cellPad.td, whiteSpace: 'nowrap' }}>
+                    <ApriRicevuta
+                      api={api}
+                      documentoId={m.documento_id}
+                      anno={m.documento_anno}
+                      numero={m.documento_numero}
+                    />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -473,7 +488,7 @@ export default function VouchersPage() {
           </div>
           <p style={styles.hintCampo}>
             Il voucher nasce senza credito. L'importo acquistato dal socio si registra subito dopo con una
-            ricarica{inFatturazione && ', che compare in Fatturazione'}.
+            ricarica{inRicevute && ', che compare in Ricevute'}.
           </p>
           {/* Il saldo importato è dietro una spunta di proposito: serve solo a
               portare in Clubby voucher venduti prima, e un campo sempre
@@ -492,7 +507,7 @@ export default function VouchersPage() {
                 <p style={styles.avvisoImport}>
                   Solo per la configurazione iniziale del sistema: porta in Clubby il credito residuo di un
                   voucher venduto prima di usarlo. <strong>Non corrisponde a una ricarica</strong>
-                  {inFatturazione && ' e non compare in Fatturazione'}. Per un voucher nuovo lascia la spunta
+                  {inRicevute && ' e non compare in Ricevute'}. Per un voucher nuovo lascia la spunta
                   disattivata e registra il credito acquistato con una ricarica.
                 </p>
                 <label style={styles.label} htmlFor='saldo-importato'>Saldo importato (€)</label>

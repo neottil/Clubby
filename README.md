@@ -6,15 +6,19 @@ Applicazione multi-tenant per la gestione di Associazioni Sportive Dilettantisti
 
 - Gestione soci
 - Gestione incontri, con note in testo semplice o in Markdown, filtrabili per attività e per periodo
-- Listino delle attività con il relativo costo, gestito dal pannello Admin
+- Listino delle attività con il relativo costo, gestito dalla pagina Impostazioni
 - Attribuzione degli incontri a un istruttore, abilitato per singola attività
 - Voucher prepagati, con il credito acquistato registrato come ricarica; a scelta del club, la
   ricarica può accreditare più di quanto pagato (percentuale fissa o tagli preconfigurati)
 - Tesseramento al club: scadenza per socio, rinnovi con storico e quota configurabile *(modulo opzionale)*
-- Fatturazione: ricariche, quote di tesseramento e incontri non coperti da voucher, con i totali del periodo *(modulo opzionale)*
+- Ricevute: ricariche, quote di tesseramento e incontri non coperti da voucher, con i totali del
+  periodo e il segno di quelli già documentati *(modulo opzionale)*
+- Ricevute in PDF: numerate per anno, viste in anteprima prima di confermarle, conservate
+  nell'applicazione e riapribili anche dal socio intestatario *(modulo opzionale)*
 - Resoconto: un istruttore vede gli incontri che ha tenuto, con numero e costo complessivo del periodo filtrato
-- Resoconti per l'admin: gli incontri di un istruttore o di un socio a scelta, filtrabili per periodo e attività
-- Elenchi caricati a blocchi (incontri, movimenti, fatturazione, soci, voucher, tesseramenti, account),
+- Resoconti per l'admin: gli incontri tenuti da un istruttore, filtrabili per periodo e attività, con la
+  rendicontazione di quelli già riconosciuti
+- Elenchi caricati a blocchi (incontri, movimenti, ricevute, soci, voucher, tesseramenti, account),
   con ricerca e ordinamento applicati dal server, per non scaricare tutto a ogni apertura
 
 ## Architettura
@@ -50,7 +54,7 @@ Ruoli:
 
 Privilegio **admin**: amministra l'applicazione — account, ruoli, listino delle attività, abilitazioni,
 soci e voucher — ed è indipendente dal ruolo, quindi un istruttore può essere admin. Si concede e si
-toglie con la casella "Admin" nella card Utenti - Soci del pannello Admin; un admin non può toglierlo a sé
+toglie con la casella "Admin" nella card Utenti - Soci della pagina Impostazioni; un admin non può toglierlo a sé
 stesso.
 
 Il ruolo sta dentro il token. Cambiarlo chiude tutte le sessioni aperte
@@ -59,7 +63,7 @@ precedenti.
 
 ### Attività e abilitazioni
 
-Le attività sono un listino a database (nome e costo proposto), gestito dal pannello Admin. Il costo è
+Le attività sono un listino a database (nome e costo proposto), gestito dalla pagina Impostazioni. Il costo è
 unico per attività, e viene proposto quando la si sceglie in un incontro: il costo effettivo resta
 sull'incontro, così un ritocco al listino non riscrive lo storico.
 
@@ -75,14 +79,35 @@ leggibile sullo storico.
 Un account può comparire in un incontro in due vesti, che l'interfaccia tiene separate: la pagina **Incontri**
 mostra quelli a cui ha partecipato come socio, in sola lettura; la pagina **Resoconto** mostra a un istruttore
 quelli che ha tenuto, con la stessa tabella, i totali del periodo nella riga dei filtri, e la possibilità di
-registrarli e correggerli. L'admin, in Incontri, vede e gestisce tutti gli incontri; nella pagina **Resoconti**
-consulta in sola lettura quelli di un istruttore (scheda "Per istruttore") o di un socio (scheda "Per socio"),
-con gli stessi filtri e totali.
+registrarli e correggerli. L'admin, in Incontri, vede e gestisce tutti gli incontri, con i totali del periodo
+filtrato; nella pagina **Resoconti** consulta quelli tenuti da un istruttore, con gli stessi filtri.
+
+### Rendicontazione degli incontri
+
+Il club riconosce all'istruttore una percentuale sugli incontri che ha tenuto, e ha bisogno di sapere dove si
+era fermato il conteggio precedente. In **Resoconti** l'admin sceglie gli incontri con le caselle della prima
+colonna — o tutti quelli a video con quella in testata — e li marca come rendicontati. Gli identificativi
+scelti restano validi anche caricando altri blocchi: si possono spuntare i primi venticinque, premere "Carica
+altri" e aggiungere anche i successivi prima di salvare. Cambiando un filtro la selezione si azzera, perché
+resterebbe viva su righe non più a video.
+
+Uno switch sopra la tabella fa comparire anche gli incontri già rendicontati, con la casella spuntata e
+bloccata: la rendicontazione **non si annulla**, e per lo stesso motivo un incontro rendicontato **non si può
+più né modificare né eliminare** — il conteggio su cui l'istruttore è stato pagato deve restare
+ricostruibile. Il blocco vale per l'intera riga e non per il solo costo: spostare la data farebbe uscire
+l'incontro dal periodo in cui è stato conteggiato, che è lo stesso danno per un'altra via. Per correggere un
+errore si registra un incontro di rettifica. Lo switch parte
+spento per l'admin, che apre la pagina per sapere che cosa resta da fare, e acceso nella pagina Resoconto
+dell'istruttore, che la apre per consultare il proprio lavoro.
+
+Solo l'admin rendiconta: un istruttore vede lo stato dei propri incontri ma non lo decide. Altrove — nella
+pagina Incontri, e per il socio — la rendicontazione non compare e non nasconde nulla: riguarda il compenso
+dell'istruttore, non lo storico di chi ha partecipato.
 
 Filtri, ordinamento e totali sono calcolati dal database sull'intero risultato filtrato: gli elenchi arrivano a
 blocchi, e un calcolo nel browser sulle sole righe caricate darebbe numeri falsi.
 
-### Voucher, tesseramento e fatturazione
+### Voucher, tesseramento e ricevute
 
 Un socio paga l'associazione in tre modi, tenuti distinti:
 
@@ -98,14 +123,84 @@ Un socio paga l'associazione in tre modi, tenuti distinti:
   card in cima, con i suoi movimenti. Sotto, in tabella, i voucher degli altri soci: l'admin li gestisce
   tutti, un istruttore ne vede i saldi ma non i movimenti, un socio non ha la tabella.
 - **Tesseramento**: ogni rinnovo registra una scadenza e la quota pagata, proposta dal valore
-  configurato nel pannello Admin. La quota non passa dal voucher, si paga a parte. La nuova scadenza
+  configurato nella pagina Impostazioni. La quota non passa dal voucher, si paga a parte. La nuova scadenza
   deve seguire sia la data del rinnovo sia la scadenza precedente, e i rinnovi restano nello storico.
+  Il socio vede la propria scadenza e i propri rinnovi nella pagina Tesseramenti; l'admin li vede
+  per tutti, e solo lui rinnova.
 - **Incontri non coperti da voucher**: chi non ha un voucher paga l'incontro a parte.
 
-La pagina **Fatturazione** (solo admin) somma esattamente queste tre cose: ricariche, quote e incontri
+La pagina **Ricevute** (solo admin) somma esattamente queste tre cose: ricariche, quote e incontri
 senza voucher, filtrabili per socio e per periodo. Restano fuori gli addebiti sul voucher — già
-fatturati con la ricarica che li copre, contarli di nuovo raddoppierebbe l'importo — e il saldo
+coperti dalla ricarica che li paga, contarli di nuovo raddoppierebbe l'importo — e il saldo
 importato, che non è un incasso.
+
+La pagina ha due schede, sugli stessi filtri: **Crea ricevuta**, con le voci ancora da documentare, e
+**Ricevute emesse**, con lo storico dei PDF prodotti.
+
+#### Ricevute in PDF
+
+Selezionate le voci di **un socio** — una ricevuta è intestata a una persona sola, quindi il pulsante
+resta spento finché non se ne sceglie uno — si indica una causale e si ottiene un'**anteprima**. Solo
+la conferma emette davvero: assegna il numero, genera il PDF definitivo e lo conserva.
+
+Il numero **riparte da 1 a ogni anno** e non ha buchi: lo assegna un contatore per anno, dentro la
+stessa transazione che scrive il documento. Due amministratori che confermano nello stesso istante
+ricevono numeri consecutivi, e nessuna delle due emissioni fallisce.
+
+Una ricevuta emessa **non si annulla e non si elimina**, ed è il motivo per cui esiste l'anteprima:
+l'errore si vede prima di commetterlo. Da quel momento la voce d'origine non si può più cancellare né
+modificare.
+
+I byte del PDF restano nel database, quindi finiscono nei backup e si ripristinano insieme alla riga
+che li referenzia. Chi può riaprirli: l'amministratore, e il **socio intestatario** dalla colonna
+comparsa nei propri movimenti.
+
+Il file scaricato si chiama `ricevuta_<anno>_<numero>.pdf`: l'anno prima del numero, così una cartella
+ordinata per nome segue l'ordine di emissione, e nessun dato della persona nel nome del file. Lo stesso
+nome vale da qualunque tabella lo si scarichi.
+
+Le righe comprese in una ricevuta ne mostrano il **codice** `<anno>_<numero>`, cliccabile per scaricare
+il PDF. Compare ovunque nasca un incasso, così il socio arriva alla ricevuta dalla riga che la ha
+generata: voci e ricevute emesse in Ricevute, movimenti del voucher, incontri, rinnovi del
+tesseramento. Il codice e non un'icona perché dice *quale* ricevuta, senza doverla aprire.
+
+Un istruttore **non** vede la ricevuta degli incontri che ha soltanto tenuto: quelli sono di altri
+soci, e il documento non è suo. Li vede solo dove compare come socio.
+
+Intestazione e piè di pagina si scrivono nella pagina **Impostazioni**, card *Ricevute*, e valgono
+dalla ricevuta successiva: quelle già emesse conservano il testo che avevano — il PDF è congelato
+all'emissione, quindi una ricevuta prodotta prima di configurarli resta senza. Proprio per questo,
+**finché l'intestazione non è configurata la voce di menù Ricevute resta spenta**, con un `?` accanto
+che dice dove configurarla: una ricevuta emessa non si annulla, e una senza intestazione resterebbe
+tale per sempre.
+
+Nel PDF l'intestazione è allineata a **sinistra** e il logo sta a **destra sulla stessa riga**, come
+la carta intestata di un'associazione. Il **logo** invece è
+quello del club, lo stesso mostrato in testa a ogni pagina (vedi [`branding/`](branding/README.md)).
+
+#### Voci già registrate
+
+La pagina serve a sapere **che cosa resta da registrare**, quindi le voci per cui una ricevuta è già
+stata emessa non compaiono — indipendentemente dai filtri per socio e per periodo. Uno switch sopra la
+tabella le fa tornare, con la casella spuntata e bloccata.
+
+Si scelgono le voci con le caselle della prima colonna, o tutte quelle a video con quella in testata. Le
+scelte restano valide anche caricando altri blocchi: si possono spuntare le prime venticinque, premere
+"Carica altri" e aggiungere le successive prima di emettere; cambiando un filtro, invece, la selezione si
+azzera, perché resterebbe viva su righe non più a video.
+
+L'emissione **non si annulla**, e per lo stesso motivo una voce già documentata **non si può né modificare
+né eliminare**: né direttamente (un incontro registrato non si cancella e non cambia di costo) né per via
+traversa (un socio con voci registrate o incontri rendicontati non si elimina, perché cancellarlo se li
+porterebbe dietro in cascata). Una ricevuta emessa deve continuare a riferire qualcosa che esiste, e che
+non è cambiato sotto.
+
+Sotto, la relazione è registrata in `documento_emesso_voce`, che lega una voce al documento che la
+comprende. Le voci marcate come emesse prima che l'applicazione producesse ricevute restano senza
+documento: dicono "già emessa" e nient'altro, ed è il motivo per cui nelle tabelle la colonna del PDF
+può risultare vuota. La relazione è polimorfica, perché le voci vengono da tre tabelle diverse: è il
+motivo per cui non può esserci un vincolo di integrità verso l'origine, e quindi il motivo per cui
+l'eliminazione va impedita a monte.
 
 #### Ricariche con valore extra
 
@@ -115,10 +210,10 @@ Di norma una ricarica accredita sul voucher esattamente l'importo pagato. La var
 | `RECHARGE_MODE` | Come si registra una ricarica | Configurazione |
 |---|---|---|
 | `free` (predefinita) | Importo libero, accreditato tale e quale | nessuna |
-| `percentage` | Importo libero, accreditato con una percentuale in più | percentuale nella card **Ricariche** del pannello Admin |
+| `percentage` | Importo libero, accreditato con una percentuale in più | percentuale nella card **Ricariche** delle Impostazioni |
 | `map` | Importo scelto fra tagli preconfigurati (es. 50 → 55, 100 → 110) | elenco dei tagli nella card **Ricariche** |
 
-**In Fatturazione compare sempre l'importo pagato**, mai il valore accreditato: il credito in più
+**In Ricevute compare sempre l'importo pagato**, mai il valore accreditato: il credito in più
 è uno sconto concesso al socio, non denaro incassato, e contarlo dichiarerebbe un ricavo che non
 c'è stato. Il voucher invece si muove per il valore accreditato, che è quello che il socio può
 spendere. Il movimento conserva entrambi, e la pagina Voucher mostra il credito ricevuto con sotto
@@ -128,25 +223,25 @@ Quanto accreditare **lo calcola sempre il backend** a partire dalla modalità e 
 configurazione salvata: il browser invia solo quanto il socio paga. In modalità `map` un importo
 che non corrisponde a nessun taglio viene rifiutato.
 
-La card **Ricariche** del pannello Admin è sempre visibile: in modalità `free` spiega come attivare
+La card **Ricariche** delle Impostazioni è sempre visibile: in modalità `free` spiega come attivare
 la funzionalità, così i tagli o la percentuale si possono preparare prima di accenderla. Il
 database ha comunque la tabella dei tagli e la colonna dell'importo pagato, in ogni modalità: sono
 gli stessi per tutti gli ambienti.
 
 #### Moduli opzionali
 
-Tesseramento e Fatturazione sono **moduli opzionali**, attivati per singolo ambiente dalle Variables
-`ENABLE_MODULE_TESSERAMENTO` e `ENABLE_MODULE_FATTURAZIONE` (vedi
+Tesseramento e Ricevute sono **moduli opzionali**, attivati per singolo ambiente dalle Variables
+`ENABLE_MODULE_TESSERAMENTO` e `ENABLE_MODULE_RICEVUTE` (vedi
 [Variables](#variables)). Valgono solo con il valore esatto `true`: una variabile mancante o scritta
 diversamente lascia il modulo spento.
 
 Con un modulo spento spariscono la voce di menu e la pagina, e le relative API rispondono `404` come
 qualunque percorso inesistente — il controllo sta nel backend, il frontend evita soltanto di mostrare
-sezioni che non funzionerebbero. Senza Tesseramento sparisce anche la configurazione della quota dal
-pannello Admin.
+sezioni che non funzionerebbero. Senza Tesseramento sparisce anche la configurazione della quota dalla
+pagina Impostazioni.
 
-I due moduli sono indipendenti: Fatturazione senza Tesseramento funziona (mancheranno le voci di quel
-tipo), e Tesseramento senza Fatturazione registra rinnovi e quote che però nessuna pagina riepiloga.
+I due moduli sono indipendenti: Ricevute senza Tesseramento funziona (mancheranno le voci di quel
+tipo), e Tesseramento senza Ricevute registra rinnovi e quote che però nessuna pagina riepiloga.
 Il database è sempre completo — niente migrazioni per accendere o spegnere un modulo, e lo storico si
 ritrova intatto alla riaccensione.
 
@@ -203,7 +298,8 @@ password al primo accesso.
 - **In locale**: email e password chieste da `scripts/init-local.sh` (default `admin@clubby.local` / `adminadmin`; la password deve avere almeno 10 caratteri)
 - **Su cluster**: email dalla variabile `INITIAL_ADMIN_EMAIL` dell'Environment, password temporanea generata dalla pipeline [Infra](#infra), nessuna credenziale scritta nel codice
 
-Un admin può promuovere altri utenti tramite `POST /api/admin/promuovi`.
+Un admin può concedere il privilegio ad altri utenti dalla pagina Impostazioni, o con
+`POST /api/admin/amministratore`.
 
 ### Sessione
 
@@ -224,7 +320,7 @@ all'interessato, e questi la sostituisce al primo accesso.
 Le API sono documentate con due specifiche OpenAPI, una per servizio:
 
 - [backend/docs/openapi.yaml](backend/docs/openapi.yaml) — soci, attività, istruttori, incontri,
-  voucher, tesseramenti, fatturazione, impostazioni e amministrazione
+  voucher, tesseramenti, ricevute, impostazioni e amministrazione
 - [authorizer/docs/openapi.yaml](authorizer/docs/openapi.yaml) — registrazione, accesso, sessioni,
   gestione degli account e chiavi pubbliche
 
@@ -278,7 +374,7 @@ npx @redocly/cli lint backend/docs/openapi.yaml authorizer/docs/openapi.yaml
    `authorizer/.env` e `frontend/.env.local`.
 
    In locale i [moduli opzionali](#moduli-opzionali) nascono **attivi**: lo script scrive
-   `ENABLE_MODULE_TESSERAMENTO` e `ENABLE_MODULE_FATTURAZIONE` in `backend/.env` e le corrispondenti
+   `ENABLE_MODULE_TESSERAMENTO` e `ENABLE_MODULE_RICEVUTE` in `backend/.env` e le corrispondenti
    `VITE_ENABLE_MODULE_*` in `frontend/.env.local`. Per provare l'applicazione senza un modulo, metti
    `false` in **entrambi** i file: se i due valori non coincidono, il frontend mostra una pagina che il
    backend rifiuta, o nasconde un modulo che invece risponde.
@@ -362,20 +458,40 @@ Avviare l'app con npm run dev, avviare debugger da launch vscode
 
 ### Credenziali di test
 
-`scripts/seed-demo-data.sh` crea questi account, ciascuno collegato alla propria scheda socio, insieme
-a listino, abilitazioni, voucher e incontri di esempio. La password dell'admin è `INITIAL_ADMIN_PASSWORD`
-di `authorizer/.env`:
+`scripts/seed-demo-data.sh` **azzera i due database** e li ripopola: questi account, ciascuno collegato
+alla propria scheda socio, più listino, abilitazioni, voucher, incontri, tesseramenti e una ricevuta
+dimostrativa in PDF. Chiede conferma prima di cancellare, e non va mai puntato a un ambiente con dati
+veri. La password dell'admin è `INITIAL_ADMIN_PASSWORD` di `authorizer/.env`:
 
-| Account | Password | Ruolo | Admin |
-|---------|----------|-------|-------|
-| istruttore1@clubby.local | da `authorizer/.env` | istruttore | sì |
-| istruttore2@clubby.local | clubby2026 | istruttore | no |
-| socio1@clubby.local | clubby2026 | socio | no |
-| socio2@clubby.local | clubby2026 | socio | no |
-| socio3@clubby.local | clubby2026 | socio | no |
+| Account | Nominativo | Password | Ruolo | Admin |
+|---------|------------|----------|-------|-------|
+| admin@clubby.local | *(nessuna scheda socio)* | da `authorizer/.env` | socio | **sì** |
+| marco.bianchi@clubby.dev | Marco Bianchi | clubby2026 | istruttore | no |
+| elena.ferrari@clubby.dev | Elena Ferrari | clubby2026 | istruttore | no |
+| luca.moretti@clubby.dev | Luca Moretti | clubby2026 | socio | no |
+| giulia.rinaldi@clubby.dev | Giulia Rinaldi | clubby2026 | socio | no |
+| davide.costa@clubby.dev | Davide Costa | clubby2026 | socio | no |
+| sara.vitali@clubby.dev | Sara Vitali | clubby2026 | socio | no |
 
-In locale il modo più rapido di ripartire da uno schema aggiornato resta azzerare il volume
-(`docker compose down -v`, `docker compose up -d`) e rieseguire il seed. In cluster, invece, i dati ci sono
+L'**amministratore è un account a sé**, senza scheda socio: ruolo nel club e privilegio di
+amministrazione sono indipendenti, e tenerli separati nella demo è il modo più diretto di mostrarlo —
+gli istruttori restano istruttori e basta, così si vede davvero cosa può fare chi non amministra.
+
+C'è inoltre **Paolo Greco** (`paolo.greco@clubby.dev`), socio **senza account**: serve a provare dalle
+Impostazioni il collegamento manuale di un account registrato in seguito, e a vedere come si presenta
+un socio ancora senza dati.
+
+**Sara Vitali** è il caso opposto e altrettanto utile: ha un account ma **nessun voucher**, e paga gli
+incontri a parte. È l'unico modo di provare che un socio senza credito prepagato raggiunge comunque le
+proprie ricevute, partendo dalla riga dell'incontro.
+
+Il seed emette **due ricevute dimostrative**: una su una ricarica e una su un incontro di Sara Vitali,
+che non ha voucher — così entrambi i percorsi con cui un socio raggiunge una ricevuta sono visibili
+subito.
+
+Il seed riparte sempre da zero: azzera entrambi i database e li ricostruisce, quindi non serve più
+buttare il volume per avere dati puliti (`docker compose down -v` resta utile solo per rifare lo
+**schema** da capo). In cluster, invece, i dati ci sono
 e non si buttano: le modifiche allo schema si applicano come migrazioni (vedi
 [Migrazioni dello schema](#migrazioni-dello-schema)).
 
@@ -448,7 +564,7 @@ Clubby/
 │   ├── src/
 │   │   ├── auth/           # AuthContext + client dell'authorizer (authApi.ts)
 │   │   ├── api/            # API client factory
-│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, ResocontoPage, ResocontiAdminPage, TesseramentiPage, FatturazionePage, AdminPage, InfoPage, LoginPage, CambioPasswordPage
+│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, ResocontoPage, ResocontiAdminPage, TesseramentiPage, RicevutePage, ImpostazioniPage, InfoPage, LoginPage, CambioPasswordPage
 │   │   ├── components/     # Layout, ElencoIncontri, CardCollassabile, Avviso, Modal, TableScroll, IntestazioneOrdinabile, CaricaAltri, TotaliFiltri, Etichetta, SearchSelect, DateRangeFilter, MarkdownEditor
 │   │   ├── styles/ui.ts    # Stili comuni (pulsanti, form, tabelle), inclusi da ogni pagina
 │   │   ├── utils/formato.ts # Formati di importi e date
@@ -494,11 +610,11 @@ Le immagini Docker sono le stesse per tutti i club; ciò che li distingue arriva
 - backend e authorizer ricevono database, indirizzi e credenziali dai ConfigMap e Secret del proprio
   namespace;
 - il frontend legge all'avvio `/config.json`, generato dalle Variables dell'Environment: nome del club
-  (`TENANT_NAME`), colori (`THEME_*`) e logo (`LOGO_FILE`, uno dei file in `frontend/public/branding/`,
+  (`TENANT_NAME`), colori (`THEME_*`) e logo (`LOGO_FILE`, uno dei file in `branding/`,
   inclusi nell'immagine).
 
 Attività, costi e istruttori **non** sono variabili d'ambiente: sono dati del tenant, gestiti dal
-pannello Admin della sua istanza. Cambiarli non richiede una nuova build del frontend, e le
+pagina Impostazioni della sua istanza. Cambiarli non richiede una nuova build del frontend, e le
 abilitazioni degli istruttori devono comunque stare dove sta il controllo, non nel bundle del browser.
 
 ## Deploy (VPC / Kubernetes)
@@ -893,7 +1009,7 @@ per ogni ambiente.
 `Deploy Frontend` genera inoltre con `jq` la configurazione del club — nome, indirizzi di API e
 authorizer, colori e logo — e la mette nel ConfigMap del frontend, da cui nginx la serve su
 `/config.json`. Si ferma con un errore chiaro se mancano `APP_DOMAIN`, `AUTH_DOMAIN` o `TENANT_NAME`, o se
-`LOGO_FILE` non esiste in `frontend/public/branding/`.
+`LOGO_FILE` non esiste in `branding/`.
 
 #### `Promote` ([promote.yml](.github/workflows/promote.yml))
 
@@ -1076,9 +1192,9 @@ database vengono invece riallineate sugli utenti Postgres a ogni run di Infra.
 | `THEME_SUCCESS` | Colore per importi positivi/conferme | `#16a34a` | `#16a34a` | deploy del frontend |
 | `THEME_NAV_BG` | Colore di sfondo della barra di navigazione | `#2E2A26` | `#2E2A26` | deploy del frontend |
 | `THEME_NAV_TEXT` | Colore del testo/voci di menu sulla barra di navigazione, da abbinare a `THEME_NAV_BG` per restare leggibile | `#F5C36B` | `#F5C36B` | deploy del frontend |
-| `LOGO_FILE` | Nome del file SVG in `frontend/public/branding/` da usare come logo e favicon del club. Il file deve essere nel repository (e quindi nell'immagine): il deploy si ferma se non esiste | `romaasd.svg` | `-` (resta il logo di default) | deploy del frontend |
-| `ENABLE_MODULE_TESSERAMENTO` | Attiva il modulo Tesseramento: pagina Tesseramenti, quota nel pannello Admin e API `/api/tesseramenti`. Attivo **solo** con il valore esatto `true` | `true` | `-` (modulo spento) | deploy di backend e frontend |
-| `ENABLE_MODULE_FATTURAZIONE` | Attiva il modulo Fatturazione: pagina Fatturazione e API `/api/fatturazione`. Attivo **solo** con il valore esatto `true` | `true` | `-` (modulo spento) | deploy di backend e frontend |
+| `LOGO_FILE` | Nome del file in [`branding/`](branding/README.md) da usare come logo e favicon del club. Col modulo Ricevute serve anche un PNG/JPEG omonimo, che il PDF stampa in intestazione. Il deploy si ferma se il file non esiste | `romaasd.svg` | `-` (resta il logo di default) | deploy di backend e frontend |
+| `ENABLE_MODULE_TESSERAMENTO` | Attiva il modulo Tesseramento: pagina Tesseramenti, quota nelle Impostazioni e API `/api/tesseramenti`. Attivo **solo** con il valore esatto `true` | `true` | `-` (modulo spento) | deploy di backend e frontend |
+| `ENABLE_MODULE_RICEVUTE` | Attiva il modulo Ricevute: pagina Ricevute, emissione delle ricevute in PDF e API `/api/documenti`. Attivo **solo** con il valore esatto `true` | `true` | `-` (modulo spento) | deploy di backend e frontend |
 | `RECHARGE_MODE` | Come si registra una ricarica del voucher: `free`, `percentage` o `map` (vedi [Ricariche con valore extra](#ricariche-con-valore-extra)). Un valore non riconosciuto vale `free` | `map` | `free` | deploy di backend e frontend |
 
 I colori e il logo non richiedono una nuova build: cambiano al successivo deploy del frontend.
@@ -1131,16 +1247,18 @@ personale — non lasciarla aperta a tutto internet.
 In DBeaver: host `<IP_VPS>` (o un DNS che punta allo stesso IP, es. `db-dev.clubby.click`), porta
 `DB_NODE_PORT`, stesse credenziali del metodo 1.
 
-#### 3. Docker
+#### 3. Client `psql` usa-e-getta in Docker
+
+Senza installare niente in locale, con il `NodePort` del metodo 2 attivo:
 
 ```bash
-docker run --rm -it \
-  -v "$(pwd)/scripts:/scripts" \
-  -e DB_HOST=<IP_VPS> -e DB_PORT=<...> -e DB_PASSWORD=<...> \
-  -e AUTH_INTERNAL_URL=https://auth-dev.clubby.click -e AUTH_DB_PASSWORD=<...> \
-  postgres:18.3-alpine \
-  sh -c "apk add --no-cache bash curl jq && bash /scripts/seed-demo-data.sh"
+docker run --rm -it postgres:18.3-alpine \
+  psql -h <IP_VPS> -p <DB_NODE_PORT> -U <env>-clubby -d <env>-clubby
 ```
+
+⚠️ **Il seed non si esegue contro un ambiente di cluster.** `scripts/seed-demo-data.sh` **azzera**
+i due database prima di ripopolarli: è uno strumento per la macchina di sviluppo. Per questo non è
+dentro l'immagine del backend, e non è raggiungibile con `kubectl exec` su un pod.
 
 ## Package.json script
 

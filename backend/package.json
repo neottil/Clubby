@@ -1,24 +1,29 @@
 {
   "name": "clubby-backend",
-  "version": "2.6.0",
+  "version": "2.10.0",
   "description": "Clubby API",
   "type": "module",
   "scripts": {
+    "prebuild": "node ../scripts/copia-branding.mjs backend",
     "build": "tsc -p tsconfig.build.json",
     "build:watch": "tsc -p tsconfig.build.json --watch",
     "test": "jest",
     "lint": "eslint src --ext .ts",
+    "predev": "node ../scripts/copia-branding.mjs backend",
     "dev": "npx tsx --watch src/server.ts",
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "dotenv": "^16.4.7",
     "jose": "^5.9.6",
-    "pg": "^8.13.1",
-    "dotenv": "^16.4.7"
+    "n2words": "^6.2.0",
+    "pdfkit": "^0.20.2",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.11.11",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",

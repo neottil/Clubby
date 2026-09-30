@@ -107,6 +107,10 @@ ridistribuire tutto ad ogni push quando magari è cambiato un solo componente. I
    affatto** (non solo "salta il rebuild": non tocca proprio il Deployment k8s esistente).
 4. Se non si trova nessun tag precedente (prima run in assoluto, o dopo una pulizia) → si builda/deploya
    tutto per quello scope, per sicurezza.
+5. **Percorsi extra**: alcune cose stanno fuori da `<scope>/` ma finiscono comunque nell'immagine, e
+   vanno guardate esplicitamente o un commit che tocca solo loro non farebbe partire niente.
+   `scripts/migra.sh` per il backend (lo esegue il Job delle migrazioni); `branding/` per **entrambi**
+   (il backend ne stampa il logo sulle ricevute, il frontend lo serve al browser).
 
 Requisiti perché funzioni:
 - Checkout con `fetch-depth: 0` (serve tutta la history e i tag, non l'ultimo commit soltanto).
@@ -377,11 +381,15 @@ Problemi reali incontrati costruendo questi workflow, non ovvi in anticipo:
   prese da `envFrom` non si aggiornano in un container già avviato, e un deploy che cambia solo il
   ConfigMap lascia la spec del Deployment identica: nessun rollout, quindi il pod continua a girare con
   il valore vecchio, e il flag sembra ignorato. I flag dei moduli opzionali
-  (`ENABLE_MODULE_TESSERAMENTO`, `ENABLE_MODULE_FATTURAZIONE`) sono perciò scritti come `env:` nel
+  (`ENABLE_MODULE_TESSERAMENTO`, `ENABLE_MODULE_RICEVUTE`) sono perciò scritti come `env:` nel
   Deployment: cambiarli cambia la spec e il rollout parte da solo. Corollario: lo stesso flag serve a
   due scope diversi (backend per rifiutare le API, frontend per non mostrare le pagine) e viene letto
   dalla **stessa** Variable dell'Environment in entrambi i workflow di deploy — un solo posto da
   cambiare, nessun rischio di disallineamento fra ciò che si vede e ciò che risponde.
+
+  Vale anche per **`LOGO_FILE`**: la legge il deploy del frontend (per `/config.json`) e quello del
+  backend (per stampare il logo sulle ricevute in PDF). Un valore solo per ambiente, letto da due
+  posti, così il logo in testa alle pagine e quello sui documenti non possono divergere.
 
 - **Il runner è fissato, non `ubuntu-latest`.** Tutti i job girano su `ubuntu-24.04`. `ubuntu-latest` è
   un'etichetta mobile: GitHub la sposta alla LTS successiva a una data annunciata (il 19 ottobre 2026 passa
@@ -426,6 +434,16 @@ quando il build collegato è stato saltato non fallito) → `deploy-<scope>` (ch
 pattern 4, `environment: development`) → `register-<scope>-tag` (ciclo di vita del tag, pattern 3) →
 `cleanup-registry` (pulizia immagini Docker, mantiene le N più recenti per repository indipendentemente dal
 branch).
+
+**Il job `valida-branding`** gira in parallelo alle build e blocca `deploy-backend` e
+`deploy-frontend`. Verifica che ogni logo SVG in `branding/` abbia un gemello PNG/JPEG e che i raster
+non siano sovradimensionati: il PDF delle ricevute non sa disegnare gli SVG, e senza il gemello la
+ricevuta uscirebbe senza logo — cosa di cui nessuno si accorge fino alla prima consegnata.
+
+È un job a sé e non uno step dentro una build per una ragione precisa: l'analisi del diff ragiona per
+cartelle, e un controllo *dentro* una build non girerebbe nei casi in cui quella build non parte. Il
+job resta comunque sempre in piedi — è lo **step** a essere condizionato da
+`vars.ENABLE_MODULE_RICEVUTE` — così i `needs` a valle non incontrano mai uno `skipped`.
 
 **Il job `test`** gira **dopo le build** e **blocca solo i deploy**: migrazioni e tutti e tre i deploy lo
 mettono fra i propri `needs` e pretendono `success`. Un'immagine che non passa i test resta su ghcr.io con

@@ -43,3 +43,7 @@ k8s/rendered-infra/
 
 # Frontend
 frontend/.vite/
+
+# Copie generate da scripts/copia-branding.mjs: la sorgente è branding/ alla radice
+frontend/public/branding/
+backend/branding/

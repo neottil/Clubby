@@ -85,19 +85,19 @@ jobs:
           # backend: qui servono solo a non mostrare pagine che risponderebbero
           # 404. Attivi con il valore esatto "true".
           ENABLE_MODULE_TESSERAMENTO: ${{ vars.ENABLE_MODULE_TESSERAMENTO }}
-          ENABLE_MODULE_FATTURAZIONE: ${{ vars.ENABLE_MODULE_FATTURAZIONE }}
+          ENABLE_MODULE_RICEVUTE: ${{ vars.ENABLE_MODULE_RICEVUTE }}
           # Stessa Variable letta dal backend: qui serve solo a costruire il
           # modulo di ricarica (campo libero o select dei tagli).
           RECHARGE_MODE: ${{ vars.RECHARGE_MODE }}
         run: |
           # Il logo deve essere uno di quelli inclusi nell'immagine
-          # (frontend/public/branding/): un nome sbagliato mostrerebbe
+          # (branding/ alla radice del repo): un nome sbagliato mostrerebbe
           # un'immagine rotta in ogni pagina invece di fermarsi qui. Il
           # controllo guarda il commit da cui parte il workflow: con Promote
           # un logo aggiunto dopo la versione promossa passerebbe il controllo
           # senza essere nell'immagine.
-          if [ -n "$LOGO_FILE" ] && [ ! -f "frontend/public/branding/$LOGO_FILE" ]; then
-            echo "::error::LOGO_FILE='$LOGO_FILE' non esiste in frontend/public/branding/."
+          if [ -n "$LOGO_FILE" ] && [ ! -f "branding/$LOGO_FILE" ]; then
+            echo "::error::LOGO_FILE='$LOGO_FILE' non esiste in branding/."
             exit 1
           fi
 
@@ -117,7 +117,7 @@ jobs:
             --arg navBg "$THEME_NAV_BG" \
             --arg navText "$THEME_NAV_TEXT" \
             --arg tesseramento "$ENABLE_MODULE_TESSERAMENTO" \
-            --arg fatturazione "$ENABLE_MODULE_FATTURAZIONE" \
+            --arg ricevute "$ENABLE_MODULE_RICEVUTE" \
             --arg ricarica "$RECHARGE_MODE" \
             '{
               apiBaseUrl: $api,
@@ -128,7 +128,7 @@ jobs:
                       success: $success, navBg: $navBg, navText: $navText}
                      | with_entries(select(.value != ""))),
               moduli: {tesseramento: ($tesseramento == "true"),
-                       fatturazione: ($fatturazione == "true")},
+                       ricevute: ($ricevute == "true")},
               modalitaRicarica: (if ($ricarica == "percentage" or $ricarica == "map")
                                  then $ricarica else "free" end)
             }')

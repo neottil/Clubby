@@ -286,8 +286,45 @@ export async function updateSocio(id: string, input: UpdateSocioInput): Promise<
   return toSocio(result.rows[0]);
 }
 
+/**
+ * Eliminare un socio porta via con sé, in cascata, i suoi incontri, il voucher
+ * con tutti i movimenti e i tesseramenti. È quindi anche il modo più rapido di
+ * far sparire un incontro rendicontato o una voce già registrata, che
+ * singolarmente il backend rifiuta di cancellare: senza questo controllo, quel
+ * rifiuto sarebbe aggirabile e la garanzia che offre, illusoria.
+ */
 export async function deleteSocio(id: string): Promise<void> {
   await getSocioById(id);
+
+  const vincoli = await query(
+    `SELECT
+       (SELECT COUNT(*) FROM incontro
+         WHERE socio_id = :id AND rendicontato_il IS NOT NULL) AS rendicontati,
+       (SELECT COUNT(*) FROM documento_emesso_voce d
+         WHERE (d.tipo = 'incontro'
+                AND d.riferimento_id IN (SELECT i.id FROM incontro i WHERE i.socio_id = :id))
+            OR (d.tipo = 'tesseramento'
+                AND d.riferimento_id IN (SELECT t.id FROM tesseramento t WHERE t.socio_id = :id))
+            OR (d.tipo = 'ricarica'
+                AND d.riferimento_id IN (SELECT m.id FROM movimento_voucher m
+                                           JOIN voucher v ON v.id = m.voucher_id
+                                          WHERE v.socio_id = :id))) AS documentate`,
+    { id }
+  );
+
+  const rendicontati = Number(vincoli.rows[0].rendicontati);
+  const registrate  = Number(vincoli.rows[0].documentate);
+  if (rendicontati > 0 || registrate > 0) {
+    const motivi = [
+      rendicontati > 0 ? `${rendicontati} incontri già rendicontati all'istruttore` : null,
+      registrate > 0 ? `${registrate} voci per cui è già stato emesso un documento` : null,
+    ].filter(Boolean).join(' e ');
+    throw new BadRequestError(
+      `Questo socio non può essere eliminato: ha ${motivi}, e cancellarlo li porterebbe via con sé. ` +
+      'Se non frequenta più, lascia la scheda al suo posto: lo storico deve restare ricostruibile.'
+    );
+  }
+
   await query(`DELETE FROM socio WHERE id = :id`, { id });
 }
 

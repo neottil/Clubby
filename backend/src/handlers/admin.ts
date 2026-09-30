@@ -24,8 +24,6 @@ import {
   impostaRuolo,
   impostaAdmin,
   cambiaAttivoUtente,
-  promuoviAdmin,
-  retrocediAdmin,
   resetPasswordUtente,
   associaViewerASocio,
   disassociaViewerDaSocio,
@@ -104,31 +102,13 @@ export const handler = async (
 
     // -----------------------------------------------------------
     // POST /api/admin/ruolo   Body: { utente_id, ruolo }
-    // Assegna il ruolo nel club: socio o istruttore. /promuovi e /retrocedi
-    // restano come scorciatoie per concedere e togliere il privilegio admin.
+    // Assegna il ruolo nel club: socio o istruttore. Il privilegio di
+    // amministrazione e indipendente e si cambia con /amministratore.
     // -----------------------------------------------------------
     if (method === 'POST' && path.endsWith('/ruolo')) {
       const body = corpoJson(event);
       await impostaRuolo(body.utente_id, body.ruolo, tokenChiamante);
       return ok({ message: `Ruolo impostato a ${body.ruolo}` });
-    }
-
-    // -----------------------------------------------------------
-    // POST /api/admin/promuovi   Body: { utente_id }
-    // -----------------------------------------------------------
-    if (method === 'POST' && path.endsWith('/promuovi')) {
-      const body = corpoJson(event);
-      await promuoviAdmin(body.utente_id, tokenChiamante);
-      return ok({ message: 'Utente promosso ad admin' });
-    }
-
-    // -----------------------------------------------------------
-    // POST /api/admin/retrocedi   Body: { utente_id }
-    // -----------------------------------------------------------
-    if (method === 'POST' && path.endsWith('/retrocedi')) {
-      const body = corpoJson(event);
-      await retrocediAdmin(body.utente_id, tokenChiamante);
-      return ok({ message: 'Privilegio di amministratore rimosso' });
     }
 
     // -----------------------------------------------------------

@@ -26,12 +26,14 @@ import {
   createIncontro,
   updateIncontro,
   deleteIncontro,
+  rendicontaIncontri,
   type Incontro,
   type ListIncontriOptions,
 } from '../service/incontri.service.js';
 import { verificaAbilitazione } from '../service/attivita.service.js';
 import { getSocioByViewerId } from '../service/soci.service.js';
 import { intParam } from '../util/paginazione.js';
+import { moduloAttivo } from '../util/moduli.js';
 
 /**
  * Opzioni di elenco lette dalla query string. `socio_id` non viene preso da
@@ -44,6 +46,9 @@ function listOptionsFromQuery(qs: Record<string, string> | undefined): ListIncon
     attivitaId: qs?.attivita_id,
     da:         qs?.da,
     a:          qs?.a,
+    // Solo il valore esatto "1": un parametro assente o scritto in altro modo
+    // non deve nascondere righe senza che nessuno l'abbia chiesto.
+    soloDaRendicontare: qs?.solo_da_rendicontare === '1',
     sort:       qs?.sort,
     dir:        qs?.dir === 'asc' ? 'asc' : 'desc',
     limit:      intParam(qs?.limit),
@@ -77,6 +82,33 @@ export const handler = async (
     const socioProprio: string | null = socio?.id ?? null;
 
     // -----------------------------------------------------------
+    // POST /api/incontri/rendiconta   Body: { ids: string[] }
+    //
+    // Prima delle route con {id}: per il pattern delle route "rendiconta"
+    // sarebbe altrimenti l'identificativo di un incontro.
+    //
+    // Solo admin: la rendicontazione è l'atto con cui il club riconosce un
+    // compenso, e un istruttore che potesse marcare i propri incontri
+    // deciderebbe da sé quanto gli spetta.
+    // -----------------------------------------------------------
+    if (method === 'POST' && path.endsWith('/incontri/rendiconta')) {
+      if (!auth.isAdmin) throw new ForbiddenError();
+      const body = corpoJson(event);
+      const ids  = body.ids;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        throw new BadRequestError('ids è obbligatorio e deve contenere almeno un incontro');
+      }
+      if (!ids.every((id: unknown) => typeof id === 'string' && id.length > 0)) {
+        throw new BadRequestError('ids deve contenere solo identificativi di incontro');
+      }
+      const esito = await rendicontaIncontri(ids);
+      // "richiesti" e "rendicontati" differiscono quando un altro admin ha
+      // rendicontato le stesse righe nel frattempo: il frontend lo dice invece
+      // di far credere che siano state aggiornate tutte.
+      return ok({ richiesti: esito.richiesti, rendicontati: esito.rendicontati });
+    }
+
+    // -----------------------------------------------------------
     // GET /api/incontri[?ambito=&socio_id=&istruttore_id=&q=&attivita_id=&da=&a=&sort=&dir=&limit=&offset=]
     // Risposta paginata: { data, total, totale_costo, limit, offset }
     //
@@ -98,13 +130,21 @@ export const handler = async (
         // invece di ripiegare su un altro ambito.
         if (!auth.isIstruttore) return ok(vuoto);
         options.istruttoreId = auth.userId;
+        // Niente ricevute qui: sono gli incontri che ha TENUTO, quindi di altri
+        // soci. Il codice del documento direbbe all'istruttore che esiste una
+        // ricevuta intestata a qualcun altro, e quale numero ha. Un admin la
+        // vede comunque, perché vede tutto (ramo sotto).
+        options.conDocumento = moduloAttivo('ricevute') && auth.isAdmin;
       } else if (auth.isAdmin && ambito !== 'socio') {
         options.socioId      = event.queryStringParameters?.socio_id;
         options.istruttoreId = event.queryStringParameters?.istruttore_id;
+        options.conDocumento = moduloAttivo('ricevute');
       } else {
         // Nessun socio associato → nessun dato (mai "tutti gli incontri").
         if (!socioProprio) return ok(vuoto);
         options.socioId = socioProprio;
+        // Qui l'intestatario è chi chiama: la ricevuta è sua.
+        options.conDocumento = moduloAttivo('ricevute');
       }
 
       const { rows, total, totaleCosto } = await listIncontri(options);
@@ -122,11 +162,18 @@ export const handler = async (
     // -----------------------------------------------------------
     if (method === 'GET' && incontroId) {
       const incontro = await getIncontroById(incontroId);
+      const intestatario = auth.isAdmin || (socioProprio !== null && incontro.socio_id === socioProprio);
       const puoVedere =
-        auth.isAdmin ||
-        (socioProprio !== null && incontro.socio_id === socioProprio) ||
+        intestatario ||
         (auth.isIstruttore && incontro.istruttore_id === auth.userId);
       if (!puoVedere) throw new ForbiddenError();
+      // Stessa regola dell'elenco: la ricevuta la vede l'intestatario, non
+      // l'istruttore che ha tenuto l'incontro di un altro socio. Si rilegge
+      // invece di aggiungere sempre le giunture, perché questo ramo è l'unico
+      // dei tanti usi di getIncontroById a cui il documento serve.
+      if (intestatario && moduloAttivo('ricevute')) {
+        return ok(await getIncontroById(incontroId, undefined, true));
+      }
       return ok(incontro);
     }
 

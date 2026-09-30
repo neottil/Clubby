@@ -106,7 +106,7 @@ export const ATTESE = {
   comeSocioSocio2: { total: 3, costo: 75 },
   saldoSocio1: 60,
   saldoSocio2: -5,
-  // Ricariche fatturate: l'acquisto del voucher più le ricariche successive.
+  // Ricariche registrabili: l'acquisto del voucher più le ricariche successive.
   ricaricheSocio1: 150,
   ricaricheSocio2: 70,
   abilitazioniIstruttore2: ['dogdance_test', 'educazione_test', 'mantrailing_test'],
@@ -168,6 +168,24 @@ export async function pulisciDatiTest(): Promise<void> {
           OR attivita_id IN (SELECT id FROM attivita WHERE nome LIKE $2)`,
       [idAccount, LIKE_NOME]
     );
+    // I documenti PRIMA dei soci: documento.socio_id ha una foreign key senza
+    // ON DELETE, quindi una ricevuta di prova bloccherebbe l'eliminazione del
+    // socio e la pulizia fallirebbe a metà. Le righe di
+    // documento_emesso_voce che vi puntano se ne vanno con il documento solo
+    // se le si toglie prima: anche quella foreign key è senza cascata.
+    await app.query(
+      `DELETE FROM documento_emesso_voce
+        WHERE documento_id IN (
+          SELECT d.id FROM documento d
+            JOIN socio s ON s.id = d.socio_id
+           WHERE s.email LIKE $1 OR s.cognome LIKE $2)`,
+      [LIKE_EMAIL, LIKE_NOME]
+    );
+    await app.query(
+      `DELETE FROM documento
+        WHERE socio_id IN (SELECT id FROM socio WHERE email LIKE $1 OR cognome LIKE $2)`,
+      [LIKE_EMAIL, LIKE_NOME]
+    );
     // Voucher, movimenti e incontri se ne vanno a cascata con il socio.
     await app.query('DELETE FROM socio WHERE email LIKE $1 OR cognome LIKE $2', [LIKE_EMAIL, LIKE_NOME]);
     // Rete di sicurezza per incontri di prova finiti fuori dai soci di prova,
@@ -179,6 +197,20 @@ export async function pulisciDatiTest(): Promise<void> {
       [LIKE_NOME, idAccount]
     );
     await app.query('DELETE FROM attivita WHERE nome LIKE $1', [LIKE_NOME]);
+    // Le voci registrate puntano a tre tabelle diverse senza foreign key, quindi
+    // le cancellazioni qui sopra non se le portano dietro: si tolgono quelle
+    // rimaste a puntare nel vuoto. Il criterio è l'assenza della riga
+    // d'origine, non il marcatore "_test": una riga orfana non serve comunque
+    // a nessuno, qualunque l'abbia creata.
+    await app.query(
+      `DELETE FROM documento_emesso_voce d
+        WHERE (d.tipo = 'incontro'
+               AND NOT EXISTS (SELECT 1 FROM incontro i WHERE i.id = d.riferimento_id))
+           OR (d.tipo = 'tesseramento'
+               AND NOT EXISTS (SELECT 1 FROM tesseramento t WHERE t.id = d.riferimento_id))
+           OR (d.tipo = 'ricarica'
+               AND NOT EXISTS (SELECT 1 FROM movimento_voucher m WHERE m.id = d.riferimento_id))`
+    );
     // Le sessioni se ne vanno a cascata con l'account.
     await auth.query('DELETE FROM utente WHERE email LIKE $1', [LIKE_EMAIL]);
   } finally {
@@ -268,7 +300,7 @@ async function creaDati(): Promise<DatiTest> {
     { attivita_ids: ABILITAZIONI_ISTRUTTORE2.map(a => attivita[a]) }, 'abilitazioni di istruttore2');
 
   // istruttore2 porta un voucher già in uso, con il saldo importato (non
-  // fatturato); socio1 e socio2 lo acquistano, cioè lo attivano con una ricarica.
+  // registrabile); socio1 e socio2 lo acquistano, cioè lo attivano con una ricarica.
   await esegui('POST', '/api/voucher', { socio_id: soci.istruttore2, saldo_iniziale: 100 }, 'voucher importato di istruttore2');
   await esegui('POST', '/api/voucher', { socio_id: soci.socio1, ricarica: 150 }, 'voucher di socio1');
   const voucherSocio2 = await esegui('POST', '/api/voucher', { socio_id: soci.socio2, ricarica: 40 }, 'voucher di socio2');

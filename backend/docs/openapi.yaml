@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: |
     API applicative di Clubby: soci, attività, istruttori, incontri, voucher,
-    tesseramenti, fatturazione e amministrazione.
+    tesseramenti, ricevute e amministrazione.
 
     **Autenticazione**: ogni endpoint sotto `/api` richiede un access token emesso
     dall'authorizer (`Authorization: Bearer <token>`), verificato con le chiavi
@@ -28,7 +28,7 @@ info:
     **Date**: le date di calendario sono stringhe `YYYY-MM-DD`; gli istanti
     (`created_at`, `updated_at`) sono date-time ISO in UTC.
 
-    **Elenchi paginati** (incontri, movimenti, fatturazione): parametri `limit`
+    **Elenchi paginati** (incontri, movimenti, voci registrabili): parametri `limit`
     (default 25, massimo 200) e `offset`. `total` è il numero di righe che
     soddisfano il filtro, non quelle restituite; i totali di importo coprono
     l'intero risultato filtrato. Nella risposta `limit` riporta il valore
@@ -60,9 +60,11 @@ tags:
       **Modulo opzionale.** Presenti solo dove la variabile `ENABLE_MODULE_TESSERAMENTO`
       dell'ambiente vale `true`; altrove rispondono `404` come un percorso inesistente,
       qualunque sia il ruolo di chi chiama.
-  - name: Fatturazione
+  - name: Documenti
     description: |
-      **Modulo opzionale.** Presenti solo dove la variabile `ENABLE_MODULE_FATTURAZIONE`
+      Voci ancora da documentare ed emissione delle ricevute in PDF.
+
+      **Modulo opzionale.** Presenti solo dove la variabile `ENABLE_MODULE_RICEVUTE`
       dell'ambiente vale `true`; altrove rispondono `404` come un percorso inesistente,
       qualunque sia il ruolo di chi chiama.
   - name: Impostazioni
@@ -708,9 +710,9 @@ paths:
       summary: Attiva il voucher di un socio
       description: |
         Solo admin, un voucher per socio. `ricarica` è il credito acquistato: diventa la
-        prima ricarica ("Acquisto voucher") e viene fatturata. `saldo_iniziale` è il
+        prima ricarica ("Acquisto voucher"), registrabile. `saldo_iniziale` è il
         credito importato da un voucher già in uso prima di Clubby: non è una ricarica e
-        non viene fatturato.
+        non è registrabile.
       requestBody:
         required: true
         content:
@@ -781,7 +783,7 @@ paths:
           legge il valore accreditato — un importo non previsto è rifiutato con 400.
 
         Nella risposta `importo` è il credito accreditato e `importo_pagato` quanto è stato
-        pagato, quando le due cose differiscono. La Fatturazione conta il pagato.
+        pagato, quando le due cose differiscono. Le ricevute contano il pagato.
       requestBody:
         required: true
         content:
@@ -1021,7 +1023,10 @@ paths:
     get:
       tags: [Tesseramenti]
       summary: Storico dei rinnovi di un socio
-      description: Solo admin. In ordine di scadenza, dalla più recente.
+      description: |
+        Admin, **o il socio stesso**: è l'unica rotta dell'area aperta oltre l'admin.
+        Il confronto è con la scheda socio collegata all'account, non con il parametro:
+        chiedere l'id di un altro risponde 403. In ordine di scadenza, dalla più recente.
       responses:
         '200':
           description: Rinnovi
@@ -1039,16 +1044,90 @@ paths:
           $ref: '#/components/responses/NonTrovato'
 
   # ---------------------------------------------------------------------------
-  /api/fatturazione:
+  /api/documenti/voci:
     get:
-      tags: [Fatturazione]
-      summary: Voci fatturate
+      tags: [Documenti]
+      summary: Voci ancora da documentare
       description: |
         Solo admin. Tre fonti: ricariche dei voucher, quote dei tesseramenti e incontri
         non coperti da un voucher. Addebiti e saldi iniziali dei voucher sono esclusi.
 
         Prima i tesseramenti, poi tutto il resto dalla data più recente.
         `totale_importo` somma l'intero risultato filtrato.
+
+        Per default contiene solo ciò che resta da registrare: le voci già comprese in
+        una ricevuta tornano solo con `includi_emesse=1`.
+      parameters:
+        - name: socio_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: includi_emesse
+          in: query
+          description: Solo il valore esatto `1` comprende anche le voci già documentate.
+          schema:
+            type: string
+            enum: ['1']
+        - $ref: '#/components/parameters/Da'
+        - $ref: '#/components/parameters/A'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Pagina di voci
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaVoci'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+
+  # ---------------------------------------------------------------------------
+  /api/documenti/anteprima:
+    post:
+      tags: [Documenti]
+      summary: Anteprima di una ricevuta
+      description: |
+        Solo admin. Genera il PDF e lo restituisce **senza scrivere niente**: nessun
+        documento viene creato e nessun numero viene consumato.
+
+        `numero_provvisorio` è quello che il documento avrebbe se venisse confermato
+        adesso; fra l'anteprima e la conferma un altro admin può emettere, quindi il
+        PDF definitivo viene rigenerato con il numero vero.
+
+        L'importo è sempre ricalcolato dal database: quello eventualmente mandato dal
+        client viene ignorato.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmissioneInput'
+      responses:
+        '200':
+          description: PDF dell'anteprima, in base64
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnteprimaDocumento'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+
+  # ---------------------------------------------------------------------------
+  /api/documenti:
+    get:
+      tags: [Documenti]
+      summary: Ricevute emesse
+      description: |
+        Solo admin. Elenco paginato dei documenti, **senza** i byte dei PDF: quelli si
+        scaricano uno alla volta da `/api/documenti/{id}`.
       parameters:
         - name: socio_id
           in: query
@@ -1061,15 +1140,86 @@ paths:
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Pagina di voci
+          description: Pagina di ricevute
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginaFatturazione'
+                $ref: '#/components/schemas/PaginaDocumenti'
         '401':
           $ref: '#/components/responses/NonAutenticato'
         '403':
           $ref: '#/components/responses/AccessoNegato'
+    post:
+      tags: [Documenti]
+      summary: Emette una ricevuta
+      description: |
+        Solo admin. Assegna il numero definitivo, genera il PDF, lo conserva e lega le
+        voci al documento — tutto in un'unica transazione.
+
+        Una ricevuta emessa **non si annulla e non si elimina**: è per questo che
+        esiste l'anteprima.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmissioneInput'
+      responses:
+        '201':
+          description: Ricevuta emessa, con il PDF in base64
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentoEmesso'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '409':
+          description: |
+            Una delle voci selezionate è stata documentata nel frattempo. L'importo non
+            sarebbe più quello visto in anteprima, quindi non viene emesso niente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Errore'
+
+  # ---------------------------------------------------------------------------
+  /api/documenti/{id}:
+    get:
+      tags: [Documenti]
+      summary: Scarica una ricevuta
+      description: |
+        Restituisce il PDF conservato, con `Content-Type: application/pdf`.
+
+        È l'**unica** rotta dell'area aperta oltre l'admin: la può leggere anche il
+        socio a cui la ricevuta è intestata, perché è ciò che rende utile l'icona
+        nei suoi movimenti. Il controllo confronta `socio_id` del documento con la
+        scheda di chi chiama, non il ruolo: un socio che prova l'id di un altro
+        riceve `403`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Il PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
 
   # ---------------------------------------------------------------------------
   /api/impostazioni:
@@ -1261,52 +1411,6 @@ paths:
                   $ref: '#/components/schemas/RiferimentoUtente'
                 admin:
                   type: boolean
-      responses:
-        '200':
-          $ref: '#/components/responses/Messaggio'
-        '400':
-          $ref: '#/components/responses/RichiestaNonValida'
-        '401':
-          $ref: '#/components/responses/NonAutenticato'
-        '403':
-          $ref: '#/components/responses/AccessoNegato'
-        '404':
-          $ref: '#/components/responses/NonTrovato'
-
-  /api/admin/promuovi:
-    post:
-      tags: [Amministrazione]
-      summary: Concede il privilegio admin
-      description: Scorciatoia di `/api/admin/amministratore` con `admin` a true.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CorpoUtente'
-      responses:
-        '200':
-          $ref: '#/components/responses/Messaggio'
-        '400':
-          $ref: '#/components/responses/RichiestaNonValida'
-        '401':
-          $ref: '#/components/responses/NonAutenticato'
-        '403':
-          $ref: '#/components/responses/AccessoNegato'
-        '404':
-          $ref: '#/components/responses/NonTrovato'
-
-  /api/admin/retrocedi:
-    post:
-      tags: [Amministrazione]
-      summary: Toglie il privilegio admin
-      description: Scorciatoia di `/api/admin/amministratore` con `admin` a false; non su sé stessi.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CorpoUtente'
       responses:
         '200':
           $ref: '#/components/responses/Messaggio'
@@ -1717,6 +1821,21 @@ components:
         note_markdown:
           type: boolean
           description: Le note sono in Markdown
+        documento_id:
+          type: [string, 'null']
+          format: uuid
+          description: |
+            La ricevuta che comprende questa riga. Presente solo a modulo ricevute attivo
+            e per chi ne è intestatario: l'admin sempre, il socio sui propri dati. Un
+            istruttore che guarda gli incontri che ha solo tenuto non riceve il campo.
+        documento_anno:
+          type: [integer, 'null']
+          description: Anno della ricevuta; con il numero forma il codice mostrato e il nome del file.
+          example: 2026
+        documento_numero:
+          type: [integer, 'null']
+          description: Numero della ricevuta nell'anno.
+          example: 60
         created_at:
           type: string
           format: date-time
@@ -1878,8 +1997,8 @@ components:
           description: |
             Solo per le ricariche con valore extra (`RECHARGE_MODE` `percentage` o `map`):
             quanto ha pagato davvero il socio, quando è meno del credito accreditato in
-            `importo`. `null` quando le due cose coincidono. È questo che la Fatturazione
-            conta come incasso.
+            `importo`. `null` quando le due cose coincidono. È questo che le ricevute
+            contano come incasso.
           oneOf:
             - $ref: '#/components/schemas/Importo'
             - type: 'null'
@@ -1888,6 +2007,21 @@ components:
         created_at:
           type: string
           format: date-time
+        documento_id:
+          type: [string, 'null']
+          format: uuid
+          description: |
+            La ricevuta che comprende questa ricarica. `null` su addebiti e rettifiche,
+            che non sono voci documentabili, e sulle ricariche marcate come emesse prima
+            che l'applicazione producesse documenti.
+        documento_anno:
+          type: [integer, 'null']
+          description: Anno della ricevuta. Con `documento_numero` forma il codice mostrato all'utente e il nome del file (`ricevuta_<anno>_<numero>.pdf`).
+          example: 2026
+        documento_numero:
+          type: [integer, 'null']
+          description: Numero della ricevuta nell'anno. `null` esattamente quando lo è `documento_id`.
+          example: 60
 
     TaglioRicarica:
       type: object
@@ -1958,6 +2092,21 @@ components:
         created_at:
           type: string
           format: date-time
+        documento_id:
+          type: [string, 'null']
+          format: uuid
+          description: |
+            La ricevuta che comprende questa riga. Presente solo a modulo ricevute attivo
+            e per chi ne è intestatario: l'admin sempre, il socio sui propri dati. Un
+            istruttore che guarda gli incontri che ha solo tenuto non riceve il campo.
+        documento_anno:
+          type: [integer, 'null']
+          description: Anno della ricevuta; con il numero forma il codice mostrato e il nome del file.
+          example: 2026
+        documento_numero:
+          type: [integer, 'null']
+          description: Numero della ricevuta nell'anno.
+          example: 60
 
     SituazioneTesseramento:
       type: object
@@ -1999,7 +2148,7 @@ components:
           minimum: 0
           description: Omesso = quota delle impostazioni
 
-    VoceFatturazione:
+    VoceDocumento:
       type: object
       required: [id, tipo, data, socio_id, nome, cognome, descrizione, importo]
       properties:
@@ -2024,19 +2173,178 @@ components:
           type: string
         importo:
           $ref: '#/components/schemas/Importo'
+        emessa_il:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando è stato emesso il documento che comprende questa voce.
+        documento_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            La ricevuta che comprende la voce. Resta `null` sulle voci marcate come
+            emesse prima che l'applicazione producesse documenti: sono storico.
+        documento_anno:
+          type: [integer, 'null']
+          description: Anno della ricevuta. Con `documento_numero` forma il codice mostrato all'utente e il nome del file (`ricevuta_<anno>_<numero>.pdf`).
+          example: 2026
+        documento_numero:
+          type: [integer, 'null']
+          description: Numero della ricevuta nell'anno. `null` esattamente quando lo è `documento_id`.
+          example: 60
 
-    PaginaFatturazione:
+    PaginaVoci:
       type: object
       required: [data, total, totale_importo, limit, offset]
       properties:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/VoceFatturazione'
+            $ref: '#/components/schemas/VoceDocumento'
         total:
           type: integer
         totale_importo:
           type: number
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    RiferimentoVoce:
+      type: object
+      required: [tipo, id]
+      description: La coppia che identifica una voce fra le tre origini possibili.
+      properties:
+        tipo:
+          type: string
+          enum: [ricarica, tesseramento, incontro]
+        id:
+          type: string
+          format: uuid
+
+    EmissioneInput:
+      type: object
+      required: [socio_id, causale, voci]
+      properties:
+        socio_id:
+          type: string
+          format: uuid
+          description: Una ricevuta è intestata a una persona sola.
+        causale:
+          type: string
+          description: Testo libero, obbligatorio, stampato sul documento.
+        voci:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/RiferimentoVoce'
+
+    AnteprimaDocumento:
+      type: object
+      required: [pdf_base64, numero_provvisorio, anno, importo, importo_lettere, nome_file]
+      properties:
+        pdf_base64:
+          type: string
+          description: Il PDF, codificato in base64.
+        numero_provvisorio:
+          type: integer
+          description: |
+            Il numero che il documento avrebbe se confermato adesso. Non è riservato:
+            un'altra emissione nel frattempo lo sposta.
+        anno:
+          type: integer
+        importo:
+          $ref: '#/components/schemas/Importo'
+        importo_lettere:
+          type: string
+          example: centosessanta/00
+        nome_file:
+          type: string
+          description: Nome proposto per il download, nella forma ricevuta_<anno>_<numero>.pdf.
+          example: ricevuta_2026_41.pdf
+
+    DocumentoEmesso:
+      type: object
+      required: [id, anno, numero, data_documento, importo, importo_lettere, nome_file, pdf_base64]
+      properties:
+        id:
+          type: string
+          format: uuid
+        anno:
+          type: integer
+        numero:
+          type: integer
+        data_documento:
+          type: string
+          format: date
+        importo:
+          $ref: '#/components/schemas/Importo'
+        importo_lettere:
+          type: string
+        nome_file:
+          type: string
+          description: Nome proposto per il download, nella forma ricevuta_<anno>_<numero>.pdf.
+          example: ricevuta_2026_41.pdf
+        pdf_base64:
+          type: string
+
+    Documento:
+      type: object
+      required: [id, anno, numero, data_documento, socio_id, intestatario, causale, importo]
+      properties:
+        id:
+          type: string
+          format: uuid
+        anno:
+          type: integer
+        numero:
+          type: integer
+        data_documento:
+          type: string
+          format: date
+        socio_id:
+          type: string
+          format: uuid
+        intestatario:
+          type: string
+          description: |
+            Nome e cognome come erano al momento dell'emissione: il documento deve
+            restare leggibile com'era, anche se il socio cambia cognome.
+        causale:
+          type: string
+        importo:
+          $ref: '#/components/schemas/Importo'
+        importo_lettere:
+          type: string
+        nome_file:
+          type: string
+          description: Nome proposto per il download, nella forma ricevuta_<anno>_<numero>.pdf.
+          example: ricevuta_2026_41.pdf
+        emesso_da:
+          type: string
+          nullable: true
+          description: Id dell'account che ha confermato l'emissione.
+        created_at:
+          type: string
+          format: date-time
+        nome:
+          type: string
+          description: Nome ATTUALE del socio, dalla giuntura con la sua scheda.
+        cognome:
+          type: string
+
+    PaginaDocumenti:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Documento'
+        total:
+          type: integer
         limit:
           type: integer
         offset:
@@ -2056,6 +2364,19 @@ components:
           description: |
             Percentuale di valore aggiunto a una ricarica, usata solo dove
             `RECHARGE_MODE` vale `percentage`. 0 = nessun extra.
+        ricevuta_intestazione:
+          type: string
+          maxLength: 2000
+          description: |
+            Testo multiriga stampato in cima alle ricevute: denominazione, indirizzo,
+            codice fiscale, numero di registro. Il **logo** non sta qui — arriva
+            dall'immagine, da `branding/`, scelto per ambiente da `LOGO_FILE`.
+        ricevuta_pie_pagina:
+          type: string
+          maxLength: 2000
+          description: |
+            Piè di pagina delle ricevute, tipicamente la clausola sull'esenzione
+            dall'imposta di bollo.
 
     UtenteAmministrabile:
       type: object

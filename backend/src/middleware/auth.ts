@@ -58,6 +58,16 @@ export interface ResponseResult {
   statusCode: number;
   headers?: Record<string, string>;
   body?: string;
+  /**
+   * `body` contiene byte codificati in base64, non testo.
+   *
+   * Serve alle risposte binarie (oggi solo i PDF delle ricevute): `body` è
+   * tipizzato `string`, e un Buffer convertito in stringa UTF-8 arriverebbe
+   * corrotto. Il server decodifica prima di scrivere sulla risposta.
+   *
+   * È additivo: chi non lo passa si comporta esattamente come prima.
+   */
+  isBase64Encoded?: boolean;
 }
 
 /**

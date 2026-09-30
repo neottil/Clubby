@@ -23,8 +23,12 @@ export default function SocioSelect({ soci, value, onChange, placeholder, resetL
       value={value}
       onChange={onChange}
       getValue={s => s.id}
-      getLabel={s => `${s.nome} ${s.cognome}`}
-      placeholder={placeholder ?? 'Cerca per nome o cognome...'}
+      // Cognome prima del nome, come ovunque nell'applicazione (elenchi,
+      // tabelle, ricevute): in un elenco di persone è il cognome che si cerca
+      // con l'occhio. La ricerca non ne risente, perché confronta le parole
+      // una per una e senza badare all'ordine.
+      getLabel={s => `${s.cognome} ${s.nome}`}
+      placeholder={placeholder ?? 'Cerca per cognome o nome...'}
       emptyLabel='Nessun socio trovato'
       resetLabel={resetLabel}
     />
