@@ -617,6 +617,17 @@ cambia percorso.
 | Redirect da `/admin` | **nessuno** | scelta esplicita: i segnalibri sulla vecchia rotta danno 404 |
 | Modulo separato per le ricevute | **scartato**, ma il codice è isolato | numerazione, documento e legame con le voci stanno in **una transazione su un database solo**. Spezzarli su due servizi imporrebbe di ricostruire a mano quella garanzia, proprio sulla parte che non può sbagliare |
 
+## Alternative scartate
+
+Le righe marcate "scartata" nella tabella qui sopra appartengono a questa
+sezione: la spec è stata scritta prima che il template la prevedesse, e non sono
+state spostate per non rimaneggiare una spec chiusa. Qui sotto quelle emerse
+**durante l'implementazione**, che non erano registrate da nessuna parte.
+
+| Alternativa | Perché no |
+|---|---|
+| **Risolvere il logo cercando prima `cwd/branding` e poi `cwd/../branding`** | in sviluppo il backend gira da `backend/`, dove `branding/` non c'è, e il fallback al livello superiore lo faceva funzionare. Ma così l'unico percorso che conta — quello dell'immagine Docker, dove `branding/` è accanto al processo — non veniva più esercitato in locale: si collaudava la via di scorta e si spediva quella vera. La regola è rimasta una sola (`branding/` accanto al processo) e in sviluppo la cartella viene **copiata** anche in `backend/`, come già si faceva per il frontend |
+
 ## Rischi e impatti
 
 **Lo spostamento di `branding/` può rompere il frontend in silenzio.** Vite

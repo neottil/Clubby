@@ -50,6 +50,20 @@ specifica, poi si implementa.
    - Se durante l'implementazione si scopre che un requisito va cambiato, aggiornare la spec
    - Non implementare features extra non documentate nella spec
 
+3-ter. **Scrivere nella spec le alternative rifiutate, nel momento in cui lo sono**
+   - Quando una proposta viene scartata — da chi scrive la spec o dall'utente
+     durante l'implementazione — va nella sezione `## Alternative scartate` della
+     spec, con il motivo. Subito, non alla fine: è nel momento del rifiuto che il
+     motivo è noto
+   - Comprese, e soprattutto, le soluzioni che **funzionerebbero** ma rompono una
+     coerenza del progetto. Sono le più facili da riproporre, perché a guardarle
+     isolate non hanno niente che non torni
+   - Il motivo è che questa è l'unica conoscenza che i file non catturano da soli.
+     Come funziona l'applicazione sta nel codice e in `docs/`; cosa è stato
+     deciso sta nelle `Decisioni`; **cosa è stato provato e scartato non sta in
+     nessun posto** se non lo si scrive, e vive solo nella conversazione in cui è
+     avvenuto. Quando quella conversazione finisce, qualcuno la riproporrà
+
 3-bis. **GATE: Mai marcare Completata senza il test dell'utente**
    - Finita l'implementazione, la spec passa a `[x] In test (utente)` e ci si
      ferma lì. Non si marca Completata da soli, nemmeno con la suite verde:
@@ -83,16 +97,33 @@ specifica, poi si implementa.
    - Dopo ogni modifica, ricontrollare **tutti** i README del progetto e
      aggiornare quelli che la modifica ha reso falsi o incompleti. Non a fine
      lavoro, non "quando capita": nello stesso passaggio, o restano indietro
-   - I README del progetto, e cosa descrive ciascuno:
+   - La documentazione del progetto, e cosa descrive ciascun pezzo:
 
      | File | Copre |
      |---|---|
-     | `README.md` | il prodotto: cos'è, come si avvia, cosa fa |
+     | `README.md` | solo l'essenziale: cos'è, avvio rapido, indice. **Resta snello**: il contenuto nuovo va in `docs/` |
+     | `docs/readme/readme.md` | l'indice della documentazione di prodotto, diviso per contesto |
+     | `docs/readme/*.md` | funzionalità, ruoli, voucher e ricevute, account, API, architettura, deploy, pipeline, migrazioni, manifest, variabili |
+     | `docs/developer/*.md` | documentazione tecnica: sviluppo locale e operazioni su cluster. **Nessuna credenziale in chiaro** |
+     | `specs/README.md` | indice delle spec: dove è stata decisa una cosa (vedi regola 7) |
+     | `scripts/seed/README.md` | i dati di esempio: quali crea, quali variabili accetta, perché quei dati |
      | `.github/README.md` | workflow, Environment, Variables e Secrets |
      | `backend/src/db/migrations/README.md` | come si scrive e applica una migrazione |
      | `authorizer/src/db/migrations/README.md` | idem per il database degli account |
      | `branding/README.md` | i loghi dei club e i formati richiesti |
      | `k8s/templates/openwa/README.md` | il componente OpenWA |
+
+   - **Due livelli, da non mescolare**: `docs/readme/` parla a chi vuole capire
+     *cosa fa* Clubby, `docs/developer/` a chi ci lavora. Un dettaglio di
+     configurazione nel primo lo appesantisce senza servire a nessuno; una
+     spiegazione del dominio nel secondo non la trova chi la cerca
+   - Un file di `docs/` che supera le ~300 righe va diviso per contesto: il
+     README di progetto era arrivato a 1283 righe, e a quel punto nessuno —
+     persona o agente — lo legge più, lo cerca soltanto
+   - **Il lavoro da fare sta nelle issue di GitHub, non in un file.** Niente
+     sezioni "TODO" nei README e nessun `todo.md`: una lista di cose da fare
+     dentro al repository non si chiude mai, perché nessuno la rilegge quando
+     quelle cose vengono fatte. Se ne trovi una, va svuotata verso le issue
 
    - Non serve un aggiornamento per ciò che un lettore del README non nota mai
      (refactoring interno, formattazione, commenti). Serve per tutto ciò che
@@ -100,6 +131,19 @@ specifica, poi si implementa.
      endpoint, passi di avvio, struttura delle cartelle, vincoli nuovi
    - Un README che descrive qualcosa che non esiste più è peggio di un README
      mancante: il secondo manda a leggere il codice, il primo manda fuori strada
+
+7. **Aggiornare l'indice delle spec a fine implementazione**
+   - Finita l'implementazione di una spec, va aggiornata la sua riga in
+     [specs/README.md](specs/README.md): stato e, in una frase, **cosa decide** —
+     non cosa implementa
+   - Una spec nuova va aggiunta all'indice nello stesso momento in cui nasce il
+     file, anche se è ancora in Draft
+   - A cosa serve: rispondere a "questa scelta è già stata discussa?" senza
+     aprire tutte le spec. Senza l'indice la risposta costa quattro letture da
+     centinaia di righe, e il modo più rapido di scoprirlo diventa rifare la
+     discussione da zero
+   - Una spec implementata e non indicizzata è una decisione che il prossimo non
+     trova: vale come non documentata
 
 ### Workflow in Pratica (come seguire le regole)
 
@@ -110,18 +154,25 @@ AGENTE:
   2. Se NON esiste → CREARE la spec (Draft) → mostrare all'utente → chiedere approvazione
   3. Se esiste Draft → chiedere approvazione
   4. Se esiste Approvata → implementare
-  5. Allineare i README resi falsi dalla modifica
+  5. Allineare la documentazione resa falsa dalla modifica (README e docs/)
   6. Bump delle versioni dei moduli toccati
-  7. Dopo implementazione → marcare come "In test (utente)" e FERMARSI
-  8. L'utente prova; se serve si corregge la spec e il codice, restando in test
-  9. Solo a test superato → compilare "Verifica" e marcare Completata
+  7. Aggiornare la riga della spec in specs/README.md
+  8. Dopo implementazione → marcare come "In test (utente)" e FERMARSI
+  9. L'utente prova; se serve si corregge la spec e il codice, restando in test
+ 10. Solo a test superato → compilare "Verifica" e marcare Completata
 ```
 
 ### Directory Struttura
 
 ```
 clubby/
+├── README.md               # Snello: cos'è, avvio rapido, indice
+├── docs/
+│   ├── readme/             # Documentazione di prodotto, divisa per contesto
+│   │   └── readme.md       # Indice: da qui si raggiunge tutto il resto
+│   └── developer/          # Documentazione tecnica (sviluppo locale, cluster)
 ├── specs/                  # Specifiche delle feature
+│   ├── README.md           # Indice: cosa decide ciascuna spec
 │   └── template.md         # Template per nuove spec
 ├── backend/                # API (node:http + TypeScript)
 │   ├── src/
@@ -141,7 +192,8 @@ clubby/
 │   └── k8s/
 ├── tests/api/              # Suite black-box via HTTP (node:test)
 ├── branding/               # loghi dei club (SVG per il browser, PNG per i PDF)
-├── scripts/                # init-local, migra, seed-demo-data, copia-branding
+├── scripts/                # init-local, migra, copia-branding
+│   └── seed/               # I passi del seed, caricati da seed-demo-data.sh
 ├── k8s/templates/          # manifest applicati da Infra e dalle migrazioni
 ├── bruno/                  # Collezione di richieste API
 ├── .github/                # Workflow e relativo README
@@ -267,13 +319,19 @@ PostgreSQL su `localhost:5432` (docker-compose):
 | Password | `clubby` | `clubby_auth` |
 
 **Seed di esempio**: `scripts/seed-demo-data.sh` — **azzera entrambi i database**
-e li ripopola. Unico admin `admin@clubby.local` (password da
-`INITIAL_ADMIN_PASSWORD`, nessuna scheda socio), gli altri account con
-`DEMO_PASSWORD` (default `clubby2026`) — i due istruttori **non** sono admin.
-Fra i soci, `sara.vitali@clubby.dev` non ha voucher (paga a parte) e
-`paolo.greco@clubby.dev` è una scheda **senza account**, da collegare a mano. Chiede conferma interattiva; `SEED_FORZA=1` la salta. Sta fuori
-dall'immagine Docker di proposito: azzera due database, e non deve essere a
-portata di `kubectl exec` su uno staging.
+e li ripopola. Il file è solo l'ordine delle operazioni: i passi stanno in
+`scripts/seed/`, uno per fase, documentati in
+[scripts/seed/README.md](scripts/seed/README.md) — che è anche l'unico posto in
+cui si descrivono i dati creati, per non averne due versioni.
+
+Unico admin `admin@clubby.local` (email e password dall'admin iniziale
+dell'authorizer, nessuna scheda socio), gli altri account con `DEMO_PASSWORD`
+(default `clubby2026`) — i due istruttori **non** sono admin. Fra i soci,
+`sara.vitali@clubby.dev` non ha voucher (paga a parte) e
+`paolo.greco@clubby.dev` è una scheda **senza account**, da collegare a mano.
+Chiede conferma interattiva; `SEED_FORZA=1` la salta. Sta fuori dall'immagine
+Docker di proposito: azzera due database, e non deve essere a portata di
+`kubectl exec` su uno staging.
 
 ### Migrazioni
 

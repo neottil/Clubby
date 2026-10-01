@@ -60,12 +60,30 @@ Comportamento su schermo stretto, se la feature tocca una tabella.
 
 ## Decisioni
 
-Le scelte prese e il perché, comprese quelle scartate. È la sezione che fra sei
-mesi evita di rifare la stessa discussione.
+Le scelte prese e il perché. È la sezione che fra sei mesi evita di rifare la
+stessa discussione.
 
 | Tema | Scelta | Motivo |
 |---|---|---|
 | | | |
+
+## Alternative scartate
+
+Le strade **valutate e non prese**, con il motivo. Comprese quelle proposte e
+rifiutate **durante** l'implementazione: una via scartata a voce vive solo nella
+conversazione in cui è stata scartata, e quando quella conversazione finisce
+qualcuno la riproporrà — di solito chi l'aveva proposta la prima volta.
+
+Va compilata man mano, non alla fine: è nel momento del rifiuto che si conosce il
+motivo.
+
+| Alternativa | Perché no |
+|---|---|
+| | |
+
+Qui dentro, non altrove, finiscono anche le soluzioni "quasi giuste": quelle che
+funzionerebbero ma rompono una coerenza del progetto. Sono le più facili da
+riproporre, perché a guardarle isolate non hanno niente che non torni.
 
 ## Rischi e impatti
 
