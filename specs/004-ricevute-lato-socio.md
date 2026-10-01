@@ -4,8 +4,8 @@
 
 - [ ] Draft
 - [ ] Approvata
-- [x] In test (utente)
-- [ ] Completata
+- [ ] In test (utente)
+- [x] Completata
 
 **Versioni**: `backend 2.10.0`, `frontend 2.9.0` (minor entrambi: è una feature).
 Authorizer non toccato.
