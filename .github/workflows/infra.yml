@@ -91,8 +91,14 @@ jobs:
           fi
 
           # Chiave di firma dei token. Va riusata a ogni run: rigenerarla
-          # invaliderebbe di colpo tutti i token e i refresh token in
-          # circolazione, disconnettendo ogni utente. Gli a capo del PEM sono
+          # invaliderebbe di colpo tutti gli access token in circolazione, che
+          # smetterebbero di valere invece di scadere da sé entro 15 minuti. I
+          # refresh token NON sono firmati — sono stringhe opache il cui hash sta
+          # in tabella — quindi nessuno viene disconnesso: ogni client incassa un
+          # 401 e rinnova. Resta fuori chi non rinnova in automatico (script,
+          # token incollati a mano). Sostituirla di proposito è un'operazione
+          # prevista: vedi docs/developer/operazioni-cluster.md.
+          # Gli a capo del PEM sono
           # convertiti in "\n" letterali perché il valore deve stare su una
           # riga sola sia come output di step sia come GitHub Secret
           # (crypto/tokens.ts li ripristina prima di leggere la chiave).

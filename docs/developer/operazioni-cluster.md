@@ -69,6 +69,103 @@ Due cose sul ciclo di vita di queste credenziali:
 - **La password del superutente la genera Infra e vive solo nel cluster.** Non è
   in nessun Secret di GitHub: quel `kubectl get secret` è l'unica copia.
 
+## Sostituire la chiave di firma dei token
+
+L'authorizer firma gli access token con `AUTH_JWT_PRIVATE_KEY` (Secret
+dell'Environment su GitHub, da cui il deploy genera `clubby-auth-secrets` nel
+cluster). È generata **una volta** da Infra e riusata per sempre: a ogni run
+Infra riusa quella che trova, e ne genera una nuova solo se l'Environment non ce
+l'ha.
+
+Chi possiede quella chiave può fabbricare un token valido per qualunque utente,
+admin compreso: non esiste scadenza né revoca, e l'unico rimedio è sostituirla.
+Va fatto se si sospetta che sia uscita da dove sta — i Secret di GitHub e il
+Secret Kubernetes sono entrambi leggibili da persone — o quando chi aveva accesso
+a quei Secret lascia il progetto.
+
+### Cosa succede quando la si cambia
+
+Meno di quanto sembri, ed è utile saperlo prima di decidere se farlo in orario di
+lavoro:
+
+- **nessuno viene disconnesso.** I refresh token sono stringhe casuali opache il
+  cui hash sta in tabella `refresh_token`: non sono firmati, quindi la chiave non
+  li riguarda. Le sessioni aperte sopravvivono;
+- **gli access token in circolazione smettono di valere subito**, invece di
+  scadere da sé entro 15 minuti. Il frontend rinnova al primo 401 e riprova, in
+  modo trasparente per chi sta usando l'applicazione;
+- quindi per ~15 minuti nei log compare **un 401 per client**, ed è normale;
+- **chi non rinnova in automatico resta fuori**: uno script, una richiesta di
+  Bruno con un token incollato a mano, un'eventuale integrazione. Va rifatto il
+  login, nient'altro.
+
+Il JWKS pubblica una chiave sola, quindi questa finestra non si può evitare:
+servirebbe pubblicare per qualche minuto anche la pubblica vecchia. Non è
+implementato di proposito — con un solo frontend il costo reale è quello scritto
+sopra.
+
+### Procedura
+
+1. **Genera la chiave nuova**, già su una riga sola con gli a capo come `\n`
+   letterali, che è il formato richiesto da un Secret di GitHub (`tokens.ts` li
+   ripristina prima di leggerla):
+
+   ```bash
+   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | awk '{printf "%s\\n", $0}'
+   ```
+
+2. **Sostituisci il Secret `AUTH_JWT_PRIVATE_KEY`** dell'Environment interessato,
+   da *Settings → Environments → \<ambiente\> → Secrets*. È la sorgente di
+   verità: finché non cambia qui, qualunque intervento sul cluster viene
+   annullato dal primo deploy successivo.
+
+3. **Rideploya l'authorizer.** Backend e frontend non leggono questa chiave e non
+   serve toccarli.
+   - su un club: workflow **Promote**, compilando **solo**
+     `authorizer_version` con la versione già taggata;
+   - su `development`: workflow **Build & Deploy** con `force_all: true` (il
+     deploy dell'authorizer è `workflow_call`, non si lancia da solo).
+
+4. **Verifica che la chiave pubblicata sia cambiata.** Il `kid` deriva dal
+   contenuto della chiave, quindi è diverso se e solo se la chiave è diversa:
+
+   ```bash
+   curl -s https://<AUTH_DOMAIN>/.well-known/jwks.json | jq -r '.keys[].kid'
+   ```
+
+   Poi un login, per conferma. Se il `kid` è rimasto quello di prima, il deploy
+   non ha applicato il Secret nuovo: controlla di aver cambiato l'Environment
+   giusto.
+
+5. **Distruggi le copie della chiave vecchia** — e anche quelle della nuova fuori
+   dal Secret: terminale, appunti, cronologia della shell.
+
+### In caso di urgenza
+
+Se serve che la chiave vecchia smetta di valere *adesso*, senza attendere una
+pipeline, si può scrivere direttamente nel cluster:
+
+```bash
+kubectl patch secret clubby-auth-secrets -n clubby-<ambiente>-app --type merge -p '{"stringData":{"AUTH_JWT_PRIVATE_KEY":"<chiave con \\n letterali>"}}'
+```
+
+```bash
+kubectl rollout restart deployment/clubby-authorizer -n clubby-<ambiente>-app
+```
+
+⚠️ **Poi aggiorna comunque il Secret su GitHub**, subito. Il Secret del cluster
+viene rigenerato da ogni deploy a partire da quello di GitHub: senza il passo 2,
+il primo deploy successivo **rimette silenziosamente la chiave compromessa** — e
+non lo dirà nessuno, perché per la pipeline è un deploy riuscito.
+
+### In locale
+
+La chiave sta in `authorizer/.env`. Sostituirla è innocuo: basta rifare il login.
+Se la variabile manca del tutto, l'authorizer genera una chiave effimera a ogni
+avvio e lo dichiara nei log — comodo in sviluppo, da non usare in cluster, dove
+ogni riavvio del pod invaliderebbe gli access token e più repliche firmerebbero
+ognuna con una chiave propria.
+
 ## Accedere al database senza password
 
 Dentro il pod l'autenticazione sul socket locale è in `trust` — è così che Infra
