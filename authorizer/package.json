@@ -1,6 +1,6 @@
 {
   "name": "clubby-authorizer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Servizio di autenticazione di Clubby: registrazione, login, ruoli, emissione e verifica dei JWT",

@@ -1,6 +1,5 @@
 /**
- * Handler: GET /api/version
- * Ruoli: qualsiasi JWT valido
+ * GET /api/version — pubblica, nessuna autenticazione.
  *
  * Espone la versione del backend attualmente in esecuzione. APP_VERSION è
  * popolata nel ConfigMap (backend/k8s/configmap.yaml) dal workflow di deploy
@@ -11,15 +10,26 @@
  * perché backend e frontend si deployano in modo indipendente: solo chiedendola
  * a runtime al backend la pagina Info mostra la versione di ciò che sta
  * davvero girando, e non quella nota all'ultima build del frontend.
+ *
+ * Pubblica perché la pagina Info è raggiungibile anche senza accesso: serve
+ * soprattutto quando l'accesso non funziona. Per questo è servita da
+ * server.ts prima del controllo del token, accanto a /health, e non sta nella
+ * tabella delle route.
+ *
+ * null se APP_VERSION manca: un valore di ripiego ("dev") farebbe sembrare
+ * configurato un ambiente che non lo è, e la pagina Info non potrebbe mai
+ * dire "non disponibile".
+ *
+ * `db` è la versione dello schema (vedi service/versione.service.ts): sta qui
+ * perché il database dell'applicazione è del backend, e chi vuole sapere cosa
+ * gira la chiede con una chiamata sola.
  */
 
-import { type RequestEvent, type ResponseResult } from '../middleware/auth.js';
-import { ok, errorResponse } from '../middleware/response.js';
+import { versioneDatabase } from '../service/versione.service.js';
 
-export const handler = async (_event: RequestEvent): Promise<ResponseResult> => {
-  try {
-    return ok({ version: process.env.APP_VERSION ?? 'dev' });
-  } catch (error) {
-    return errorResponse(error);
-  }
-};
+export async function versioneInEsecuzione(): Promise<{ version: string | null; db: string | null }> {
+  return {
+    version: process.env.APP_VERSION || null,
+    db: await versioneDatabase(),
+  };
+}

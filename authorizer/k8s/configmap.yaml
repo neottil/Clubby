@@ -19,6 +19,8 @@ data:
   # direttamente con l'authorizer per accesso e registrazione.
   CORS_ORIGIN: "https://${APP_DOMAIN}"
   PORT: "${AUTH_PORT}"
+  # Tag dell'immagine deployata, esposto da GET /version per la pagina Info.
+  APP_VERSION: "${APP_VERSION}"
   # Anagrafica del primo amministratore. Non è sensibile e sta qui, non nel
   # Secret: lì resta solo la password temporanea. Chi amministra è di norma
   # anche uno degli istruttori, quindi nome, cognome e telefono sono quelli

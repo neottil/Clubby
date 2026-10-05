@@ -508,14 +508,15 @@ jobs:
           DB_PASSWORD=clubby_auth
           AUTH_ISSUER=http://localhost:3001
           CORS_ORIGIN=*
+          APP_VERSION=test
           ENV
 
       # --network host: i due container si vedono fra loro, vedono Postgres e
       # sono raggiungibili dalla suite, che gira sul runner. Su Linux è il modo
       # più semplice di avere un solo "localhost" per tutti.
       #
-      # /health è l'endpoint giusto per aspettarli: non richiede autenticazione,
-      # mentre /api/version risponde 401 e farebbe fallire il controllo.
+      # /health è l'endpoint giusto per aspettarli: risponde appena il processo è
+      # in ascolto, e lo hanno entrambi i servizi con lo stesso percorso.
       - name: Avvia i servizi dalle immagini
         run: |
           docker run -d --name authorizer --network host --env-file authorizer/.env \

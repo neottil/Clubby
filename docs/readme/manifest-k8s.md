@@ -21,7 +21,7 @@ backend/
 
 authorizer/
 ├── k8s/                     # manifest con placeholder ${VAR}, applicati da deploy-authorizer
-│   ├── configmap.yaml        # DB_*, AUTH_ISSUER, CORS_ORIGIN, PORT
+│   ├── configmap.yaml        # DB_*, AUTH_ISSUER, CORS_ORIGIN, PORT, APP_VERSION
 │   ├── secret.yaml           # AUTH_DB_PASSWORD, chiave di firma, admin iniziale
 │   ├── deployment.yaml
 │   ├── service.yaml

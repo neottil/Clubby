@@ -162,16 +162,26 @@ export async function caricaConfig(): Promise<void> {
  * bundle è buildato una volta sola e non sa con quale tag l'immagine verrà poi
  * deployata — Promote la ri-tagga X.Y.Z senza ribuildarla.
  *
- * In locale (vite dev) il file non esiste: si ripiega su 'dev'.
+ * null se non la si conosce: un deploy che non l'ha scritta va mostrato come
+ * tale. Stesso modello di backend e authorizer: nessun valore di ripiego
+ * inventato.
+ *
+ * In locale (vite dev) il file non esiste, e si legge VITE_APP_VERSION da
+ * frontend/.env.local. Solo lì: import.meta.env.DEV è falso nella build di
+ * produzione e Vite elimina il ramo, quindi il bundle non porta con sé nessuna
+ * versione compilata (vedi .github/README.md).
  */
-export async function fetchFrontendVersion(): Promise<string> {
+export async function fetchFrontendVersion(): Promise<string | null> {
+  if (import.meta.env.DEV) return import.meta.env.VITE_APP_VERSION || null;
   try {
     const res = await fetch('/version.json', { cache: 'no-store' });
-    if (!res.ok) return 'dev';
+    // Controllo sul tipo, come per /config.json: vite risponde index.html con
+    // 200 a qualunque percorso sconosciuto.
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
     const data = await res.json() as { version?: string };
-    return data.version || 'dev';
+    return data.version || null;
   } catch {
-    return 'dev';
+    return null;
   }
 }
 

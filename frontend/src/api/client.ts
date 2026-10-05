@@ -674,6 +674,7 @@ export function createApiClient(token: string | null) {
       request<{ password_temporanea: string }>('/api/admin/reset-password', { method: 'POST', body: JSON.stringify(body) }, token),
 
     // Versione del backend in esecuzione (pagina Info)
-    getVersion:     ()                    => request<{ version: string }>('/api/version', {}, token),
+    // Pubblica: funziona anche senza token (pagina Info prima dell'accesso).
+    getVersion:     ()                    => request<{ version: string | null; db: string | null }>('/api/version', {}, token),
   };
 }

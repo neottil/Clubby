@@ -93,6 +93,9 @@ export const authApi = {
 
   me: (token: string) => chiama<UtenteAuth>('/auth/me', {}, token),
 
+  /** Versione in esecuzione, null se l'ambiente non la dichiara. Pubblica. */
+  versione: () => chiama<{ version: string | null }>('/version'),
+
   cambiaPassword: (token: string, passwordAttuale: string, passwordNuova: string) =>
     chiama<Sessione>('/auth/cambia-password', {
       method: 'POST',

@@ -250,6 +250,10 @@ di versione reale se quello scope non ha nulla di nuovo da promuovere. Per ciasc
    — l'altro scope non è cambiato, non c'è motivo di ripulirlo in questa run; se sono stati promossi
    entrambi, `scope` resta vuoto (pulisce entrambi). Se nessuno scope è stato promosso (tutto già allineato), questo step non gira:
    non c'è nessuna nuova baseline da preservare.
+8. Scrive il **riepilogo** della run (summary del job): una riga per scope con tag di deploy, commit,
+   versione, esito (`promosso`, `già promosso`, `mai deployato su main`) e link alla Release, più una riga
+   sulla pulizia dei tag — se è partita e con quale scope. Per sapere cosa ha fatto una run di Tag basta
+   aprirla, senza leggere il log.
 
 **Nota sul tag di data e i limiti di GHCR**: il tag di data **non** viene eliminato dall'immagine appena
 promossa nello step 4. L'API di GitHub Packages cancella per *versione* (= digest), non per singolo tag:

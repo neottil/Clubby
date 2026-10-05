@@ -81,7 +81,6 @@ ENABLE_MODULE_RICEVUTE=true
 RECHARGE_MODE=free
 
 PORT=3000
-APP_VERSION=dev
 EOF
   echo "  backend/.env scritto."
 fi

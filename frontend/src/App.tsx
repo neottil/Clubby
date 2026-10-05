@@ -13,12 +13,25 @@ import ResocontiAdminPage from './pages/ResocontiAdminPage';
 import TesseramentiPage from './pages/TesseramentiPage';
 import RicevutePage from './pages/RicevutePage';
 import InfoPage from './pages/InfoPage';
+import ManualePage from './pages/ManualePage';
 
 function ProtectedRoutes() {
   const { user, isLoading } = useAuth();
 
   if (isLoading) return <div style={{ padding: 64, textAlign: 'center' }}>Caricamento...</div>;
-  if (!user)     return <Navigate to='/login' replace />;
+
+  // Senza sessione l'unica pagina raggiungibile è Info, con il menu ridotto:
+  // serve proprio quando l'accesso non funziona. Tutto il resto torna al
+  // form. Il caricamento della sessione è già passato qui sopra, così il menu
+  // ridotto non compare per un istante a chi una sessione ce l'ha.
+  if (!user) {
+    return (
+      <Routes>
+        <Route path='/info' element={<Layout><InfoPage /></Layout>} />
+        <Route path='*'     element={<Navigate to='/login' replace />} />
+      </Routes>
+    );
+  }
 
   // Password temporanea non ancora sostituita: nessuna rotta dell'app è
   // raggiungibile finché non lo è. Il backend rifiuterebbe comunque le
@@ -54,6 +67,7 @@ function ProtectedRoutes() {
         {config.moduli.tesseramento && <Route path='/tesseramenti' element={<TesseramentiPage />} />}
         {user.isAdmin && config.moduli.ricevute && <Route path='/ricevute' element={<RicevutePage />} />}
         <Route path='/impostazioni' element={<ImpostazioniPage />} />
+        <Route path='/manuale' element={<ManualePage />} />
         <Route path='/info'     element={<InfoPage />} />
         <Route path='*'         element={<Navigate to={defaultRoute} replace />} />
       </Routes>
@@ -75,7 +89,9 @@ function ProtectedRoutes() {
  */
 function RottaAccesso() {
   const { user } = useAuth();
-  return user ? <Navigate to='/' replace /> : <LoginPage />;
+  // Dentro il Layout, che senza sessione mostra il menu ridotto: è da qui che
+  // si raggiunge Info prima di aver fatto l'accesso.
+  return user ? <Navigate to='/' replace /> : <Layout><LoginPage /></Layout>;
 }
 
 export default function App() {

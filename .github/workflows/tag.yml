@@ -92,11 +92,25 @@ jobs:
           declare -A IMAGE=( [backend]=clubby-backend [frontend]=clubby-frontend [authorizer]=clubby-authorizer )
           declare -A PROMOTED=( [backend]=false [frontend]=false [authorizer]=false )
 
+          # Righe del riepilogo del job, una per scope qualunque sia l'esito:
+          # senza, per sapere cosa è stato promosso bisognava aprire il log.
+          # riga SCOPE DEPLOY_TAG COMMIT VERSIONE ESITO TAG_RELEASE ("" = nessuno)
+          RELEASES="${{ github.server_url }}/${{ github.repository }}/releases/tag"
+          RIGHE=""
+          riga() {
+            local deploy="—" commit="—" versione="${4:-—}" release="—"
+            [ -n "$2" ] && deploy="\`$2\`"
+            [ -n "$3" ] && commit="\`${3:0:7}\`"
+            [ -n "$6" ] && release="[$6]($RELEASES/$6)"
+            RIGHE+="| $1 | $deploy | $commit | $versione | $5 | $release |"$'\n'
+          }
+
           for SCOPE in backend frontend authorizer; do
             echo "=== $SCOPE ==="
             DEPLOY_TAG=$(git tag -l "${SCOPE}-main-*" --sort=-creatordate | head -1)
             if [ -z "$DEPLOY_TAG" ]; then
               echo "  Nessun tag ${SCOPE}-main-* trovato: '$SCOPE' non è mai stato deployato su main, salto."
+              riga "$SCOPE" "" "" "" "mai deployato su main" ""
               continue
             fi
 
@@ -105,6 +119,7 @@ jobs:
             ALREADY_PROMOTED=$(git tag --points-at "$COMMIT" | grep -E "^${SCOPE}-v[0-9]+\.[0-9]+\.[0-9]+$" || true)
             if [ -n "$ALREADY_PROMOTED" ]; then
               echo "  $DEPLOY_TAG (commit $COMMIT) è già promosso come $ALREADY_PROMOTED: nessuna modifica, salto."
+              riga "$SCOPE" "$DEPLOY_TAG" "$COMMIT" "${ALREADY_PROMOTED#${SCOPE}-v}" "già promosso" "$ALREADY_PROMOTED"
               continue
             fi
 
@@ -130,6 +145,7 @@ jobs:
             fi
 
             PROMOTED[$SCOPE]=true
+            riga "$SCOPE" "$DEPLOY_TAG" "$COMMIT" "$VERSION" "**promosso**" "$REAL_TAG"
           done
 
           # Conta quanti scope sono stati promossi: serve sia per sapere se
@@ -160,6 +176,20 @@ jobs:
 
           echo "promoted_any=$PROMOTED_ANY" >> "$GITHUB_OUTPUT"
           echo "cleanup_scope=$CLEANUP_SCOPE" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Tag"
+            echo ""
+            echo "| Scope | Tag di deploy | Commit | Versione | Esito | Release |"
+            echo "|---|---|---|---|---|---|"
+            printf '%s' "$RIGHE"
+            echo ""
+            # La riga sulla pulizia la scrive lo step successivo, se parte:
+            # qui solo il caso in cui non c'è niente da pulire.
+            if [ "$PROMOTED_ANY" != "true" ]; then
+              echo "Nessuno scope promosso: pulizia dei tag non necessaria."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # NOTA sui limiti di GHCR: il tag di data NON viene eliminato
       # dall'immagine qui sopra. L'API di GitHub Packages cancella per
@@ -192,3 +222,5 @@ jobs:
             -f scope="${{ steps.promuovi.outputs.cleanup_scope }}" \
             -f preserve_latest=true \
             -f dry_run=false
+          SCOPE_PULIZIA="${{ steps.promuovi.outputs.cleanup_scope }}"
+          echo "Pulizia dei vecchi tag *-main-* lanciata (workflow Cleanup build tags), scope: **${SCOPE_PULIZIA:-tutti}**." >> "$GITHUB_STEP_SUMMARY"

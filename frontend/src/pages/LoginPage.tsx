@@ -165,12 +165,14 @@ export default function LoginPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    minHeight: '100vh',
+    // 56px = altezza della navbar del Layout, che c'è anche senza sessione.
+    minHeight: 'calc(100vh - 56px)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     background: '#f5f5f5',
     padding: 16,
+    boxSizing: 'border-box',
   },
   card: {
     background: '#fff',

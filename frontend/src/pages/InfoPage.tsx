@@ -1,30 +1,40 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '../auth/AuthContext';
 import { createApiClient } from '../api/client';
+import { authApi } from '../auth/authApi';
 import { fetchFrontendVersion } from '../config';
 
-/** Versione non ancora arrivata (null) vs. richiesta fallita (false). */
-type VersionState = string | null | false;
+/**
+ * undefined = richiesta in corso; null = non disponibile, sia perché la
+ * richiesta è fallita sia perché il componente non dichiara una versione.
+ * Per chi legge le due cose si equivalgono: non si sa cosa stia girando.
+ */
+type VersionState = string | null | undefined;
 
 function VersionRow({ label, version }: { label: string; version: VersionState }) {
   return (
     <div style={styles.row}>
       <span style={styles.label}>{label}</span>
-      <span style={{ ...styles.value, ...(version === false ? styles.valueError : {}) }}>
-        {version === false ? 'non disponibile' : version ?? '...'}
+      <span style={{ ...styles.value, ...(version === null ? styles.valueError : {}) }}>
+        {version === null ? 'non disponibile' : version ?? '...'}
       </span>
     </div>
   );
 }
 
+/**
+ * Raggiungibile anche senza accesso (vedi App.tsx): serve soprattutto quando
+ * l'accesso non funziona. Per questo nessuna delle tre chiamate usa il token.
+ */
 export default function InfoPage() {
-  const { token } = useAuth();
-
-  // Nessuna delle due versioni è compilata nel bundle: ognuna arriva dal
+  // Nessuna delle versioni è compilata nel bundle: ognuna arriva dal
   // componente che sta effettivamente girando (vedi config.ts), così restano
-  // corrette anche quando i due scope vengono deployati separatamente.
-  const [feVersion, setFeVersion] = useState<VersionState>(null);
-  const [beVersion, setBeVersion] = useState<VersionState>(null);
+  // corrette anche quando i tre moduli vengono deployati separatamente.
+  const [feVersion, setFeVersion] = useState<VersionState>(undefined);
+  const [beVersion, setBeVersion] = useState<VersionState>(undefined);
+  const [authVersion, setAuthVersion] = useState<VersionState>(undefined);
+  // Versione dello schema: il numero dell'ultima migrazione applicata, letto
+  // dal backend nella stessa risposta della sua versione.
+  const [dbVersion, setDbVersion] = useState<VersionState>(undefined);
 
   useEffect(() => {
     let annullato = false;
@@ -32,19 +42,25 @@ export default function InfoPage() {
     fetchFrontendVersion()
       .then(v => { if (!annullato) setFeVersion(v); });
 
-    createApiClient(token).getVersion()
-      .then(res => { if (!annullato) setBeVersion(res.version); })
-      .catch(()  => { if (!annullato) setBeVersion(false); });
+    createApiClient(null).getVersion()
+      .then(res => { if (!annullato) { setBeVersion(res.version ?? null); setDbVersion(res.db ?? null); } })
+      .catch(()  => { if (!annullato) { setBeVersion(null); setDbVersion(null); } });
+
+    authApi.versione()
+      .then(res => { if (!annullato) setAuthVersion(res.version ?? null); })
+      .catch(()  => { if (!annullato) setAuthVersion(null); });
 
     return () => { annullato = true; };
-  }, [token]);
+  }, []);
 
   return (
     <div style={styles.page}>
       <div style={styles.card}>
         <h2 style={styles.title}>Info</h2>
-        <VersionRow label='Frontend' version={feVersion} />
-        <VersionRow label='Backend'  version={beVersion} />
+        <VersionRow label='Frontend'   version={feVersion} />
+        <VersionRow label='Backend'    version={beVersion} />
+        <VersionRow label='Authorizer' version={authVersion} />
+        <VersionRow label='Database'   version={dbVersion} />
       </div>
     </div>
   );

@@ -52,7 +52,13 @@ export default function Layout({ children }: LayoutProps) {
   // Voucher è la home (vedi App.tsx): primo nel menu.
   // L'istruttore ha bisogno dell'elenco soci (ne vede il solo nominativo) e
   // del proprio resoconto; l'amministrazione resta agli admin.
-  const navLinks: VoceMenu[] = [
+  const navLinks: VoceMenu[] = !user ? [
+    // Senza sessione resta solo Info, che serve proprio quando l'accesso non
+    // funziona, e la strada per tornare al form: da /info non ce ne sarebbe
+    // un'altra se non riscrivere l'indirizzo.
+    { to: '/info',  label: 'Info' },
+    { to: '/login', label: 'Accedi' },
+  ] : [
     { to: '/voucher', label: 'Voucher' },
     ...(user?.isAdmin || user?.isIstruttore ? [{ to: '/soci', label: 'Soci' }] : []),
     { to: '/incontri', label: 'Incontri' },
@@ -70,6 +76,7 @@ export default function Layout({ children }: LayoutProps) {
         ? [{ to: '/ricevute', label: 'Ricevute', bloccata: ricevuteBloccate ? MOTIVO_SENZA_INTESTAZIONE : undefined }]
         : []),
     ] : []),
+    { to: '/manuale', label: 'Manuale' },
     { to: '/info',    label: 'Info' },
     ...(user?.isAdmin ? [{ to: '/impostazioni', label: 'Impostazioni' }] : []),
   ];
@@ -99,7 +106,7 @@ export default function Layout({ children }: LayoutProps) {
         }
       `}</style>
       <nav style={styles.nav}>
-        <Link to="/voucher" style={styles.brandLink}>
+        <Link to={user ? '/voucher' : '/login'} style={styles.brandLink}>
           <img src={config.logo} alt="" style={styles.brandLogo} />
           <span style={styles.brand}>{config.tenantName}</span>
         </Link>
@@ -156,14 +163,18 @@ export default function Layout({ children }: LayoutProps) {
                 {link.label}
               </Link>
             )))}
-            <div style={styles.menuDivider} />
-            <span style={styles.menuEmail}>{user?.email}</span>
-            <button
-              style={styles.menuLogoutBtn}
-              onClick={() => { setMenuOpen(false); logout(); }}
-            >
-              Esci
-            </button>
+            {user && (
+              <>
+                <div style={styles.menuDivider} />
+                <span style={styles.menuEmail}>{user.email}</span>
+                <button
+                  style={styles.menuLogoutBtn}
+                  onClick={() => { setMenuOpen(false); logout(); }}
+                >
+                  Esci
+                </button>
+              </>
+            )}
           </div>
         )}
       </nav>
@@ -183,7 +194,7 @@ export default function Layout({ children }: LayoutProps) {
           vuota: senza questo avviso sembrerebbe rotta. Non riguarda gli admin,
           che lavorano sui dati di tutti e non hanno bisogno di un socio
           proprio. */}
-      {socioCollegato === false && !user?.isAdmin && (
+      {user && socioCollegato === false && !user.isAdmin && (
         <div style={styles.avvisoSocio}>
           Il tuo account non è ancora collegato alla tua scheda socio. Chiedi a un amministratore di collegarlo.
         </div>

@@ -28,8 +28,8 @@ con `source` i file di questa cartella, nell'ordine in cui vanno eseguiti.
 | `03-anagrafiche.sh` | listino, account, schede socio, abilitazioni |
 | `04-voucher-e-incontri.sh` | voucher, ricariche e incontri |
 | `05-tesseramenti.sh` | quota e rinnovi |
-| `06-chiusure.sh` | ciò che risulta già rendicontato o già documentato |
-| `07-ricevuta-dimostrativa.sh` | le due ricevute vere, con il PDF |
+| `06-chiusure.sh` | ciò che risulta già rendicontato |
+| `07-ricevuta-dimostrativa.sh` | le tre ricevute vere, con il PDF: le uniche voci già documentate |
 | `08-riepilogo.sh` | riepilogo finale, letto dal database |
 
 ## Prerequisiti
@@ -119,27 +119,27 @@ accredita 30 a fronte di 25 pagati — in Ricevute devono comparire i 25.
 
 ### Rendicontazione e ricevute
 
-Ciò che è abbastanza vecchio risulta già chiuso, così entrambe le funzionalità
-hanno da subito i due stati. Gli incontri anteriori a 40 giorni sono
-rendicontati; sono già documentate le ricariche anteriori a 180 giorni, i
-tesseramenti anteriori a 300 e gli incontri senza voucher anteriori a 100. Ogni
-istruttore conserva comunque incontri ancora da rendicontare, che è il caso di
-partenza della pagina.
+Gli incontri anteriori a 40 giorni risultano già rendicontati, così la pagina
+Resoconti ha da subito i due stati. Ogni istruttore conserva comunque incontri
+ancora da rendicontare, che è il caso di partenza della pagina.
 
 **Attenzione**: un incontro rendicontato o documentato non si può più modificare
 né eliminare — è voluto, ed è il comportamento da provare.
 
-Le ricevute dimostrative sono **due vere**, con il PDF prodotto dallo stesso
-codice dell'applicazione, l'intestazione e il piè di pagina scritti nelle
-impostazioni e il logo indicato da `LOGO_FILE`. Una su una ricarica (il socio la
-ritrova fra i movimenti del voucher) e una su un incontro di Vitali, che un
-voucher non ce l'ha: per lei quella riga è l'unico modo di arrivare alla propria
-ricevuta.
+Le ricevute dimostrative sono **tre vere**, una per tipo di voce, con il PDF
+prodotto dallo stesso codice dell'applicazione, l'intestazione e il piè di pagina
+scritti nelle impostazioni e il logo indicato da `LOGO_FILE`:
 
-Le righe di `documento_emesso_voce` scritte da `06-chiusure.sh` hanno invece
-`documento_id` a `NULL`: dicono "già documentata" senza che esista un documento,
-ed è lo stato storico che la migrazione 002 produceva prima che le ricevute
-esistessero.
+- su una **ricarica**: il socio la ritrova fra i movimenti del voucher;
+- su un **incontro** di Vitali, che un voucher non ce l'ha: per lei quella riga è
+  l'unico modo di arrivare alla propria ricevuta;
+- sul **tesseramento** più vecchio: il socio la ritrova nello storico dei rinnovi.
+
+Sono anche le **uniche voci già documentate**. Il seed non segna mai una voce
+come emessa senza la sua ricevuta: l'applicazione non può produrre quello stato
+(la riga in `documento_emesso_voce` nasce insieme al documento, nella stessa
+transazione), e nella pagina Ricevute una voce bloccata con la colonna Ricevuta
+vuota sembrerebbe un errore.
 
 ### Tesseramenti
 

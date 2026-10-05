@@ -29,7 +29,7 @@ import { handler as impostazioniHandler } from './handlers/impostazioni.js';
 import { handler as adminHandler } from './handlers/admin.js';
 import { handler as ricaricheHandler } from './handlers/ricariche.js';
 import { handler as authHandler } from './handlers/auth.js';
-import { handler as versionHandler } from './handlers/version.js';
+import { versioneInEsecuzione } from './handlers/version.js';
 import { moduloAttivo, type Modulo } from './util/moduli.js';
 import { modalitaRicarica } from './util/ricariche.js';
 
@@ -55,7 +55,6 @@ const ROUTES: Array<{
   modulo?: Modulo;
 }> = [
   { pattern: /^\/api\/auth\/socio$/,                 handler: authHandler,      param: null },
-  { pattern: /^\/api\/version$/,                     handler: versionHandler,   param: null },
   { pattern: /^\/api\/soci\/([^/]+)$/,               handler: sociHandler,      param: 'id' },
   { pattern: /^\/api\/soci$/,                        handler: sociHandler,      param: null },
   { pattern: /^\/api\/attivita\/([^/]+)$/,           handler: attivitaHandler,  param: 'id' },
@@ -156,6 +155,16 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
+
+  // Versione in esecuzione — pubblica, letta dalla pagina Info anche prima
+  // dell'accesso (vedi handlers/version.ts). Con CORS, a differenza di
+  // /health: la chiama il browser.
+  if (url.pathname === '/api/version' && req.method === 'GET') {
+    const versione = await versioneInEsecuzione();
+    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS_HEADERS });
+    res.end(JSON.stringify(versione));
     return;
   }
 

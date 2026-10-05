@@ -98,20 +98,32 @@ paths:
     get:
       tags: [Servizio]
       summary: Versione del backend in esecuzione
+      description: |
+        Pubblica: la legge la pagina Info anche prima dell'accesso, quindi un
+        token assente o non valido viene ignorato. Stesso modello di
+        `GET /version` dell'authorizer.
+      security: []
       responses:
         '200':
-          description: Tag dell'immagine deployata, `dev` in locale
+          description: |
+            Tag dell'immagine deployata (`APP_VERSION`), `null` se l'ambiente
+            non la dichiara — in locale, di norma.
           content:
             application/json:
               schema:
                 type: object
-                required: [version]
+                required: [version, db]
                 properties:
                   version:
-                    type: string
+                    type: [string, 'null']
                     example: 1.4.0
-        '401':
-          $ref: '#/components/responses/NonAutenticato'
+                  db:
+                    type: [string, 'null']
+                    description: |
+                      Versione dello schema: numero dell'ultima migrazione
+                      applicata (tabella `migrazione`). `null` se il registro
+                      manca o il database non risponde — l'endpoint non fallisce.
+                    example: '003'
 
   /health:
     get:

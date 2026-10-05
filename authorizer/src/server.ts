@@ -90,6 +90,17 @@ async function instrada(
   }
 
   // -----------------------------------------------------------
+  // Versione in esecuzione — mostrata dalla pagina Info anche prima
+  // dell'accesso, che è proprio quando serve sapere cosa sta girando qui.
+  // APP_VERSION è il tag dell'immagine, scritto nel ConfigMap al deploy
+  // (authorizer/k8s/configmap.yaml). null se manca: un valore di ripiego
+  // farebbe sembrare configurato un ambiente che non lo è.
+  // -----------------------------------------------------------
+  if (metodo === 'GET' && percorso === '/version') {
+    return ok({ version: process.env.APP_VERSION || null });
+  }
+
+  // -----------------------------------------------------------
   // Registrazione e accesso
   // -----------------------------------------------------------
   if (metodo === 'POST' && percorso === '/auth/register') {

@@ -15,6 +15,14 @@
 - Resoconto: un istruttore vede gli incontri che ha tenuto, con numero e costo complessivo del periodo filtrato
 - Resoconti per l'admin: gli incontri tenuti da un istruttore, filtrabili per periodo e attività, con la
   rendicontazione di quelli già riconosciuti
+- Manuale d'uso nella pagina Manuale, con le sole sezioni che riguardano chi la apre: i propri dati
+  per il socio, Resoconto e saldi dei voucher per l'istruttore, tutte le pagine e le configurazioni per
+  l'admin. Ruolo e privilegio admin si sommano; le pagine dei moduli spenti non vengono descritte, e
+  all'admin sono mostrate tutte e tre le modalità di ricarica con quella del club evidenziata
+- Pagina Info con le versioni in esecuzione di frontend, backend e authorizer, e la versione del database
+  (il numero dell'ultima migrazione applicata), raggiungibile **anche senza
+  accesso** (il menu si riduce a Info e Accedi): serve soprattutto quando l'accesso non funziona. Una
+  versione che l'ambiente non dichiara compare come "non disponibile"
 - Elenchi caricati a blocchi (incontri, movimenti, ricevute, soci, voucher, tesseramenti, account),
   con ricerca e ordinamento applicati dal server, per non scaricare tutto a ogni apertura
 

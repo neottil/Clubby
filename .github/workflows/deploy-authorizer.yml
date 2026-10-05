@@ -89,10 +89,13 @@ jobs:
           AUTH_JWT_PRIVATE_KEY: ${{ secrets.AUTH_JWT_PRIVATE_KEY }}
           INITIAL_ADMIN_EMAIL: ${{ vars.INITIAL_ADMIN_EMAIL }}
           INITIAL_ADMIN_PASSWORD: ${{ secrets.INITIAL_ADMIN_PASSWORD }}
+          # Come per backend e frontend: il tag dell'immagine effettivamente
+          # deployata, letto dalla pagina Info tramite GET /version.
+          APP_VERSION: ${{ inputs.image_tag }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered
-          VARS='$KUBE_NAMESPACE $AUTHORIZER_IMAGE $AUTH_PORT $AUTH_DOMAIN $APP_DOMAIN $DB_HOST $DB_PORT $AUTH_DB_NAME $AUTH_DB_USER $AUTH_DB_PASSWORD $AUTH_JWT_PRIVATE_KEY $INITIAL_ADMIN_EMAIL $INITIAL_ADMIN_PASSWORD'
+          VARS='$KUBE_NAMESPACE $AUTHORIZER_IMAGE $AUTH_PORT $AUTH_DOMAIN $APP_DOMAIN $DB_HOST $DB_PORT $AUTH_DB_NAME $AUTH_DB_USER $AUTH_DB_PASSWORD $AUTH_JWT_PRIVATE_KEY $INITIAL_ADMIN_EMAIL $INITIAL_ADMIN_PASSWORD $APP_VERSION'
           # Prefisso "authorizer-" nel nome renderizzato: backend e frontend
           # usano file con lo stesso nome nelle proprie cartelle, ma sulla VPS
           # finiscono nella STESSA directory di deploy — senza prefisso si

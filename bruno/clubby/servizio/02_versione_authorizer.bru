@@ -1,0 +1,16 @@
+meta {
+  name: Versione authorizer
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{auth_url}}/version
+  body: none
+  auth: none
+}
+
+docs {
+  Versione dell'authorizer in esecuzione: il tag dell'immagine (APP_VERSION),
+  null se l'ambiente non la dichiara. Pubblica, senza token.
+}

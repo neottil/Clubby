@@ -58,7 +58,7 @@ bloccata: la rendicontazione **non si annulla**, e per lo stesso motivo un incon
 più né modificare né eliminare** — il conteggio su cui l'istruttore è stato pagato deve restare
 ricostruibile. Il blocco vale per l'intera riga e non per il solo costo: spostare la data farebbe uscire
 l'incontro dal periodo in cui è stato conteggiato, che è lo stesso danno per un'altra via. Per correggere un
-errore si registra un incontro di rettifica. Lo switch parte
+errore contattare l'amministratore. Lo switch parte
 spento per l'admin, che apre la pagina per sapere che cosa resta da fare, e acceso nella pagina Resoconto
 dell'istruttore, che la apre per consultare il proprio lavoro.
 

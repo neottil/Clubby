@@ -10,6 +10,15 @@ Job Kubernetes che il workflow
 del rollout, sulla stessa immagine che sta per essere deployata. Un file già
 applicato viene saltato (tabella `migrazione`), quindi rilanciare è sicuro.
 
+## Il numero è la versione del database
+
+Il prefisso numerico dell'ultima migrazione applicata è la **versione dello
+schema**: `GET /api/version` la restituisce nel campo `db`, e la pagina Info la
+mostra alla riga Database. Non c'è un altro numero da tenere allineato: per
+sapere se il database di un club è indietro rispetto al codice basta
+confrontarlo con l'ultimo file di questa cartella. Per questo i numeri non si
+riusano e non si riordinano.
+
 ## Regole
 
 - **Un file per migrazione**, con nome ordinabile: `001_descrizione.sql`,

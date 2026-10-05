@@ -58,8 +58,9 @@ Clubby/
 │   ├── src/
 │   │   ├── auth/           # AuthContext + client dell'authorizer (authApi.ts)
 │   │   ├── api/            # API client factory
-│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, ResocontoPage, ResocontiAdminPage, TesseramentiPage, RicevutePage, ImpostazioniPage, InfoPage, LoginPage, CambioPasswordPage
+│   │   ├── pages/          # SociPage, IncontriPage, VouchersPage, ResocontoPage, ResocontiAdminPage, TesseramentiPage, RicevutePage, ImpostazioniPage, InfoPage, ManualePage, LoginPage, CambioPasswordPage
 │   │   ├── components/     # Layout, ElencoIncontri, CardCollassabile, Avviso, Modal, TableScroll, IntestazioneOrdinabile, CaricaAltri, TotaliFiltri, Etichetta, SearchSelect, DateRangeFilter, MarkdownEditor
+│   │   ├── manuale/        # Testo della pagina Manuale, a sezioni filtrate per ruolo, admin e moduli
 │   │   ├── styles/ui.ts    # Stili comuni (pulsanti, form, tabelle), inclusi da ogni pagina
 │   │   ├── utils/formato.ts # Formati di importi e date
 │   │   └── config.ts       # Configurazione runtime (URL dei servizi, tenant) + fetch /version.json

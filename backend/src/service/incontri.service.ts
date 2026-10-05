@@ -384,7 +384,7 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
     if (attuale.rendicontato_il) {
       throw new BadRequestError(
         'Questo incontro è già stato rendicontato all\'istruttore e non può più essere modificato. ' +
-        'Per correggere un errore, registra un incontro di rettifica.'
+        'Per correggere un errore, contatta l\'amministratore.'
       );
     }
     // `q` e non la connessione globale: siamo dentro una transazione, e la
@@ -392,7 +392,7 @@ export async function updateIncontro(id: string, input: UpdateIncontroInput): Pr
     if (await voceGiaEmessa('incontro', id, q)) {
       throw new BadRequestError(
         'Per questo incontro è già stata emessa una ricevuta e non può più essere modificato. ' +
-        'Per correggere un errore, registra un incontro di rettifica.'
+        'Per correggere un errore, contatta l\'amministratore.'
       );
     }
 

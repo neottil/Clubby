@@ -426,6 +426,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/Salute'
 
+  /version:
+    get:
+      tags: [Servizio]
+      summary: Versione dell'authorizer in esecuzione
+      description: |
+        Pubblica: la legge la pagina Info del frontend anche prima
+        dell'accesso. Stesso modello di `GET /api/version` del backend.
+      security: []
+      responses:
+        '200':
+          description: |
+            Tag dell'immagine deployata (`APP_VERSION`), `null` se l'ambiente
+            non la dichiara — in locale, di norma.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version:
+                    type: [string, 'null']
+                    example: 1.1.0
+
 security:
   - bearerAuth: []
 

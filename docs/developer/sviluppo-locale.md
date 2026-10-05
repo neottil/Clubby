@@ -38,6 +38,12 @@ Come si prepara e si avvia l'ambiente di sviluppo. Cosa fa il prodotto sta in
    `false` in **entrambi** i file: se i due valori non coincidono, il frontend mostra una pagina che il
    backend rifiuta, o nasconde un modulo che invece risponde.
 
+   La pagina **Info** mostra "non disponibile" per le versioni che l'ambiente non dichiara, ed è
+   quello che succede in locale. Per vederne una, la si imposta a mano: `APP_VERSION` in
+   `backend/.env` e in `authorizer/.env`, `VITE_APP_VERSION` in `frontend/.env.local` (letta solo da
+   `vite dev`, mai dal bundle di produzione). La riga **Database** non va impostata: è il numero
+   dell'ultima migrazione applicata, letto dal database.
+
 3. Installa le dipendenze dei tre moduli:
    ```bash
    npm run install:all
@@ -150,9 +156,10 @@ un socio ancora senza dati.
 incontri a parte. È l'unico modo di provare che un socio senza credito prepagato raggiunge comunque le
 proprie ricevute, partendo dalla riga dell'incontro.
 
-Il seed emette **due ricevute dimostrative**: una su una ricarica e una su un incontro di Sara Vitali,
-che non ha voucher — così entrambi i percorsi con cui un socio raggiunge una ricevuta sono visibili
-subito.
+Il seed emette **tre ricevute dimostrative**, una per tipo di voce: su una ricarica, su un incontro di
+Sara Vitali, che non ha voucher, e su un rinnovo del tesseramento — così tutti i percorsi con cui un
+socio raggiunge una ricevuta sono visibili subito. Sono le uniche voci già documentate: il seed non
+segna mai una voce come emessa senza la sua ricevuta, perché l'applicazione non può farlo.
 
 Il seed riparte sempre da zero: azzera entrambi i database e li ricostruisce, quindi non serve più
 buttare il volume per avere dati puliti (`docker compose down -v` resta utile solo per rifare lo

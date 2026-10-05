@@ -373,7 +373,7 @@ Problemi reali incontrati costruendo questi workflow, non ovvi in anticipo:
   `promote.yml`) — il bundle continuerebbe a dichiarare il tag di build. Regola: ogni componente espone la
   propria versione **a runtime**, alimentata al deploy dal tag dell'immagine che sta effettivamente mettendo
   in esecuzione (qui: `APP_VERSION` nel ConfigMap di ciascuno scope → il backend la serve su
-  `GET /api/version`, il frontend — che è solo nginx + file statici — come file `/version.json` montato dal
+  `GET /api/version`, l'authorizer su `GET /version`, entrambe pubbliche e `null` se la variabile manca; il frontend — che è solo nginx + file statici — come file `/version.json` montato dal
   ConfigMap). Corollario k8s: quel file va montato come **directory**, non con `subPath`, altrimenti kubelet
   non lo aggiorna più quando il ConfigMap cambia.
 
@@ -486,6 +486,11 @@ branch/run di `build-deploy.yml`, né dell'input di `promote.yml`).
 **Cosa fa**: vedi pattern 5. Per ciascuno scope, risolve se serve una nuova versione reale (o se è già
 stata assegnata), crea/sposta il tag e la GitHub Release, ri-tagga l'immagine Docker esistente senza
 rebuild. **Non deploya.** Se almeno uno scope è stato promosso, triggera `cleanup-build-tags.yml`.
+
+**Riepilogo**: a fine run il job scrive nel proprio summary una tabella con una riga per scope — tag di
+deploy, commit, versione, esito (`promosso`, `già promosso`, `mai deployato su main`) e link alla Release —
+e se la pulizia dei tag è partita, con quale scope. È lì che si legge cosa ha fatto la run, senza aprire il
+log.
 
 ### `promote.yml`
 

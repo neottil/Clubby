@@ -95,15 +95,22 @@ export default function Tabs({ schede, attiva, onCambia }: TabsProps) {
 
 const styles: Record<string, CSSProperties> = {
   barra: {
-    display: 'flex', gap: 4, borderBottom: '2px solid #e5e7eb',
-    marginBottom: 16, overflowX: 'auto',
+    display: 'flex', gap: 4, marginBottom: 16,
+    // La riga grigia è un'ombra interna e non un bordo, e le schede non hanno
+    // margini negativi per sovrapporvisi. Con un bordo e marginBottom -2 le
+    // schede sporgevano dal contenitore: overflowX 'auto' rende 'auto' anche
+    // l'asse verticale, e il browser mostrava una barra di scorrimento
+    // verticale accanto alle schede. L'ombra sta sotto i figli, quindi la
+    // sottolineatura della scheda attiva la copre senza sporgere.
+    boxShadow: 'inset 0 -2px 0 #e5e7eb',
+    overflowX: 'auto', overflowY: 'hidden',
   },
   scheda: {
     padding: '10px 18px', minHeight: 44, border: 'none', background: 'transparent',
     font: 'inherit', fontSize: 15, color: '#666', cursor: 'pointer',
     // Il bordo c'è sempre, trasparente da inattiva: senza, la scheda
-    // selezionata si sposterebbe di due pixel a ogni cambio.
-    borderBottom: '3px solid transparent', marginBottom: -2, whiteSpace: 'nowrap',
+    // selezionata si sposterebbe di tre pixel a ogni cambio.
+    borderBottom: '3px solid transparent', whiteSpace: 'nowrap',
   },
   schedaAttiva: {
     color: theme.primary, fontWeight: 600, borderBottomColor: theme.primary,

@@ -125,6 +125,11 @@ specifica, poi si implementa.
      dentro al repository non si chiude mai, perché nessuno la rilegge quando
      quelle cose vengono fatte. Se ne trovi una, va svuotata verso le issue
 
+   - **Anche il manuale d'uso è documentazione**: una modifica che cambia cosa
+     vede un ruolo, o il nome di una pagina, di una card o di un pulsante, aggiorna
+     `frontend/src/manuale/sezioni.tsx` nello stesso passaggio. Un'istruzione che
+     nomina un pulsante che non c'è più manda fuori strada proprio chi la segue
+
    - Non serve un aggiornamento per ciò che un lettore del README non nota mai
      (refactoring interno, formattazione, commenti). Serve per tutto ciò che
      cambia **comportamento osservabile**: comandi, variabili d'ambiente,
@@ -221,11 +226,11 @@ clubby/
 
 ### API Endpoints
 
-Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`):
+Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`, tranne `/api/version`):
 
 | Endpoint | Metodo | Descrizione |
 |----------|--------|-------------|
-| `/api/version` | GET | Versione del backend in esecuzione |
+| `/api/version` | GET | Versione del backend (`null` se non dichiarata) e del database (`db`, ultima migrazione applicata) — **pubblica**, senza token |
 | `/api/auth/socio` | GET | Scheda socio di chi chiama (204 se non collegata) |
 | `/api/soci` | GET/POST | Elenco paginato / creazione |
 | `/api/soci/:id` | GET/PUT/DELETE | Scheda socio |
@@ -267,6 +272,7 @@ Authorizer (porta a sé, nessun prefisso `/api`):
 | `/auth/me` | GET | Account corrente |
 | `/auth/cambia-password` | POST | Cambio password |
 | `/.well-known/jwks.json` | GET | Chiavi pubbliche per la verifica dei token |
+| `/version` | GET | Versione in esecuzione, `null` se non dichiarata (pubblica) |
 | `/health` | GET | Liveness (anche sul backend) |
 
 > La tabella è mantenuta per comodità ma potrebbe essere obsoleta. Per la fonte

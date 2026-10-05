@@ -1,0 +1,20 @@
+meta {
+  name: Versione backend
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/version
+  body: none
+  auth: none
+}
+
+docs {
+  Versione del backend in esecuzione: il tag dell'immagine (APP_VERSION),
+  null se l'ambiente non la dichiara. Pubblica, senza token: la pagina Info
+  la legge anche prima dell'accesso.
+
+  db: versione dello schema, cioè il numero dell'ultima migrazione applicata
+  (es. "003"); null se il registro manca o il database non risponde.
+}

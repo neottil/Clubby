@@ -88,9 +88,10 @@ porterebbe dietro in cascata). Una ricevuta emessa deve continuare a riferire qu
 non è cambiato sotto.
 
 Sotto, la relazione è registrata in `documento_emesso_voce`, che lega una voce al documento che la
-comprende. Le voci marcate come emesse prima che l'applicazione producesse ricevute restano senza
-documento: dicono "già emessa" e nient'altro, ed è il motivo per cui nelle tabelle la colonna del PDF
-può risultare vuota. La relazione è polimorfica, perché le voci vengono da tre tabelle diverse: è il
+comprende, e nasce **solo insieme al documento**, nella stessa transazione dell'emissione: una voce
+segnata come emessa ha sempre la sua ricevuta. Fanno eccezione soltanto le voci segnate prima che
+l'applicazione producesse i PDF (migrazione 003), dove un database le avesse già: dicono "già emessa"
+e nient'altro, e la colonna Ricevuta resta vuota. La relazione è polimorfica, perché le voci vengono da tre tabelle diverse: è il
 motivo per cui non può esserci un vincolo di integrità verso l'origine, e quindi il motivo per cui
 l'eliminazione va impedita a monte.
 

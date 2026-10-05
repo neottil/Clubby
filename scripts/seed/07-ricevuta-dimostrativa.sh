@@ -1,15 +1,18 @@
-# Le due ricevute vere, con il PDF prodotto dal codice dell'applicazione
+# Le tre ricevute vere, con il PDF prodotto dal codice dell'applicazione
 #
 # Parte di scripts/seed-demo-data.sh, che lo carica con "source": non si
 # esegue da solo e non ha shebang di proposito.
 
 # ------------------------------------------------------------
-# Una ricevuta VERA, con il suo PDF.
+# Ricevute VERE, con il loro PDF: una per ciascun tipo di voce (ricarica,
+# incontro, tesseramento).
 #
-# Le righe scritte sopra sono lo storico di prima che l'applicazione producesse
-# documenti: hanno documento_id a NULL e nell'interfaccia non mostrano l'icona.
-# Senza almeno una ricevuta completa, la colonna aggiunta ai movimenti del socio
-# resterebbe vuota in ogni demo, e nessuno vedrebbe mai la funzionalità.
+# Sono anche gli unici esempi di voci gia documentate. Il seed non segna voci
+# come emesse senza una ricevuta: l'applicazione non lo fa mai (la riga in
+# documento_emesso_voce nasce insieme al documento), e una voce bloccata senza
+# il suo PDF sembrerebbe un errore a chi prova la pagina Ricevute. Senza queste,
+# la colonna Ricevuta resterebbe vuota in ogni demo, e nessuno vedrebbe mai la
+# funzionalità.
 #
 # Il PDF lo genera lo STESSO codice dell'applicazione (service/documenti/pdf.js),
 # non un file incollato qui: un modello incollato si sarebbe disallineato al
@@ -194,5 +197,25 @@ else
       "$(echo "$INCONTRO" | cut -d'|' -f2 | tr -d ' ')" "$(echo "$INCONTRO" | cut -d'|' -f3 | tr -d ' ')" \
       "Incontro: $(echo "$INCONTRO" | cut -d'|' -f5 | sed 's/^ *//;s/ *$//')" \
       'incontro pagato a parte (dati dimostrativi)'
+  fi
+
+  # 3. Su un TESSERAMENTO: il socio la ritrova nello storico dei rinnovi della
+  #    pagina Tesseramenti, la terza strada verso le proprie ricevute (spec 004).
+  #    Il più vecchio, così il rinnovo documentato sta nello storico e non è
+  #    quello in corso.
+  TESSERAMENTO=$(psql_righe "
+    SELECT t.id || '|' || t.data_rinnovo || '|' || t.importo || '|' || s.id || '|' || to_char(t.scadenza, 'DD/MM/YYYY')
+      FROM tesseramento t
+      JOIN socio s ON s.id = t.socio_id
+     WHERE s.email IN ($ELENCO_SOCI)
+       AND NOT EXISTS (SELECT 1 FROM documento_emesso_voce d
+                        WHERE d.tipo = 'tesseramento' AND d.riferimento_id = t.id)
+     ORDER BY t.data_rinnovo
+     LIMIT 1;" | tr -d ' ' | head -1)
+
+  if [ -z "$TESSERAMENTO" ]; then
+    echo "  Saltata la ricevuta su tesseramento: nessun rinnovo libero."
+  else
+    emetti_ricevuta 'tesseramento'       "$(echo "$TESSERAMENTO" | cut -d'|' -f1)" "$(echo "$TESSERAMENTO" | cut -d'|' -f4)"       "$(echo "$TESSERAMENTO" | cut -d'|' -f2)" "$(echo "$TESSERAMENTO" | cut -d'|' -f3)"       "Tesseramento fino al $(echo "$TESSERAMENTO" | cut -d'|' -f5)"       'quota di tesseramento (dati dimostrativi)'
   fi
 fi
