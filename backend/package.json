@@ -1,6 +1,6 @@
 {
   "name": "clubby-backend",
-  "version": "2.11.0",
+  "version": "2.12.0",
   "description": "Clubby API",
   "type": "module",
   "scripts": {
@@ -11,6 +11,8 @@
     "lint": "eslint src --ext .ts",
     "predev": "node ../scripts/copia-branding.mjs backend",
     "dev": "npx tsx --watch src/server.ts",
+    "predev:test": "node ../scripts/copia-branding.mjs backend",
+    "dev:test": "npx tsx --env-file=.env.test src/server.ts",
     "start": "node dist/server.js"
   },
   "dependencies": {

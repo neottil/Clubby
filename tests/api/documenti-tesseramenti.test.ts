@@ -24,7 +24,11 @@ describe('Ricevute e tesseramenti', () => {
     assert.equal(body.total, total, 'numero di voci');
     assert.equal(Number(body.totale_importo), importo, 'importo complessivo');
   };
-  const rinnova = (body: Record<string, unknown>) => api(admin, 'POST', '/api/tesseramenti', body);
+  // Dalla spec 007 il numero di tessera è obbligatorio: uno per socio, che
+  // lo riusa nei rinnovi. Le regole sul numero hanno un file a sé
+  // (tesseramenti-numero.test.ts).
+  const rinnova = (body: Record<string, unknown>) =>
+    api(admin, 'POST', '/api/tesseramenti', { numero_tessera: `DT_test_${String(body.socio_id).slice(0, 8)}`, ...body });
   const voucherDi = async (socioId: string) => (await api(admin, 'GET', `/api/voucher?socio_id=${socioId}`)).body[0];
 
   before(async () => {

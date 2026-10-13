@@ -147,6 +147,12 @@ Quota a 20 €: due soci attivi, uno in scadenza, uno scaduto, uno con due rinno
 nello storico e due mai tesserati (Vitali e Greco). I rinnovi più vecchi restano
 a 15 €, così lo storico mostra un importo diverso da quello in vigore.
 
+Ogni tesseramento ha un numero di tessera (da `CL-0001` a `CL-0005`), tranne il
+primo rinnovo di Rinaldi: un rinnovo registrato prima che il numero si
+chiedesse, che nello storico compare con il trattino. I mai tesserati non hanno
+numero, e nella card La tua tessera della pagina Voucher compaiono come "Mai
+tesserato".
+
 ### Abilitazioni e listino
 
 Bianchi a tutte le attività attive; Ferrari solo a Educazione, Dog Dance e

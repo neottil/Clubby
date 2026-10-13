@@ -172,8 +172,22 @@ e non si buttano: le modifiche allo schema si applicano come migrazioni (vedi
 `tests/api/` verifica dall'esterno, con token veri, i permessi e i dati che ogni ruolo riceve: ruoli nel
 token, visibilità degli incontri e totali di Incontri, Resoconto e Resoconti, listino e soci per ruolo,
 regole di scrittura degli incontri e del voucher, privilegio admin e ruolo, rifiuto di corpi malformati e
-di route inesistenti. Richiede i servizi avviati
-(`npm run dev`) e il database raggiungibile:
+di route inesistenti. Richiede l'authorizer, il backend e il database raggiungibile.
+
+Il backend va avviato con `npm run dev:backend:test` invece che con `npm run dev`: carica
+`backend/.env.test` sopra a `backend/.env`, con i soli interruttori che la suite richiede
+(`RECHARGE_MODE=free`, i due moduli accesi) — in modalità `map` la creazione dei dati di prova viene
+rifiutata, perché non ci sono tagli configurati. Il tuo `backend/.env` resta com'è. Gira **senza**
+`--watch` di proposito: un riavvio a metà suite fa fallire tutti i test successivi con "non
+raggiungibile".
+
+```bash
+npm run dev:authorizer
+```
+
+```bash
+npm run dev:backend:test
+```
 
 ```bash
 npm run test:api

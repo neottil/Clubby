@@ -9,6 +9,7 @@ import Avviso from '../components/Avviso';
 import CaricaAltri from '../components/CaricaAltri';
 import IntestazioneOrdinabile from '../components/IntestazioneOrdinabile';
 import { dataIso } from '../utils/formato';
+import { config } from '../config';
 import { ui } from '../styles/ui';
 import { messaggioErrore } from '../utils/errori';
 
@@ -98,10 +99,15 @@ export default function SociPage() {
   // iscrizione non arrivano proprio, e mostrarne le colonne significherebbe
   // tre trattini per riga.
   const anagraficaVisibile = !!user?.isAdmin || !user?.isIstruttore;
-  const colonne: [keyof Socio, string][] = anagraficaVisibile
-    ? [['cognome', 'Cognome'], ['nome', 'Nome'], ['email', 'Email'],
-       ['telefono', 'Telefono'], ['data_iscrizione', 'Iscritto dal']]
-    : [['cognome', 'Cognome'], ['nome', 'Nome']];
+  // Il numero di tessera lo riceve solo l'admin, e solo a modulo attivo.
+  const tesseraVisibile = !!user?.isAdmin && config.moduli.tesseramento;
+  const colonne: [keyof Socio, string][] = [
+    ['cognome', 'Cognome'], ['nome', 'Nome'],
+    ...(tesseraVisibile ? [['numero_tessera', 'N° tessera'] as [keyof Socio, string]] : []),
+    ...(anagraficaVisibile
+      ? [['email', 'Email'], ['telefono', 'Telefono'], ['data_iscrizione', 'Iscritto dal']] as [keyof Socio, string][]
+      : []),
+  ];
 
   if (!elenco.caricato && !error) return <div style={styles.loading}>Caricamento...</div>;
 
@@ -118,7 +124,9 @@ export default function SociPage() {
 
       <input
         style={styles.filterInput}
-        placeholder={anagraficaVisibile ? 'Cerca per cognome, nome, email o telefono...' : 'Cerca per cognome o nome...'}
+        placeholder={tesseraVisibile
+          ? 'Cerca per cognome, nome, email, telefono o n° tessera...'
+          : anagraficaVisibile ? 'Cerca per cognome, nome, email o telefono...' : 'Cerca per cognome o nome...'}
         value={filter}
         onChange={e => setFilter(e.target.value)}
       />
@@ -171,6 +179,7 @@ export default function SociPage() {
               <tr key={s.id} style={styles.tr}>
                 <td style={styles.td}>{s.cognome}</td>
                 <td style={styles.td}>{s.nome}</td>
+                {tesseraVisibile && <td style={styles.td}>{s.numero_tessera ?? '—'}</td>}
                 {anagraficaVisibile && (
                   <>
                     <td style={styles.td}>{s.email ?? '—'}</td>

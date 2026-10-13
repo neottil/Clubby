@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { createApiClient, DIMENSIONE_PAGINA, type UltimaRicarica, type TaglioRicarica, type Socio, type Voucher, type Movimento } from '../api/client';
+import { createApiClient, DIMENSIONE_PAGINA, type UltimaRicarica, type TaglioRicarica, type Socio, type Voucher, type Movimento, type Tesseramento } from '../api/client';
 import SocioSelect from '../components/SocioSelect';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useElencoPaginato } from '../hooks/useElencoPaginato';
@@ -11,6 +11,7 @@ import Avviso from '../components/Avviso';
 import CaricaAltri from '../components/CaricaAltri';
 import ApriRicevuta from '../components/ApriRicevuta';
 import IntestazioneOrdinabile from '../components/IntestazioneOrdinabile';
+import Etichetta from '../components/Etichetta';
 import { euro, dataIso, dataItaliana, oggiIso } from '../utils/formato';
 import Modal from '../components/Modal';
 import { MarkdownView } from '../components/MarkdownEditor';
@@ -18,6 +19,7 @@ import { theme } from '../theme';
 import { config } from '../config';
 import { ui } from '../styles/ui';
 import { messaggioErrore } from '../utils/errori';
+import { STATI_TESSERAMENTO } from '../utils/tesseramento';
 
 
 
@@ -125,6 +127,12 @@ export default function VouchersPage() {
   // servirebbe a questa sola scheda, e lì andrebbe calcolata per ogni riga.
   const [ultimaRicarica, setUltimaRicarica] = useState<UltimaRicarica | null>(null);
 
+  // Il tesseramento più recente di chi guarda, per la card La tua tessera:
+  // undefined finché non è noto o se la card non si mostra, null se mai
+  // tesserato. Viene dallo storico che il socio può già leggere; lo stato lo
+  // calcola il backend, come per l'admin in Tesseramenti.
+  const [tessera, setTessera] = useState<Tesseramento | null | undefined>(undefined);
+
   const caricaMioVoucher = async (socioId: string | null) => {
     const voucher = socioId ? (await api.getVouchers(socioId))[0] ?? null : null;
     setMioVoucher(voucher);
@@ -142,7 +150,12 @@ export default function VouchersPage() {
       const socioId = mio?.id ?? null;
       setMioSocioId(socioId);
       setSoci(s);
-      await caricaMioVoucher(socioId);
+      await Promise.all([
+        caricaMioVoucher(socioId),
+        socioId && config.moduli.tesseramento
+          ? api.getStoricoTesseramenti(socioId).then(rinnovi => setTessera(rinnovi[0] ?? null))
+          : Promise.resolve(),
+      ]);
     } catch (e) { setError(messaggioErrore(e)); }
     finally { setLoading(false); }
   };
@@ -255,6 +268,8 @@ export default function VouchersPage() {
   // movimenti. La card compare a tutti tranne all'admin senza scheda socio:
   // per lui "Non hai un voucher" non direbbe nulla, non essendo un socio.
   const mostraCard = !user?.isAdmin || !!mioSocioId;
+  // Accanto, la propria tessera: serve una scheda socio e il modulo attivo.
+  const mostraTessera = mostraCard && tessera !== undefined;
 
   const apriNuovoVoucher = async () => {
     setVoucherForm(formVoucherVuoto);
@@ -522,9 +537,43 @@ export default function VouchersPage() {
         </div>
       )}
 
-      {/* Il proprio voucher. */}
+      {/* Il proprio voucher e, a destra, la propria tessera, in due colonne di
+          uguale larghezza. Su schermo stretto vanno su due righe, con la tessera sopra. */}
       {mostraCard && (
-        <div style={styles.mioVoucher}>
+        <div style={isMobile ? styles.cardSocioColonna : styles.cardSocioRiga}>
+        {mostraTessera && (
+          <div style={{ ...styles.mioVoucher, ...styles.cardTessera, ...(isMobile ? {} : { order: 1, flex: '1 1 0', minWidth: 0 }) }}>
+            <div style={styles.cardTesseraTitolo}>
+              <h3 style={styles.movTitle}>La tua tessera</h3>
+              <Etichetta
+                testo={STATI_TESSERAMENTO[tessera?.stato ?? 'mai'].etichetta}
+                colore={STATI_TESSERAMENTO[tessera?.stato ?? 'mai'].colore}
+                sfondo={STATI_TESSERAMENTO[tessera?.stato ?? 'mai'].sfondo}
+              />
+            </div>
+            {tessera ? (
+              // Il numero su una riga, le due date sotto: in una card stretta tre
+              // valori affiancati andrebbero a capo in modo irregolare.
+              <div style={styles.tesseraDati}>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={styles.mioVoucherEtichetta}>Numero</div>
+                  <div style={styles.numeroTessera}>{tessera.numero_tessera ?? '—'}</div>
+                </div>
+                <div>
+                  <div style={styles.mioVoucherEtichetta}>Scadenza</div>
+                  <div>{dataIso(tessera.scadenza)}</div>
+                </div>
+                <div>
+                  <div style={styles.mioVoucherEtichetta}>Ultimo rinnovo</div>
+                  <div>{dataIso(tessera.data_rinnovo)}</div>
+                </div>
+              </div>
+            ) : (
+              <p style={styles.hint}>Non risulta nessun tesseramento a tuo nome.</p>
+            )}
+          </div>
+        )}
+        <div style={{ ...styles.mioVoucher, marginBottom: 0, flex: '1 1 0', minWidth: 0 }}>
           <h3 style={styles.movTitle}>Il tuo voucher</h3>
           {mioVoucher ? (
             <div style={styles.mioVoucherCorpo}>
@@ -562,6 +611,7 @@ export default function VouchersPage() {
           )}
           {pannelloSulMio && pannelloRicarica}
           {pannelloSulMio && pannelloMovimenti}
+        </div>
         </div>
       )}
 
@@ -718,4 +768,11 @@ const styles: Record<string, React.CSSProperties> = {
   mioVoucherDati: { display: 'flex', gap: 32, flexWrap: 'wrap', fontSize: 14 },
   mioVoucherEtichetta: { fontSize: 12, color: '#666', marginBottom: 4 },
   mioVoucherSaldo: { fontSize: 24, fontWeight: 700 },
+  // Voucher e tessera del socio: affiancati, o uno sopra l'altro su schermo stretto.
+  cardSocioRiga: { display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 24 },
+  cardSocioColonna: { display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 24 },
+  cardTessera: { marginBottom: 0, boxSizing: 'border-box' },
+  cardTesseraTitolo: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  numeroTessera: { fontSize: 20, fontWeight: 700 },
+  tesseraDati: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 14 },
 };

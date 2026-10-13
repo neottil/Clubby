@@ -1,0 +1,32 @@
+meta {
+  name: Correggi numero di tessera
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/api/tesseramenti/rinnovi/{{tesseramento_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "numero_tessera": "CL-0001"
+  }
+}
+
+docs {
+  Solo admin. L'id è quello del TESSERAMENTO (dallo storico), non del socio.
+
+  Si corregge solo il tesseramento in corso: il più recente del socio, con la
+  scadenza non ancora passata. Su uno superato da un rinnovo o scaduto, 409.
+  Date e quota non si modificano.
+
+  numero_tessera: stesse regole del rinnovo (obbligatorio, max 30 caratteri,
+  di un solo socio).
+}

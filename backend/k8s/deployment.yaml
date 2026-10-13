@@ -44,6 +44,17 @@ spec:
             # ripartire il pod quando cambia.
             - name: RECHARGE_MODE
               value: "${RECHARGE_MODE}"
+          # Il picco di memoria è la generazione dei PDF delle ricevute: un
+          # OOMKilled durante un'emissione vuol dire che il limite è basso.
+          # Senza limite, quel picco toglierebbe memoria al database sulla
+          # stessa VPS (spec 007).
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "384Mi"
           readinessProbe:
             httpGet:
               path: /health

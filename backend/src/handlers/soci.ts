@@ -24,6 +24,7 @@ import {
   updateSocio,
   deleteSocio,
 } from '../service/soci.service.js';
+import { moduloAttivo } from '../util/moduli.js';
 
 export const handler = async (
   event: RequestEvent
@@ -55,6 +56,7 @@ export const handler = async (
             // Le schede libere interessano solo a chi fa i collegamenti.
             senzaAccount: auth.isAdmin && qs?.senza_account === '1',
             ridotto: !auth.isAdmin,
+            conTessera: moduloAttivo('tesseramento'),
           });
           return pagina(rows, total);
         }

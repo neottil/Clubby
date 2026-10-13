@@ -169,6 +169,8 @@ export interface Socio {
   /** Account collegato alla scheda, se un admin ne ha associato uno. */
   id_viewer?: string | null;
   note?: string | null;
+  /** Numero di tessera corrente: solo all'admin, a modulo tesseramento attivo. */
+  numero_tessera?: string | null;
 }
 
 /** Corpo di creazione e modifica di un socio: solo i campi scrivibili. */
@@ -469,6 +471,8 @@ export interface SituazioneTesseramento {
   cognome: string;
   ultimo_rinnovo: string | null;
   scadenza: string | null;
+  /** Numero del tesseramento più recente; null se non ne ha uno. */
+  numero_tessera: string | null;
   rinnovi: number;
 }
 
@@ -478,6 +482,10 @@ export interface Tesseramento {
   data_rinnovo: string;
   scadenza: string;
   importo: number;
+  /** null sui tesseramenti registrati prima che il numero si chiedesse. */
+  numero_tessera: string | null;
+  /** Stato della riga, calcolato dal backend: quello della prima è lo stato del socio. */
+  stato: StatoTesseramento;
   created_at: string;
   /**
    * La ricevuta che comprende questa riga, quando ce n'è una.
@@ -631,8 +639,11 @@ export function createApiClient(token: string | null) {
     getTesseramentiPagina: (params: TesseramentiQuery) =>
       request<Paginated<RigaTesseramento> & { conteggi: Record<StatoTesseramento, number> }>(`/api/tesseramenti${qsDi(params)}`, {}, token),
     getStoricoTesseramenti: (socioId: string) => request<Tesseramento[]>(`/api/tesseramenti/${socioId}`, {}, token),
-    rinnovaTesseramento: (body: { socio_id: string; scadenza: string; data_rinnovo?: string; importo?: number }) =>
+    rinnovaTesseramento: (body: { socio_id: string; scadenza: string; numero_tessera: string; data_rinnovo?: string; importo?: number }) =>
       request<Tesseramento>('/api/tesseramenti', { method: 'POST', body: JSON.stringify(body) }, token),
+    /** Solo sul tesseramento in corso del socio. */
+    correggiNumeroTessera: (id: string, numero_tessera: string) =>
+      request<Tesseramento>(`/api/tesseramenti/rinnovi/${id}`, { method: 'PATCH', body: JSON.stringify({ numero_tessera }) }, token),
 
     // Impostazioni dell'associazione (solo admin)
     getImpostazioni: () => request<Impostazioni>('/api/impostazioni', {}, token),

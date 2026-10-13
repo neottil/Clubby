@@ -18,7 +18,15 @@ Un socio paga l'associazione in tre modi, tenuti distinti:
   configurato nella pagina Impostazioni. La quota non passa dal voucher, si paga a parte. La nuova scadenza
   deve seguire sia la data del rinnovo sia la scadenza precedente, e i rinnovi restano nello storico.
   Il socio vede la propria scadenza e i propri rinnovi nella pagina Tesseramenti; l'admin li vede
-  per tutti, e solo lui rinnova.
+  per tutti, e solo lui rinnova. Il primo tesseramento è un rinnovo come gli altri: per chi non è mai
+  stato tesserato il pulsante si chiama Tessera.
+- **Numero di tessera**: ogni tesseramento nuovo registra il numero stampato sulla tessera, obbligatorio.
+  Sta sul rinnovo e non sul socio, perché la tessera è dell'anno: lo storico dice quale numero aveva il
+  socio in ogni anno. Un numero appartiene a un solo socio, che può tenerlo da un rinnovo all'altro. Si
+  corregge solo sul tesseramento in corso (l'ultimo, non scaduto); i rinnovi registrati prima che il
+  numero si chiedesse restano senza. Il numero dell'ultimo tesseramento compare all'admin nell'elenco
+  Soci, ricercabile, e al socio nella card **La tua tessera** della pagina Voucher, accanto al proprio
+  voucher, con lo stato del tesseramento come lo vede l'admin.
 - **Incontri non coperti da voucher**: chi non ha un voucher paga l'incontro a parte.
 
 La pagina **Ricevute** (solo admin) somma esattamente queste tre cose: ricariche, quote e incontri

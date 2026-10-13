@@ -79,6 +79,11 @@ specifica, poi si implementa.
 
 4. **Testare dalla spec** - I test devono coprire i requisiti documentati
    - Ogni requisito nella spec deve avere almeno un test associato in `tests/api/`
+   - Nella colonna **Test** della tabella dei requisiti si scrive per esteso il
+     test che lo copre — file e caso, o il controllo manuale da fare — su
+     **ogni** riga. Mai "idem", "come sopra" o rimandi alla riga precedente: la
+     riga si legge da sola, e un riordino dei requisiti non deve cambiarne il
+     significato
 
 5. **Bump delle versioni a ogni feature o fix**
    - Ogni spec implementata si chiude alzando la versione dei **soli moduli
@@ -213,6 +218,7 @@ clubby/
 | `npm run install:all` | Installa le dipendenze dei tre moduli |
 | `npm run dev` | Avvia backend, authorizer e frontend insieme |
 | `npm run dev:backend` | Solo backend (porta 3000) |
+| `npm run dev:backend:test` | Backend per la suite: `backend/.env.test` sopra a `.env`, senza watch |
 | `npm run dev:authorizer` | Solo authorizer (porta 3001) |
 | `npm run dev:frontend` | Solo frontend (porta 5173) |
 | `npm run db:migra` | Applica le migrazioni pendenti ai due database |
@@ -247,7 +253,8 @@ Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`, tranne `/a
 | `/api/ricarica-tagli` | GET/POST | Tagli di ricarica preconfigurati (admin) |
 | `/api/ricarica-tagli/:id` | DELETE | Elimina un taglio |
 | `/api/tesseramenti` | GET/POST | *(modulo tesseramento)* |
-| `/api/tesseramenti/:socioId` | GET | Storico dei rinnovi: admin **o il socio stesso** *(modulo tesseramento)* |
+| `/api/tesseramenti/:socioId` | GET | Storico dei rinnovi, con numero di tessera e stato: admin **o il socio stesso** *(modulo tesseramento)* |
+| `/api/tesseramenti/rinnovi/:id` | PATCH | Corregge il numero di tessera del tesseramento in corso (admin) *(modulo tesseramento)* |
 | `/api/documenti/voci` | GET | Voci ancora da documentare *(modulo ricevute)* |
 | `/api/documenti/anteprima` | POST | Anteprima della ricevuta, senza scrivere *(modulo ricevute)* |
 | `/api/documenti` | GET/POST | Ricevute emesse / emissione *(modulo ricevute)* |
@@ -389,7 +396,11 @@ userebbe un client.
 - I test creano i dati **dalle API**, come farebbe un admin; solo il primo admin
   e la pulizia passano dal database.
 - Serve `RECHARGE_MODE=free`: in modalità `map` la creazione dei dati di prova
-  viene rifiutata, non essendoci tagli configurati.
+  viene rifiutata, non essendoci tagli configurati. Per questo il backend dei
+  test si avvia con `npm run dev:backend:test`, che carica `backend/.env.test`
+  sopra a `backend/.env` senza modificarlo, e **senza** `--watch`: un riavvio a
+  metà suite fa fallire tutto ciò che segue. Non si tocca il `.env` dell'utente
+  e non si passano variabili a mano.
 - In CI la suite gira nel job `test` di `build-deploy.yml`, contro le immagini
   appena buildate e un PostgreSQL usa-e-getta. **Blocca i deploy**, non le build.
 

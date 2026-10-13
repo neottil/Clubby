@@ -34,6 +34,7 @@ import Modal from '../components/Modal';
 import { config } from '../config';
 import { ui } from '../styles/ui';
 import { messaggioErrore } from '../utils/errori';
+import { STATI_TESSERAMENTO as STATI, LUNGHEZZA_NUMERO_TESSERA } from '../utils/tesseramento';
 
 /** Stessa data dell'anno dopo; il 29 febbraio diventa 28 se l'anno non è bisestile. */
 function aggiungiAnno(iso: string): string {
@@ -45,20 +46,12 @@ function aggiungiAnno(iso: string): string {
 
 type Stato = StatoTesseramento;
 
-// Lo stato lo calcola il backend (attivo, in scadenza entro 30 giorni,
-// scaduto, mai tesserato): serve lì per filtrare e ordinare a pagine.
-const STATI: Record<Stato, { etichetta: string; colore: string; sfondo: string }> = {
-  attivo:      { etichetta: 'Attivo',        colore: '#166534', sfondo: '#f0fdf4' },
-  in_scadenza: { etichetta: 'In scadenza',   colore: '#92400e', sfondo: '#fffbeb' },
-  scaduto:     { etichetta: 'Scaduto',       colore: '#991b1b', sfondo: '#fef2f2' },
-  mai:         { etichetta: 'Mai tesserato', colore: '#4b5563', sfondo: '#f3f4f6' },
-};
-
 interface Riga {
   socio_id: string;
   socioNome: string;
   ultimo_rinnovo: string;
   scadenza: string;
+  numero_tessera: string | null;
   rinnovi: number;
   stato: Stato;
 }
@@ -69,6 +62,7 @@ function rigaDa(t: RigaTesseramento): Riga {
     socioNome: `${t.cognome} ${t.nome}`,
     ultimo_rinnovo: dataIso(t.ultimo_rinnovo),
     scadenza: dataIso(t.scadenza),
+    numero_tessera: t.numero_tessera,
     rinnovi: Number(t.rinnovi),
     stato: t.stato,
   };
@@ -137,7 +131,7 @@ function MioTesseramento() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    {['Rinnovo', 'Scadenza', 'Quota'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    {['Rinnovo', 'Scadenza', 'Tessera', 'Quota'].map(h => <th key={h} style={styles.th}>{h}</th>)}
                     {config.moduli.ricevute && <th style={styles.th}>Ricevuta</th>}
                   </tr>
                 </thead>
@@ -146,6 +140,7 @@ function MioTesseramento() {
                     <tr key={t.id} style={styles.tr}>
                       <td style={styles.td}>{dataIso(t.data_rinnovo)}</td>
                       <td style={styles.td}>{dataIso(t.scadenza)}</td>
+                      <td style={styles.td}>{t.numero_tessera ?? '—'}</td>
                       <td style={styles.td}>{euro(t.importo)}</td>
                       {config.moduli.ricevute && (
                         <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
@@ -181,12 +176,15 @@ function TesseramentiAdmin() {
   const [filtroStato, setFiltroStato] = useState<Stato | ''>('');
 
   // Rinnovo in corso: la riga e i valori del form.
-  const [rinnovo, setRinnovo] = useState<{ riga: Riga; data_rinnovo: string; scadenza: string; importo: string } | null>(null);
+  const [rinnovo, setRinnovo] = useState<{ riga: Riga; data_rinnovo: string; scadenza: string; importo: string; numero_tessera: string } | null>(null);
   const [erroreRinnovo, setErroreRinnovo] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Storico aperto: la riga e i rinnovi (null mentre si caricano).
   const [storico, setStorico] = useState<{ riga: Riga; rinnovi: Tesseramento[] | null } | null>(null);
+  // Correzione del numero nello Storico: il tesseramento e il valore digitato.
+  const [correzione, setCorrezione] = useState<{ id: string; numero: string } | null>(null);
+  const [erroreCorrezione, setErroreCorrezione] = useState('');
 
   useEffect(() => {
     api.getImpostazioni()
@@ -217,21 +215,29 @@ function TesseramentiAdmin() {
   const apriRinnovo = (riga: Riga) => {
     const base = riga.scadenza && riga.scadenza > oggi ? riga.scadenza : oggi;
     setErroreRinnovo('');
-    setRinnovo({ riga, data_rinnovo: oggi, scadenza: aggiungiAnno(base), importo: quota.toFixed(2) });
+    // Il numero parte vuoto e non dal tesseramento precedente: a ogni rinnovo
+    // il socio riceve una tessera nuova, con un numero nuovo.
+    setRinnovo({
+      riga, data_rinnovo: oggi, scadenza: aggiungiAnno(base), importo: quota.toFixed(2),
+      numero_tessera: '',
+    });
   };
 
   const confermaRinnovo = async () => {
     if (!rinnovo) return;
-    setSaving(true);
     setErroreRinnovo('');
+    setSaving(true);
     try {
       await api.rinnovaTesseramento({
         socio_id: rinnovo.riga.socio_id,
         data_rinnovo: rinnovo.data_rinnovo,
         scadenza: rinnovo.scadenza,
         importo: Number(rinnovo.importo),
+        numero_tessera: rinnovo.numero_tessera.trim(),
       });
-      setSuccessMsg(`Tesseramento di ${rinnovo.riga.socioNome} rinnovato fino al ${rinnovo.scadenza}`);
+      setSuccessMsg(rinnovo.riga.stato === 'mai'
+        ? `${rinnovo.riga.socioNome} tesserato fino al ${rinnovo.scadenza}`
+        : `Tesseramento di ${rinnovo.riga.socioNome} rinnovato fino al ${rinnovo.scadenza}`);
       setRinnovo(null);
       elenco.ricarica();
     } catch (e) {
@@ -243,6 +249,8 @@ function TesseramentiAdmin() {
   };
 
   const apriStorico = async (riga: Riga) => {
+    setCorrezione(null);
+    setErroreCorrezione('');
     setStorico({ riga, rinnovi: null });
     try {
       const rinnovi = await api.getStoricoTesseramenti(riga.socio_id);
@@ -253,8 +261,30 @@ function TesseramentiAdmin() {
     }
   };
 
+  const confermaCorrezione = async () => {
+    if (!correzione || !storico) return;
+    setErroreCorrezione('');
+    setSaving(true);
+    try {
+      const aggiornato = await api.correggiNumeroTessera(correzione.id, correzione.numero.trim());
+      setStorico({
+        ...storico,
+        rinnovi: (storico.rinnovi ?? []).map(t => (t.id === aggiornato.id ? { ...t, numero_tessera: aggiornato.numero_tessera } : t)),
+      });
+      setCorrezione(null);
+      elenco.ricarica();
+    } catch (e) {
+      // Dentro la modale, come per il rinnovo: il valore resta da correggere.
+      setErroreCorrezione(messaggioErrore(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const numeroPresente = rinnovo !== null && rinnovo.numero_tessera.trim() !== '';
   const importoValido = rinnovo !== null && rinnovo.importo !== '' && Number(rinnovo.importo) >= 0;
-  const rinnovoCompleto = rinnovo !== null && !!rinnovo.data_rinnovo && !!rinnovo.scadenza && importoValido;
+  const rinnovoCompleto = numeroPresente && !!rinnovo?.data_rinnovo && !!rinnovo?.scadenza && importoValido;
+  const confermaDisabilitata = saving || !rinnovoCompleto;
 
   if (!elenco.caricato && !error) return <div style={styles.loading}>Caricamento...</div>;
 
@@ -309,7 +339,9 @@ function TesseramentiAdmin() {
                 </td>
                 <td style={styles.td}>{r.rinnovi}</td>
                 <td style={styles.td}>
-                  <button style={styles.btnSmall} onClick={() => apriRinnovo(r)}>Rinnova</button>
+                  {/* Chi non è mai stato tesserato non ha niente da rinnovare: il
+                      flusso è lo stesso, ma deve farsi trovare come primo tesseramento. */}
+                  <button style={styles.btnSmall} onClick={() => apriRinnovo(r)}>{r.stato === 'mai' ? 'Tessera' : 'Rinnova'}</button>
                   <button style={styles.btnSmall} onClick={() => apriStorico(r)} disabled={r.rinnovi === 0}>Storico</button>
                 </td>
               </tr>
@@ -324,13 +356,14 @@ function TesseramentiAdmin() {
 
       {rinnovo && (
         <Modal
-          title={`Rinnova tesseramento - ${rinnovo.riga.socioNome}`}
+          title={`${rinnovo.riga.stato === 'mai' ? 'Nuovo tesseramento' : 'Rinnova tesseramento'} - ${rinnovo.riga.socioNome}`}
           onClose={() => setRinnovo(null)}
           footer={
             <>
               <button style={styles.btnSecondary} onClick={() => setRinnovo(null)}>Annulla</button>
-              <button style={styles.btn} onClick={confermaRinnovo} disabled={saving || !rinnovoCompleto}>
-                {saving ? 'Salvataggio...' : 'Conferma rinnovo'}
+              <button style={{ ...styles.btn, ...(confermaDisabilitata ? styles.btnDisabilitato : {}) }}
+                onClick={confermaRinnovo} disabled={confermaDisabilitata}>
+                {saving ? 'Salvataggio...' : rinnovo.riga.stato === 'mai' ? 'Conferma tesseramento' : 'Conferma rinnovo'}
               </button>
             </>
           }
@@ -341,6 +374,19 @@ function TesseramentiAdmin() {
               : 'Primo tesseramento del socio.'}
           </p>
           {erroreRinnovo && <Avviso tipo='errore' messaggio={erroreRinnovo} onChiudi={() => setErroreRinnovo('')} />}
+          <div style={styles.field}>
+            <label style={styles.label} htmlFor='numero-tessera'>Numero di tessera *</label>
+            <input id='numero-tessera' type='text' value={rinnovo.numero_tessera}
+              style={styles.input}
+              maxLength={LUNGHEZZA_NUMERO_TESSERA} required aria-required='true'
+              aria-describedby='numero-tessera-nota'
+              onChange={e => setRinnovo({ ...rinnovo, numero_tessera: e.target.value })} />
+            {/* Il pulsante di conferma resta spento finché il numero manca: la
+                nota dice perché, invece di lasciarlo indovinare. */}
+            <p id='numero-tessera-nota' style={styles.hintCampo}>
+              Il numero stampato sulla tessera consegnata al socio.{!numeroPresente && ' Obbligatorio per confermare.'}
+            </p>
+          </div>
           <div style={styles.field}>
             <label style={styles.label} htmlFor='data-rinnovo'>Data del rinnovo</label>
             <input id='data-rinnovo' type='date' style={styles.input} value={rinnovo.data_rinnovo}
@@ -369,6 +415,7 @@ function TesseramentiAdmin() {
           onClose={() => setStorico(null)}
           footer={<button style={styles.btnSecondary} onClick={() => setStorico(null)}>Chiudi</button>}
         >
+          {erroreCorrezione && <Avviso tipo='errore' messaggio={erroreCorrezione} onChiudi={() => setErroreCorrezione('')} />}
           {storico.rinnovi === null ? (
             <p>Caricamento...</p>
           ) : (
@@ -376,15 +423,47 @@ function TesseramentiAdmin() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    {['Rinnovo', 'Scadenza', 'Quota'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    {['Rinnovo', 'Scadenza', 'Tessera', 'Quota'].map(h => <th key={h} style={styles.th}>{h}</th>)}
                     {config.moduli.ricevute && <th style={styles.th}>Ricevuta</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {storico.rinnovi.map(t => (
+                  {storico.rinnovi.map((t, i) => {
+                    // Si corregge solo il tesseramento in corso: il primo dello
+                    // storico, se non è scaduto. Il backend applica la stessa regola.
+                    const inCorso = i === 0 && t.stato !== 'scaduto';
+                    return (
                     <tr key={t.id} style={styles.tr}>
                       <td style={styles.td}>{dataIso(t.data_rinnovo)}</td>
                       <td style={styles.td}>{dataIso(t.scadenza)}</td>
+                      <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                        {correzione?.id === t.id ? (
+                          <>
+                            <input
+                              aria-label='Numero di tessera'
+                              style={styles.inputTessera}
+                              value={correzione.numero}
+                              maxLength={LUNGHEZZA_NUMERO_TESSERA}
+                              autoFocus
+                              onChange={e => setCorrezione({ id: t.id, numero: e.target.value })}
+                            />
+                            <button
+                              style={{ ...styles.btnSmall, ...(saving || correzione.numero.trim() === '' ? styles.btnDisabilitato : {}) }}
+                              onClick={confermaCorrezione}
+                              disabled={saving || correzione.numero.trim() === ''}>Salva</button>
+                            <button style={styles.btnSmall} onClick={() => { setCorrezione(null); setErroreCorrezione(''); }}>Annulla</button>
+                          </>
+                        ) : (
+                          <>
+                            {t.numero_tessera ?? '—'}
+                            {inCorso && (
+                              <button style={{ ...styles.btnSmall, marginLeft: 8 }} onClick={() => setCorrezione({ id: t.id, numero: t.numero_tessera ?? '' })}>
+                                {t.numero_tessera ? 'Correggi' : 'Aggiungi'}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </td>
                       <td style={styles.td}>{euro(t.importo)}</td>
                       {config.moduli.ricevute && (
                         <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
@@ -397,7 +476,8 @@ function TesseramentiAdmin() {
                         </td>
                       )}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </TableScroll>
@@ -414,6 +494,7 @@ const styles: Record<string, React.CSSProperties> = {
   hint: { color: '#666', fontSize: 13, margin: '0 0 20px', maxWidth: 760, lineHeight: 1.5 },
   hintCampo: { fontSize: 12, color: '#666', margin: '6px 0 0' },
   filterInput: { flex: 1, minWidth: 220, maxWidth: 360, padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', minHeight: 40 },
+  inputTessera: { width: 110, padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', marginRight: 4 },
   modalInfo: { fontSize: 14, color: '#444', margin: '0 0 16px' },
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', minHeight: 40 },
 };

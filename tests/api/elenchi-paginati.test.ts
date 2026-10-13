@@ -8,7 +8,7 @@
 
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { api, type Sessione } from './helpers.ts';
+import { api, giorniFa, type Sessione } from './helpers.ts';
 import { preparaDati, pulisciDatiTest, type DatiTest } from './dati.ts';
 
 /** Soci di prova: tutti hanno il cognome che finisce in "_test". */
@@ -51,6 +51,20 @@ describe('Elenchi paginati', () => {
       const asc = await cognomi('asc');
       assert.deepEqual(asc, [...asc].sort((a, b) => a.localeCompare(b)));
       assert.deepEqual(await cognomi('desc'), [...asc].reverse());
+    });
+
+    it('ordinamento per numero_tessera', async () => {
+      // Due soci tesserati, gli altri tre senza numero: restano mai tesserati
+      // per il filtro per stato più sotto.
+      for (const [socio, numero_tessera] of [[d.soci.socio1, 'EP_test_B'], [d.soci.socio2, 'EP_test_A']]) {
+        const r = await api(admin, 'POST', '/api/tesseramenti', { socio_id: socio, scadenza: giorniFa(-365), numero_tessera });
+        assert.equal(r.status, 201, JSON.stringify(r.body));
+      }
+      const numeri = async (dir: string) =>
+        (await pagina(admin, `/api/soci?q=_test&sort=numero_tessera&dir=${dir}&limit=50`)).data.map((s: any) => s.numero_tessera);
+      // Senza numero in fondo, nelle due direzioni.
+      assert.deepEqual(await numeri('asc'), ['EP_test_A', 'EP_test_B', null, null, null]);
+      assert.deepEqual(await numeri('desc'), ['EP_test_B', 'EP_test_A', null, null, null]);
     });
 
     it('senza_account restituisce le sole schede libere', async () => {

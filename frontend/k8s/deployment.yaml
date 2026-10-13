@@ -37,6 +37,14 @@ spec:
             - name: runtime-config
               mountPath: /etc/frontend-config
               readOnly: true
+          # nginx che serve file statici: pochissimo (spec 007).
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
           readinessProbe:
             httpGet:
               path: /

@@ -7,7 +7,7 @@
 - Attribuzione degli incontri a un istruttore, abilitato per singola attività
 - Voucher prepagati, con il credito acquistato registrato come ricarica; a scelta del club, la
   ricarica può accreditare più di quanto pagato (percentuale fissa o tagli preconfigurati)
-- Tesseramento al club: scadenza per socio, rinnovi con storico e quota configurabile *(modulo opzionale)*
+- Tesseramento al club: scadenza per socio, rinnovi con storico, numero di tessera e quota configurabile *(modulo opzionale)*
 - Ricevute: ricariche, quote di tesseramento e incontri non coperti da voucher, con i totali del
   periodo e il segno di quelli già documentati *(modulo opzionale)*
 - Ricevute in PDF: numerate per anno, viste in anteprima prima di confermarle, conservate

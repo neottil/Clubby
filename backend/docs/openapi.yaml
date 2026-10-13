@@ -156,14 +156,17 @@ paths:
         Senza `limit`/`offset`: l'elenco completo in ordine di cognome e nome (per i menu
         di scelta). Con `limit` o `offset`: una pagina, con ricerca e ordinamento applicati
         dal database. L'istruttore cerca e ordina solo per cognome e nome.
+
+        A modulo tesseramento attivo la pagina dell'admin porta anche `numero_tessera`
+        (il numero del tesseramento più recente), su cui si cerca e si ordina.
       parameters:
         - $ref: '#/components/parameters/Q'
         - name: sort
           in: query
-          description: Solo con paginazione
+          description: Solo con paginazione. `numero_tessera` solo per l'admin, a modulo tesseramento attivo
           schema:
             type: string
-            enum: [cognome, nome, email, telefono, data_iscrizione]
+            enum: [cognome, nome, email, telefono, data_iscrizione, numero_tessera]
             default: cognome
         - $ref: '#/components/parameters/Dir'
         - name: senza_account
@@ -996,8 +999,10 @@ paths:
       tags: [Tesseramenti]
       summary: Registra un rinnovo
       description: |
-        Solo admin. La nuova scadenza deve seguire la data del rinnovo e l'eventuale
-        scadenza precedente. Senza `importo` si usa la quota delle impostazioni.
+        Solo admin. Registra un rinnovo, o il primo tesseramento. La nuova scadenza
+        deve seguire la data del rinnovo e l'eventuale scadenza precedente. Senza
+        `importo` si usa la quota delle impostazioni. `numero_tessera` è obbligatorio
+        e appartiene a un solo socio: già usato da un altro → 409.
       requestBody:
         required: true
         content:
@@ -1023,6 +1028,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Errore'
+        '409':
+          $ref: '#/components/responses/Conflitto'
+
+  /api/tesseramenti/rinnovi/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Id del tesseramento (non del socio)
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [Tesseramenti]
+      summary: Corregge il numero di tessera
+      description: |
+        Modifica parziale (`PATCH`): cambia solo il numero, non sostituisce il tesseramento.
+        Solo admin, e solo sul **tesseramento in corso** del socio: il più recente, con
+        la scadenza non ancora passata. Su un tesseramento superato da un rinnovo o
+        scaduto → 409. Date e quota non si modificano. Stesse regole del rinnovo sul
+        numero: obbligatorio, al massimo 30 caratteri, di un solo socio.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numero_tessera]
+              properties:
+                numero_tessera:
+                  type: string
+                  maxLength: 30
+      responses:
+        '200':
+          description: Tesseramento aggiornato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tesseramento'
+        '400':
+          $ref: '#/components/responses/RichiestaNonValida'
+        '401':
+          $ref: '#/components/responses/NonAutenticato'
+        '403':
+          $ref: '#/components/responses/AccessoNegato'
+        '404':
+          $ref: '#/components/responses/NonTrovato'
+        '409':
+          $ref: '#/components/responses/Conflitto'
 
   /api/tesseramenti/{socioId}:
     parameters:
@@ -1039,6 +1093,8 @@ paths:
         Admin, **o il socio stesso**: è l'unica rotta dell'area aperta oltre l'admin.
         Il confronto è con la scheda socio collegata all'account, non con il parametro:
         chiedere l'id di un altro risponde 403. In ordine di scadenza, dalla più recente.
+        Ogni riga porta il proprio `stato`: quello della prima è lo stato del socio,
+        `mai` se l'elenco è vuoto.
       responses:
         '200':
           description: Rinnovi
@@ -1703,6 +1759,11 @@ components:
         updated_at:
           type: string
           format: date-time
+        numero_tessera:
+          type: [string, 'null']
+          description: |
+            Numero del tesseramento più recente; null se non ne ha uno. Solo nella pagina
+            dell'admin (`GET /api/soci` con paginazione), a modulo tesseramento attivo.
 
     SocioRidotto:
       type: object
@@ -2101,6 +2162,13 @@ components:
           format: date
         importo:
           $ref: '#/components/schemas/Importo'
+        numero_tessera:
+          type: [string, 'null']
+          maxLength: 30
+          description: null sui tesseramenti registrati prima che il numero si chiedesse
+        stato:
+          $ref: '#/components/schemas/StatoTesseramento'
+          description: Solo nello storico di un socio; calcolato con la stessa regola della situazione
         created_at:
           type: string
           format: date-time
@@ -2138,12 +2206,15 @@ components:
         scadenza:
           type: [string, 'null']
           format: date
+        numero_tessera:
+          type: [string, 'null']
+          description: Numero del tesseramento più recente; null se non ne ha uno
         rinnovi:
           type: integer
 
     NuovoRinnovo:
       type: object
-      required: [socio_id, scadenza]
+      required: [socio_id, scadenza, numero_tessera]
       properties:
         socio_id:
           type: string
@@ -2159,6 +2230,10 @@ components:
           type: number
           minimum: 0
           description: Omesso = quota delle impostazioni
+        numero_tessera:
+          type: string
+          maxLength: 30
+          description: Il numero stampato sulla tessera; spazi ai lati tolti, vuoto → 400
 
     VoceDocumento:
       type: object

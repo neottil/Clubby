@@ -68,6 +68,9 @@ const ROUTES: Array<{
   { pattern: /^\/api\/voucher$/,                     handler: vouchersHandler,  param: null },
   { pattern: /^\/api\/ricarica-tagli\/([^/]+)$/,     handler: ricaricheHandler, param: 'id' },
   { pattern: /^\/api\/ricarica-tagli$/,              handler: ricaricheHandler, param: null },
+  // "rinnovi/:id" è un tesseramento, "/:id" è un socio: lo stesso segmento
+  // con due significati a seconda del metodo sarebbe un errore in attesa.
+  { pattern: /^\/api\/tesseramenti\/rinnovi\/([^/]+)$/, handler: tesseramentiHandler, param: 'rinnovoId', modulo: 'tesseramento' },
   { pattern: /^\/api\/tesseramenti\/([^/]+)$/,       handler: tesseramentiHandler, param: 'id', modulo: 'tesseramento' },
   { pattern: /^\/api\/tesseramenti$/,                handler: tesseramentiHandler, param: null, modulo: 'tesseramento' },
   // L'ordine conta: "voci" e "anteprima" devono precedere il ramo con l'id, o
@@ -135,7 +138,7 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN ?? '*';
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': CORS_ORIGIN,
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
 };
 
 // ---------------------------------------------------------------------------

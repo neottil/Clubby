@@ -5,6 +5,7 @@
     "install:all": "npm install --prefix backend && npm install --prefix frontend && npm install --prefix authorizer",
     "dev": "concurrently -n backend,authorizer,frontend -c blue,magenta,green \"npm run dev --prefix backend\" \"npm run dev --prefix authorizer\" \"npm run dev --prefix frontend\"",
     "dev:backend": "npm run dev --prefix backend",
+    "dev:backend:test": "npm run dev:test --prefix backend",
     "dev:authorizer": "npm run dev --prefix authorizer",
     "dev:frontend": "npm run dev --prefix frontend",
     "db:migra": "docker compose up migrazioni",

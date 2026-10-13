@@ -47,3 +47,20 @@ k8s/
     └── postgres-nodeport.yaml    # opzionale, solo se DB_NODE_PORT è impostata
 ```
 
+## Risorse dei container
+
+Ogni workload dichiara `resources.requests` e `resources.limits` (spec 007). Sulla VPS gira tutto sullo
+stesso nodo: le requests dicono allo scheduler quanto riservare, i limits impediscono a un picco di un
+componente di togliere memoria agli altri — al database per primo.
+
+| Workload | Manifest | CPU req | Mem req | CPU limit | Mem limit |
+|---|---|---|---|---|---|
+| backend | `backend/k8s/deployment.yaml` | 50m | 128Mi | 500m | 384Mi |
+| frontend | `frontend/k8s/deployment.yaml` | 10m | 16Mi | 100m | 64Mi |
+| authorizer | `authorizer/k8s/deployment.yaml` | 50m | 96Mi | 500m | 256Mi |
+| migrazioni (Job) | `k8s/templates/migrazioni/job.yaml` | 10m | 32Mi | 200m | 128Mi |
+| PostgreSQL | `k8s/templates/infra/postgres-deployment.yaml` | 100m | 128Mi | 500m | 512Mi |
+
+Il valore da tenere d'occhio è il limite di memoria del backend: il picco è la generazione dei PDF delle
+ricevute, e un pod `OOMKilled` durante un'emissione vuol dire che è basso. Il consumo reale si legge con
+`kubectl top pod -n <namespace>`.

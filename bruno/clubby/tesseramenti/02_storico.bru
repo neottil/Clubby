@@ -20,7 +20,10 @@ docs {
   collegata all'account, non con il parametro.
 
   Tutti i rinnovi di un socio, dal più recente:
-    id, socio_id, data_rinnovo, scadenza, importo, created_at
+    id, socio_id, data_rinnovo, scadenza, importo, numero_tessera, stato, created_at
+
+  stato (attivo, in_scadenza, scaduto) è quello di ogni riga: la prima dà lo
+  stato del socio, "mai" se l'elenco è vuoto.
 
   Col modulo ricevute attivo ogni riga porta anche la ricevuta della quota:
     documento_id, documento_anno, documento_numero (null se non emessa)

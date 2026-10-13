@@ -94,7 +94,7 @@ export const SEZIONI: Sezione[] = [
     titolo: 'Il tuo voucher e i movimenti',
     gruppo: 'I tuoi dati',
     visibile: haScheda,
-    contenuto: () => (
+    contenuto: c => (
       <>
         <p>
           Il <strong>voucher</strong> è il credito prepagato con cui paghi gli incontri. Nella pagina{' '}
@@ -113,6 +113,13 @@ export const SEZIONI: Sezione[] = [
           Se leggi <strong>Non hai un voucher attivo</strong>, paghi gli incontri a parte: chiedi al club
           se vuoi attivarne uno.
         </p>
+        {c.moduli.tesseramento && (
+          <p>
+            Accanto al voucher (sopra, su un telefono) la card <strong>La tua tessera</strong> mostra il{' '}
+            <strong>Numero</strong> della tua tessera, lo stato del tesseramento (attivo, in scadenza,
+            scaduto o mai tesserato), la <strong>Scadenza</strong> e la data dell'<strong>Ultimo rinnovo</strong>.
+          </p>
+        )}
       </>
     ),
   },
@@ -148,7 +155,7 @@ export const SEZIONI: Sezione[] = [
     contenuto: () => (
       <p>
         La pagina <strong>Tesseramenti</strong> ti dice quando scade il tuo tesseramento al club e mostra
-        lo storico dei rinnovi, con la data, la nuova scadenza e la quota pagata. I rinnovi li registra
+        lo storico dei rinnovi, con la data, la nuova scadenza, il numero della tessera e la quota pagata. I rinnovi li registra
         l'associazione: se la data non torna, chiedi a un amministratore.
       </p>
     ),
@@ -244,7 +251,7 @@ export const SEZIONI: Sezione[] = [
     titolo: 'Soci',
     gruppo: 'Amministrazione',
     visibile: c => c.admin,
-    contenuto: () => (
+    contenuto: c => (
       <>
         <p>
           La pagina <strong>Soci</strong> è l'anagrafica: <strong>+ Nuovo socio</strong> crea una scheda,{' '}
@@ -252,6 +259,12 @@ export const SEZIONI: Sezione[] = [
           e un account sono due cose diverse: la scheda è la persona per l'associazione, l'account è il
           modo di entrare nell'applicazione. Si collegano dalle Impostazioni (vedi sotto).
         </p>
+        {c.moduli.tesseramento && (
+          <p>
+            La colonna <strong>N° tessera</strong> riporta il numero dell'ultimo tesseramento di ogni socio;
+            la ricerca trova un socio anche per numero di tessera.
+          </p>
+        )}
         <p>
           Un socio con voci già comprese in una ricevuta o con incontri rendicontati non si può eliminare:
           cancellarlo si porterebbe dietro documenti che devono restare.
@@ -330,13 +343,27 @@ export const SEZIONI: Sezione[] = [
     gruppo: 'Amministrazione',
     visibile: c => c.admin && c.moduli.tesseramento,
     contenuto: () => (
-      <p>
-        In <strong>Tesseramenti</strong> trovi la scadenza di ogni socio, con lo stato (attivo, in scadenza,
-        scaduto, mai tesserato) e il filtro per stato. <strong>Rinnova</strong> registra un rinnovo: data,
-        nuova scadenza e quota, proposta dal valore configurato nelle Impostazioni e modificabile.
-        La nuova scadenza deve seguire sia la data del rinnovo sia la scadenza precedente.{' '}
-        <strong>Storico</strong> mostra i rinnovi passati.
-      </p>
+      <>
+        <p>
+          In <strong>Tesseramenti</strong> trovi la scadenza di ogni socio, con lo stato (attivo, in scadenza,
+          scaduto, mai tesserato) e il filtro per stato. <strong>Rinnova</strong> registra un rinnovo; per chi
+          non è mai stato tesserato lo stesso pulsante si chiama <strong>Tessera</strong> e registra il primo
+          tesseramento. Si indicano il <strong>Numero di tessera</strong> (obbligatorio: è quello della
+          tessera nuova consegnata al socio), la data, la nuova scadenza e la quota, proposta dal valore configurato nelle
+          Impostazioni e modificabile. La nuova scadenza deve seguire sia la data del rinnovo sia la scadenza
+          precedente.
+        </p>
+        <p>
+          Un numero di tessera appartiene a un solo socio: lo stesso socio può tenerlo da un rinnovo
+          all'altro, ma non si può assegnarlo a un altro.
+        </p>
+        <p>
+          <strong>Storico</strong> mostra i rinnovi passati. Sul tesseramento in corso — l'ultimo, se non è
+          scaduto — <strong>Correggi</strong> (o <strong>Aggiungi</strong>, se manca) cambia il numero di
+          tessera; date e quota non si modificano. I tesseramenti chiusi restano come sono: un socio scaduto
+          prende il numero nuovo rinnovando.
+        </p>
+      </>
     ),
   },
   {

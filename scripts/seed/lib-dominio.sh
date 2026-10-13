@@ -103,9 +103,10 @@ crea_incontro() {
 }
 
 # Rinnovo del tesseramento. Parametri: socio, giorni fa del rinnovo, giorni fa
-# della scadenza (negativo = scadenza futura), quota.
+# della scadenza (negativo = scadenza futura), quota, numero di tessera. Il
+# numero vuoto produce un NULL: un rinnovo registrato prima che si chiedesse.
 crea_tesseramento() {
   psql_exec "
-    INSERT INTO tesseramento (socio_id, data_rinnovo, scadenza, importo)
-    VALUES ('$1', CURRENT_DATE - $2, CURRENT_DATE - ($3), $4);"
+    INSERT INTO tesseramento (socio_id, data_rinnovo, scadenza, importo, numero_tessera)
+    VALUES ('$1', CURRENT_DATE - $2, CURRENT_DATE - ($3), $4, NULLIF('${5:-}', ''));"
 }

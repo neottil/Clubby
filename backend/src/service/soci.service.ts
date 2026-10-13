@@ -14,6 +14,8 @@ export interface Socio {
   note: string | null;
   created_at: string;
   updated_at: string;
+  /** Solo nell'elenco paginato dell'admin, a modulo tesseramento attivo. */
+  numero_tessera?: string | null;
 }
 
 export interface CreateSocioInput {
@@ -77,6 +79,11 @@ export interface ListSociOptions {
   senzaAccount?: boolean;
   /** Solo id e nominativo, per chi non deve vedere l'anagrafica (istruttore). */
   ridotto?: boolean;
+  /**
+   * Aggiunge il numero di tessera corrente, cercabile e ordinabile. Lo decide
+   * il chiamante, a modulo tesseramento attivo: spento, il campo non compare.
+   */
+  conTessera?: boolean;
 }
 
 /**
@@ -102,18 +109,35 @@ export async function listSociPaginati(
 
   // L'istruttore cerca e ordina solo sul nominativo: sui campi che non vede
   // una ricerca rivelerebbe comunque qualcosa (chi ha quell'email).
+  const conTessera = !!options.conTessera && !options.ridotto;
   const colonneRicerca = options.ridotto ? ['cognome', 'nome'] : ['cognome', 'nome', 'email', 'telefono'];
+  if (conTessera) colonneRicerca.push('numero_tessera');
   const where = condizioniRicerca(options.q, colonneRicerca, params);
   if (options.senzaAccount) where.push('id_viewer IS NULL');
 
   const chiave = options.ridotto && !['cognome', 'nome'].includes(options.sort ?? '') ? 'cognome' : options.sort ?? 'cognome';
-  const colonne = ORDINAMENTO_SOCI[chiave] ?? ORDINAMENTO_SOCI.cognome;
+  const colonne = (conTessera && chiave === 'numero_tessera' ? ['numero_tessera'] : ORDINAMENTO_SOCI[chiave]) ?? ORDINAMENTO_SOCI.cognome;
   const dir = direzione(options.dir);
   const orderBy = [...colonne.map(c => `${c} ${dir} NULLS LAST`), 'id'].join(', ');
 
+  // Il numero corrente è quello del tesseramento più recente, anche se non ne
+  // ha uno (spec 007): è l'unico su cui l'admin può ancora correggerlo.
+  // Sottoquery e non giuntura diretta, così filtri e ordinamento restano
+  // scritti sui nomi di colonna come per gli altri campi.
+  const origine = conTessera
+    ? `(SELECT s.*, ultimo.numero_tessera
+          FROM socio s
+          LEFT JOIN LATERAL (
+            SELECT numero_tessera FROM tesseramento t
+             WHERE t.socio_id = s.id
+             ORDER BY scadenza DESC, created_at DESC
+             LIMIT 1
+          ) ultimo ON TRUE) socio`
+    : 'socio';
+
   const result = await query(
     `SELECT ${options.ridotto ? 'id, nome, cognome' : '*'}, COUNT(*) OVER() AS total_count
-     FROM socio
+     FROM ${origine}
      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
      ORDER BY ${orderBy}
      LIMIT :limit OFFSET :offset`,

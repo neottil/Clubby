@@ -33,6 +33,11 @@ l'implementazione cresca per conto suo.
 
 Numerati, verificabili, uno per riga. Ognuno deve poter diventare un test.
 
+Nella colonna **Test** va scritto per esteso, su ogni riga, il test che copre il
+requisito: file e caso (`tesseramenti.test.ts` › "rifiuta un numero vuoto"), o
+il controllo manuale da fare. Mai "idem" o "come sopra": ogni riga si legge da
+sola.
+
 | # | Requisito | Test |
 |---|---|---|
 | R1 | | |

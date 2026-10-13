@@ -43,6 +43,10 @@ export const ui = {
   field: { marginBottom: 14 },
   label: { display: 'block', fontSize: 13, color: '#555', marginBottom: 4, fontWeight: 500 },
   input: { width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box' },
+  // Da aggiungere a btn/btnSmall quando il pulsante è disabilitato. Gli stili
+  // inline non hanno :disabled, e senza questo un pulsante spento è identico a
+  // uno attivo: si clicca e non succede niente, senza capire perché.
+  btnDisabilitato: { opacity: 0.45, cursor: 'not-allowed' },
   // `select` per i menu affiancati ad altro (filtri, celle di tabella), che si
   // dimensionano sul contenuto; `selectPieno` per i campi di un form, che
   // occupano la riga come gli input.

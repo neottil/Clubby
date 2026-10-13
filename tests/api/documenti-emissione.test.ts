@@ -200,6 +200,7 @@ describe('Documenti: emissione delle ricevute', () => {
       socio_id: d.soci.socio2,
       scadenza: giorniFa(-365),
       importo: 25,
+      numero_tessera: 'DE_test_1',
     });
     assert.equal(rinnovo.status, 201, JSON.stringify(rinnovo.body));
 

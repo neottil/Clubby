@@ -23,6 +23,7 @@ import {
   listTesseramentiPaginati,
   storicoTesseramenti,
   rinnovaTesseramento,
+  correggiNumeroTessera,
 } from '../service/tesseramenti.service.js';
 import { getSocioByViewerId } from '../service/soci.service.js';
 import { moduloAttivo } from '../util/moduli.js';
@@ -34,6 +35,7 @@ export const handler = async (
     const auth    = getAuthContext(event);
     const method  = event.requestContext.http.method;
     const socioId = event.pathParameters?.id;
+    const rinnovoId = event.pathParameters?.rinnovoId;
 
     // -----------------------------------------------------------
     // GET /api/tesseramenti/{socioId} — storico dei rinnovi di un socio
@@ -73,7 +75,19 @@ export const handler = async (
     }
 
     // -----------------------------------------------------------
-    // POST /api/tesseramenti   Body: { socio_id, scadenza, data_rinnovo?, importo? }
+    // PATCH /api/tesseramenti/rinnovi/{id}   Body: { numero_tessera }
+    //
+    // Solo il numero di tessera, e solo sul tesseramento in corso. PATCH e
+    // non PUT: è una modifica parziale, non la sostituzione del tesseramento.
+    // -----------------------------------------------------------
+    if (rinnovoId) {
+      if (method !== 'PATCH') return errorResponse(new NotFoundError('Route non trovata'));
+      const body = corpoJson(event);
+      return ok(await correggiNumeroTessera(rinnovoId, body.numero_tessera));
+    }
+
+    // -----------------------------------------------------------
+    // POST /api/tesseramenti   Body: { socio_id, scadenza, numero_tessera, data_rinnovo?, importo? }
     // -----------------------------------------------------------
     if (method === 'POST' && !socioId) {
       const body = corpoJson(event);
@@ -82,6 +96,7 @@ export const handler = async (
         scadenza: body.scadenza,
         data_rinnovo: body.data_rinnovo,
         importo: body.importo,
+        numero_tessera: body.numero_tessera,
       }));
     }
 

@@ -55,3 +55,12 @@ spec:
                 secretKeyRef:
                   name: clubby-migrazioni-${MIGRA_SCOPE}
                   key: DB_PASSWORD
+          # sh + psql per pochi secondi: poco da riservare, ma un limite
+          # comunque, perché gira sulla stessa VPS del database (spec 007).
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
