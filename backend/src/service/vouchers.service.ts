@@ -408,22 +408,20 @@ export async function createMovimento(
   input: CreateMovimentoInput,
   q: QueryFn = query
 ): Promise<MovimentoVoucher> {
-  const voucher = await getVoucherById(voucherId, q);
+  // Solo il controllo di esistenza: un voucher inventato tornerebbe altrimenti
+  // dalla foreign key con un errore del driver.
+  await getVoucherById(voucherId, q);
 
   if (input.importo === undefined || input.importo === null || !Number.isFinite(Number(input.importo))) {
     throw new BadRequestError('importo è obbligatorio');
   }
   const tipo = tipoMovimento(input);
 
-  // Un addebito che porta il saldo sotto zero è permesso (l'admin conferma
-  // dall'interfaccia): si blocca solo se il saldo è GIÀ negativo prima di
-  // questo movimento, per evitare di accumulare ulteriori addebiti su un
-  // voucher già scoperto.
-  if (input.importo < 0 && Number(voucher.saldo_residuo) < 0) {
-    throw new BadRequestError(
-      `Il voucher ha già un saldo negativo (${Number(voucher.saldo_residuo).toFixed(2)}). Non è possibile aggiungere altri addebiti finché il saldo non torna positivo.`
-    );
-  }
+  // Nessun controllo sul saldo: un addebito può portarlo sotto zero, o
+  // aggiungersi a un voucher già scoperto (spec 010). Chi registra l'incontro
+  // conferma dall'interfaccia; il socio l'incontro l'ha fatto comunque, e
+  // rifiutarlo qui lascerebbe un buco nel lavoro dell'istruttore invece di un
+  // credito da recuperare, che la pagina Voucher mostra.
 
   const result = await q(
     // CAST(... AS DATE) e non "::date": il convertitore di parametri con nome
@@ -453,9 +451,8 @@ export async function createMovimento(
 
 /**
  * Aggiorna l'importo di un movimento già esistente (usato quando si modifica
- * il costo di un incontro collegato). Come in createMovimento, l'operazione
- * è bloccata solo se il saldo (senza contare questo movimento) è già
- * negativo — il nuovo importo può invece portare il saldo sotto zero.
+ * il costo di un incontro collegato). Come in createMovimento, il saldo non
+ * blocca nulla: può andare, o restare, sotto zero.
  */
 export async function updateMovimentoImporto(
   id: string,
@@ -465,15 +462,6 @@ export async function updateMovimentoImporto(
   const existing = await q(`SELECT * FROM movimento_voucher WHERE id = :id`, { id });
   if (existing.rows.length === 0) {
     throw new NotFoundError(`Movimento con id ${id} non trovato`);
-  }
-  const movimento = toMovimento(existing.rows[0]);
-
-  const voucher = await getVoucherById(movimento.voucher_id, q);
-  const saldoSenzaQuestoMovimento = Number(voucher.saldo_residuo) - Number(movimento.importo);
-  if (nuovoImporto < 0 && saldoSenzaQuestoMovimento < 0) {
-    throw new BadRequestError(
-      `Il voucher ha già un saldo negativo (${saldoSenzaQuestoMovimento.toFixed(2)}) senza contare questo movimento. Non è possibile aumentare l'addebito.`
-    );
   }
 
   const result = await q(

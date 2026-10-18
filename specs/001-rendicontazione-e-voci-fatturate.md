@@ -2,7 +2,7 @@
 
 ## Stato
 
-- [ ] Draft
+- [x] Draft
 - [x] Approvata
 - [x] Completata
 

@@ -65,4 +65,9 @@ export const ui = {
   tr: { borderBottom: '1px solid #f1f5f9' },
   td: { padding: '11px 16px', fontSize: 14, color: '#333' },
   empty: { textAlign: 'center', color: '#999', marginTop: 32 },
+
+  // Chip: un elemento scelto in un elenco (i soci di un incontro di gruppo),
+  // con il pulsante per toglierlo.
+  chip: { display: 'inline-flex', alignItems: 'center', gap: 6, background: '#eef2ff', color: '#1e293b', borderRadius: 999, padding: '4px 4px 4px 12px', fontSize: 14, fontWeight: 500 },
+  chipRimuovi: { background: 'transparent', border: 'none', borderRadius: 999, width: 32, height: 32, cursor: 'pointer', fontSize: 16, lineHeight: 1, color: '#475569' },
 } satisfies Record<string, CSSProperties>;

@@ -225,7 +225,19 @@ export const SEZIONI: Sezione[] = [
           socio, la data e l'attività. Il costo viene proposto dal listino e puoi correggerlo; le note si
           scrivono in testo semplice o, spuntando <strong>Markdown</strong>, con titoli ed elenchi. Puoi
           scegliere solo le attività a cui il club ti ha abilitato: se ne manca una, chiedila a un
-          amministratore. Se il socio ha un voucher, il costo gli viene addebitato da solo.
+          amministratore. Se il socio ha un voucher, il costo gli viene addebitato da solo; se il saldo
+          resta o finisce sotto zero ti viene chiesta una conferma, e confermando l'incontro si registra
+          comunque.
+        </p>
+        <p>
+          Per una lezione con più soci spunta <strong>Incontro di gruppo</strong>: compila data, attività e
+          costo, scegli un socio, scrivi la sua nota e premi <strong>Aggiungi</strong>. Il socio compare nel
+          riquadro <strong>Gruppo</strong>, e da lì in poi data, attività e costo restano quelli per tutti;
+          ripeti per ogni socio, con la sua nota. Con la × togli un socio dal gruppo. <strong>Salva
+          gruppo</strong> registra un incontro per ciascuno, con un solo avviso per tutti i soci che
+          andrebbero in negativo. Se qualcuno non si registra, nel riquadro resta solo lui con il motivo:
+          salvando di nuovo si riprova solo quello. Dopo il salvataggio ogni incontro è a sé, e si
+          modifica o si elimina da solo.
         </p>
         <p>
           Con <strong>Modifica</strong> ed <strong>Elimina</strong> correggi un incontro registrato per
@@ -305,8 +317,10 @@ export const SEZIONI: Sezione[] = [
       <p>
         In <strong>Incontri</strong> vedi e gestisci gli incontri di tutti, con numero e costo complessivo
         del periodo filtrato. Li registri con <strong>+ Nuovo incontro</strong> scegliendo anche
-        l'istruttore, e li correggi con <strong>Modifica</strong> ed <strong>Elimina</strong>, finché non
-        sono rendicontati o compresi in una ricevuta.
+        l'istruttore, anche come <strong>Incontro di gruppo</strong>: aggiungi un socio per volta con
+        la sua nota, e <strong>Salva gruppo</strong> registra un incontro per ciascuno. Li correggi con{' '}
+        <strong>Modifica</strong> ed <strong>Elimina</strong>, finché non sono rendicontati o compresi
+        in una ricevuta.
       </p>
     ),
   },

@@ -11,6 +11,11 @@ Un socio paga l'associazione in tre modi, tenuti distinti:
   l'importo acquistato. Un voucher può anche nascere con un **saldo importato**, per portare in
   Clubby credito venduto prima di usarlo: non è un acquisto, sta dietro una spunta nel form.
 
+  Il saldo può andare sotto zero, e un incontro si registra anche per un socio che è già in
+  negativo: chi lo registra conferma un avviso che mostra saldo attuale e saldo dopo l'incontro (in
+  un incontro di gruppo, un solo avviso con tutti i soci che resterebbero o finirebbero sotto zero).
+  Il negativo è il credito da recuperare con la prossima ricarica, e si vede nella pagina Voucher.
+
   Nella pagina Voucher chi ha una scheda socio collegata, admin compresi, vede il proprio voucher in una
   card in cima, con i suoi movimenti. Sotto, in tabella, i voucher degli altri soci: l'admin li gestisce
   tutti, un istruttore ne vede i saldi ma non i movimenti, un socio non ha la tabella.

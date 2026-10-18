@@ -10,6 +10,14 @@ import { useEffect, useState } from 'react';
  */
 export const MOBILE_BREAKPOINT = 640;
 
+/**
+ * Larghezza oltre la quale due riquadri di un form stanno affiancati invece
+ * che uno sotto l'altro (form dell'incontro di gruppo, spec 010). Più larga di
+ * MOBILE_BREAKPOINT di proposito: fra 640 e 768 px due colonne ci starebbero,
+ * ma con campi troppo stretti per scriverci.
+ */
+export const MD_BREAKPOINT = 768;
+
 const QUERY = `(max-width: ${MOBILE_BREAKPOINT}px)`;
 
 /**
@@ -30,17 +38,26 @@ const QUERY = `(max-width: ${MOBILE_BREAKPOINT}px)`;
  * l'aggiornamento è immediato.
  */
 export function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(() => window.matchMedia(QUERY).matches);
+  return useMediaQuery(QUERY);
+}
+
+/** true quando la finestra è più larga di MD_BREAKPOINT (stesso meccanismo di useIsMobile). */
+export function useSopraMd(): boolean {
+  return useMediaQuery(`(min-width: ${MD_BREAKPOINT + 1}px)`);
+}
+
+function useMediaQuery(query: string): boolean {
+  const [corrisponde, setCorrisponde] = useState(() => window.matchMedia(query).matches);
 
   useEffect(() => {
-    const mql = window.matchMedia(QUERY);
-    const sync = () => setIsMobile(mql.matches);
+    const mql = window.matchMedia(query);
+    const sync = () => setCorrisponde(mql.matches);
     mql.addEventListener('change', sync);
     // Riallinea lo stato: fra il primo render e questo effetto la finestra può
     // essere già cambiata (es. rotazione dello schermo durante il caricamento).
     sync();
     return () => mql.removeEventListener('change', sync);
-  }, []);
+  }, [query]);
 
-  return isMobile;
+  return corrisponde;
 }

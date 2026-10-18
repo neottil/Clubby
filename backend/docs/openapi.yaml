@@ -565,8 +565,11 @@ paths:
         chiama (`istruttore_id` inviato è ignorato) e deve essere abilitato all'attività.
 
         Se il socio ha un voucher, nella stessa transazione viene creato un addebito pari
-        al costo, datato come l'incontro. L'addebito è rifiutato, e con lui l'incontro,
-        se il saldo del voucher è già negativo.
+        al costo, datato come l'incontro. Il saldo può andare, o restare, sotto zero: la
+        conferma la chiede l'interfaccia, il backend non rifiuta (spec 010).
+
+        Un incontro di gruppo non ha un endpoint proprio: il frontend chiama questa
+        creazione una volta per socio, con gli stessi dati comuni e la nota di ciascuno.
       requestBody:
         required: true
         content:
@@ -621,7 +624,8 @@ paths:
         e può scegliere solo attività a cui è abilitato. Il socio non è modificabile.
 
         Il movimento di addebito collegato segue le modifiche: importo se cambia il costo,
-        data e descrizione se cambiano data o attività.
+        data e descrizione se cambiano data o attività. Un nuovo costo si addebita anche
+        se il voucher è già sotto zero.
       requestBody:
         required: true
         content:

@@ -28,6 +28,10 @@ const css = `
   /* In sola lettura il contenuto non deve sembrare un campo editabile. */
   .cm-markdown-view { padding: 0; }
   .cm-markdown-view:focus-visible { outline: none; }
+  /* Il margine del primo e dell'ultimo blocco (un titolo, un elenco) resta
+     dentro la nota e sembra una riga vuota: fuori da un editor non serve. */
+  .cm-markdown-view > :first-child { margin-top: 0; }
+  .cm-markdown-view > :last-child { margin-bottom: 0; }
 `;
 
 interface MarkdownEditorProps {

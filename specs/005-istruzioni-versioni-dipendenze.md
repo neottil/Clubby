@@ -10,10 +10,10 @@
 
 ## Stato
 
-- [ ] Draft
+- [x] Draft
 - [x] Approvata
 - [x] In test (utente)
-- [ ] Completata
+- [x] Completata
 
 **Versioni**: `frontend 2.10.0` (minor: pagina Istruzioni, Info pubblica),
 `authorizer 1.1.0` (minor: `GET /version`), `backend 2.11.0` (minor:

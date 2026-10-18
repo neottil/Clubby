@@ -307,8 +307,8 @@ export async function getIncontroById(
 /**
  * Crea un incontro e, se il socio ha un voucher, genera atomicamente (stessa
  * transazione) un movimento di addebito collegato con lo stesso importo del
- * costo. Se il voucher non ha saldo sufficiente, l'intera operazione viene
- * annullata: né l'incontro né il movimento vengono creati.
+ * costo. Il saldo del voucher non blocca la creazione: può andare, o restare,
+ * sotto zero (spec 010), e la conferma la chiede l'interfaccia.
  */
 export async function createIncontro(input: CreateIncontroInput): Promise<Incontro> {
   if (!input.socio_id) throw new BadRequestError('socio_id è obbligatorio');
@@ -368,8 +368,8 @@ export async function createIncontro(input: CreateIncontroInput): Promise<Incont
 /**
  * Modifica un incontro. Se il costo cambia e l'incontro ha un movimento
  * collegato (generato automaticamente alla creazione), l'importo del
- * movimento viene aggiornato nella stessa transazione — se il nuovo importo
- * porterebbe il voucher in negativo, l'intera modifica viene annullata.
+ * movimento viene aggiornato nella stessa transazione, anche se il voucher
+ * va o resta sotto zero.
  */
 export async function updateIncontro(id: string, input: UpdateIncontroInput): Promise<Incontro> {
   return withTransaction(async (q) => {

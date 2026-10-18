@@ -2,9 +2,9 @@
 
 ## Stato
 
-- [ ] Draft
-- [ ] Approvata
-- [ ] In test (utente)
+- [x] Draft
+- [x] Approvata
+- [x] In test (utente)
 - [x] Completata
 
 **Versioni**: `backend 2.10.0`, `frontend 2.9.0` (minor entrambi: è una feature).

@@ -3,6 +3,8 @@
 
 - Gestione soci
 - Gestione incontri, con note in testo semplice o in Markdown, filtrabili per attività e per periodo
+- Incontro di gruppo: più soci con gli stessi data, attività, costo e istruttore, una nota per
+  ciascuno; si salva come un incontro per socio
 - Listino delle attività con il relativo costo, gestito dalla pagina Impostazioni
 - Attribuzione degli incontri a un istruttore, abilitato per singola attività
 - Voucher prepagati, con il credito acquistato registrato come ricarica; a scelta del club, la

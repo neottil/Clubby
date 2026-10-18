@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { createApiClient, nomeIstruttore, DIMENSIONE_PAGINA, type Attivita, type Istruttore, type Socio, type Voucher, type Incontro } from '../api/client';
 import SocioSelect from './SocioSelect';
+import RiquadroGruppo, { type MembroGruppo } from './RiquadroGruppo';
 import ActivitySelect from './ActivitySelect';
 import DateRangeFilter, { dataCompleta } from './DateRangeFilter';
 import TableScroll from './TableScroll';
@@ -27,6 +28,7 @@ import { MarkdownEditor, MarkdownView } from './MarkdownEditor';
 import { ui } from '../styles/ui';
 import { messaggioErrore } from '../utils/errori';
 import { useSelezione } from '../hooks/useSelezione';
+import { useSopraMd } from '../hooks/useIsMobile';
 
 
 
@@ -110,6 +112,17 @@ export default function ElencoIncontri({
   const [editId, setEditId]     = useState<string | null>(null);
   const [form, setForm]         = useState(emptyForm);
   const [saving, setSaving]     = useState(false);
+  // Incontro di gruppo (spec 010): il form compone un socio per volta, e il
+  // riquadro accanto raccoglie i soci con la loro nota. Data, attività, costo
+  // e istruttore restano quelli del form, bloccati finché il gruppo non è vuoto.
+  const [gruppoAttivo, setGruppoAttivo] = useState(false);
+  const [membri, setMembri]             = useState<MembroGruppo[]>([]);
+  const [avanzamento, setAvanzamento]   = useState<string | null>(null);
+  const [esitoGruppo, setEsitoGruppo]   = useState('');
+  // Cambia a ogni Aggiungi: MarkdownEditor legge il testo solo al montaggio,
+  // e senza una key nuova la nota del socio appena aggiunto resterebbe nel campo.
+  const [chiaveNota, setChiaveNota]     = useState(0);
+  const sopraMd = useSopraMd();
   const [filter, setFilter]           = useState('');
   const [attivitaFilter, setAttivitaFilter] = useState('');
   const [dataDa, setDataDa]           = useState('');
@@ -311,6 +324,17 @@ export default function ElencoIncontri({
     return salvata && !salvata.attiva ? [salvata, ...attive] : attive;
   }, [attivita, form.attivita_id]);
 
+  // Nel gruppo i dati comuni si fissano col primo socio aggiunto: un gruppo in
+  // cui i primi hanno una data e gli ultimi un'altra non è più lo stesso incontro.
+  const comuniBloccati = gruppoAttivo && membri.length > 0;
+  // Un socio già nel gruppo non si propone di nuovo: due incontri uguali per
+  // lo stesso socio sono quasi sempre un doppio clic, non una scelta.
+  const sociProponibili = useMemo(
+    () => (gruppoAttivo ? soci.filter(s => !membri.some(m => m.socio_id === s.id)) : soci),
+    [soci, membri, gruppoAttivo],
+  );
+  const nomeAttivita = (id: string) => attivita.find(a => a.id === id)?.nome ?? '—';
+
   // In creazione, un istruttore registra per sé: il campo è preimpostato e non
   // viene nemmeno mostrato (il backend lo forza comunque al chiamante).
   const openCreate = () => {
@@ -320,9 +344,18 @@ export default function ElencoIncontri({
       istruttore_id: user?.isIstruttore ? user.sub : '',
     });
     setEditId(null);
+    azzeraGruppo();
     setShowForm(true);
   };
-  const openEdit   = (i: Incontro) => { setForm({ socio_id: i.socio_id, data_incontro: dataIso(i.data_incontro), attivita_id: i.attivita_id, istruttore_id: i.istruttore_id ?? '', costo: String(i.costo), note: i.note ?? '', note_markdown: !!i.note_markdown }); setEditId(i.id); setShowForm(true); };
+
+  const azzeraGruppo = () => {
+    setGruppoAttivo(false);
+    setMembri([]);
+    setEsitoGruppo('');
+    setAvanzamento(null);
+  };
+  const chiudiForm = () => { setShowForm(false); azzeraGruppo(); };
+  const openEdit   = (i: Incontro) => { azzeraGruppo(); setForm({ socio_id: i.socio_id, data_incontro: dataIso(i.data_incontro), attivita_id: i.attivita_id, istruttore_id: i.istruttore_id ?? '', costo: String(i.costo), note: i.note ?? '', note_markdown: !!i.note_markdown }); setEditId(i.id); setShowForm(true); };
 
   // Selezionando un'attività propone il costo di listino; resta comunque
   // modificabile a mano, perché l'incontro conserva il proprio costo.
@@ -331,13 +364,29 @@ export default function ElencoIncontri({
     setForm({ ...form, attivita_id: attivitaId, costo: scelta ? String(scelta.costo_default) : form.costo });
   };
 
+  /**
+   * Saldi riletti al momento del salvataggio: quelli caricati all'apertura
+   * della pagina possono essere vecchi, se un altro istruttore ha registrato un
+   * incontro nel frattempo. Se la rilettura fallisce si resta su quelli già
+   * caricati: la conferma è un avviso, non il controllo che decide.
+   */
+  const saldiAggiornati = async (): Promise<Voucher[]> => {
+    try {
+      const freschi = await api.getVouchers();
+      setVouchers(freschi);
+      return freschi;
+    } catch {
+      return vouchers;
+    }
+  };
+
   const save = async () => {
     const costo = parseFloat(form.costo);
 
-    // Se il socio ha un voucher, avvisa (con conferma) quando questo incontro
-    // porterebbe il saldo sotto zero — non blocca l'operazione, solo se il
-    // saldo è già negativo lo farà il backend.
-    const voucherSocio = vouchers.find(v => v.socio_id === form.socio_id);
+    // Se il socio ha un voucher, avvisa (con conferma) quando dopo questo
+    // incontro il saldo sarebbe sotto zero, che lo fosse già o che ci finisca
+    // ora. Non blocca: confermato, il backend registra comunque (spec 010).
+    const voucherSocio = (await saldiAggiornati()).find(v => v.socio_id === form.socio_id);
     if (voucherSocio) {
       const vecchioCosto = editId ? Number(incontri.find(i => i.id === editId)?.costo ?? 0) : 0;
       const nuovoSaldo = Number(voucherSocio.saldo_residuo) + vecchioCosto - costo;
@@ -356,13 +405,97 @@ export default function ElencoIncontri({
       const payload = { ...form, costo };
       if (editId) await api.updateIncontro(editId, payload);
       else        await api.createIncontro(payload);
-      setShowForm(false);
+      chiudiForm();
       load();
     } catch (e) {
       setError(messaggioErrore(e));
     } finally {
       setSaving(false);
     }
+  };
+
+  // Sotto il nome del socio scelto: gli altri campi restano, sono i dati comuni.
+  const aggiungiAlGruppo = () => {
+    if (!form.socio_id || membri.some(m => m.socio_id === form.socio_id)) return;
+    setMembri([...membri, { socio_id: form.socio_id, note: form.note, note_markdown: form.note_markdown }]);
+    setForm({ ...form, socio_id: '', note: '' });
+    setChiaveNota(k => k + 1);
+  };
+
+  const togliDalGruppo = (socioId: string) => setMembri(membri.filter(m => m.socio_id !== socioId));
+
+  const cambiaGruppoAttivo = (attivo: boolean) => {
+    if (!attivo && membri.length > 0) {
+      const n = membri.length;
+      if (!confirm(`Togliere ${n === 1 ? 'il socio' : `i ${n} soci`} dal gruppo?`)) return;
+    }
+    if (!attivo) setMembri([]);
+    setEsitoGruppo('');
+    setGruppoAttivo(attivo);
+  };
+
+  /**
+   * Un incontro per socio, con POST /api/incontri chiamata una volta per
+   * ciascuno e in sequenza: nessuna API di gruppo (spec 010). Senza una
+   * transazione che li tenga insieme, chi è stato creato resta creato; nel
+   * riquadro restano solo i soci falliti, così riprovare non duplica niente.
+   */
+  const salvaGruppo = async () => {
+    if (membri.length === 0) return;
+    const costo = parseFloat(form.costo);
+
+    // Una sola conferma per tutto il gruppo, con chi resterebbe o finirebbe
+    // sotto zero. Chi non ha voucher paga a parte e non ha un saldo da avvisare.
+    const freschi = await saldiAggiornati();
+    const inNegativo = membri.flatMap(m => {
+      const v = freschi.find(x => x.socio_id === m.socio_id);
+      if (!v) return [];
+      const dopo = Number(v.saldo_residuo) - costo;
+      return dopo < 0 ? [`${socioLabel(m.socio_id)}: saldo ${euro(v.saldo_residuo)}, dopo l'incontro ${euro(dopo)}`] : [];
+    });
+    if (inNegativo.length > 0) {
+      const confermato = confirm(
+        (inNegativo.length === 1 ? 'Questo socio avrà il voucher in negativo:' : 'Questi soci avranno il voucher in negativo:') +
+        `\n\n${inNegativo.join('\n')}\n\n` +
+        (membri.length === 1 ? "Vuoi registrare comunque l'incontro?" : 'Vuoi registrare comunque gli incontri?')
+      );
+      if (!confermato) return;
+    }
+
+    setEsitoGruppo('');
+    const falliti: MembroGruppo[] = [];
+    let creati = 0;
+    for (const [n, m] of membri.entries()) {
+      setAvanzamento(`Salvataggio ${n + 1} di ${membri.length}...`);
+      try {
+        await api.createIncontro({
+          socio_id: m.socio_id,
+          data_incontro: form.data_incontro,
+          attivita_id: form.attivita_id,
+          istruttore_id: form.istruttore_id,
+          costo,
+          note: m.note,
+          note_markdown: m.note_markdown,
+        });
+        creati++;
+      } catch (e) {
+        falliti.push({ ...m, errore: messaggioErrore(e) });
+      }
+    }
+    setAvanzamento(null);
+
+    if (falliti.length === 0) {
+      chiudiForm();
+      load();
+      return;
+    }
+    setMembri(falliti);
+    setEsitoGruppo(
+      `Creati ${creati} ${creati === 1 ? 'incontro' : 'incontri'} su ${creati + falliti.length}. ` +
+      `${falliti.length === 1 ? 'Il socio rimasto nel gruppo non è stato registrato' : 'I soci rimasti nel gruppo non sono stati registrati'}: ` +
+      'Salva gruppo riprova solo quelli.'
+    );
+    if (creati > 0) load();
   };
 
   const remove = async (id: string) => {
@@ -459,24 +592,46 @@ export default function ElencoIncontri({
       )}
 
       {showForm && (
-        <div style={styles.formCard}>
+        <div style={gruppoAttivo ? { ...styles.coppiaRiquadri, flexDirection: sopraMd ? 'row' : 'column' } : undefined}>
+        <div style={gruppoAttivo ? { ...styles.formCard, ...styles.formAccanto } : styles.formCard}>
           <h3 style={styles.formTitle}>{editId ? 'Modifica incontro' : 'Nuovo incontro'}</h3>
+          {/* Solo in creazione: in Modifica l'incontro è già di un socio solo,
+              e gli incontri di un gruppo non restano legati fra loro. */}
+          {!editId && (
+            <label style={{ ...styles.checkboxLabel, marginBottom: 14 }}>
+              <input
+                type='checkbox'
+                checked={gruppoAttivo}
+                onChange={e => cambiaGruppoAttivo(e.target.checked)}
+                disabled={avanzamento !== null}
+              />
+              Incontro di gruppo
+            </label>
+          )}
           <div style={styles.field}>
             <label style={styles.label}>Socio</label>
             {editId ? (
               <div style={styles.readOnlyField}>{socioLabel(form.socio_id)}</div>
             ) : (
-              <SocioSelect soci={soci} value={form.socio_id} onChange={id => setForm({ ...form, socio_id: id })} />
+              <SocioSelect soci={sociProponibili} value={form.socio_id} onChange={id => setForm({ ...form, socio_id: id })} />
             )}
           </div>
           <div style={styles.field}>
             <label style={styles.label}>Data</label>
-            <input type='date' style={styles.input} value={form.data_incontro} onChange={e => setForm({ ...form, data_incontro: e.target.value })} />
+            {comuniBloccati ? (
+              <div style={styles.readOnlyField}>{dataIso(form.data_incontro)}</div>
+            ) : (
+              <input type='date' style={styles.input} value={form.data_incontro} onChange={e => setForm({ ...form, data_incontro: e.target.value })} />
+            )}
           </div>
           <div style={styles.field}>
             <label style={styles.label}>Attività *</label>
-            <ActivitySelect options={attivitaSelezionabili} value={form.attivita_id} onChange={onActivityChange} />
-            {attivitaSelezionabili.length === 0 && (
+            {comuniBloccati ? (
+              <div style={styles.readOnlyField}>{nomeAttivita(form.attivita_id)}</div>
+            ) : (
+              <ActivitySelect options={attivitaSelezionabili} value={form.attivita_id} onChange={onActivityChange} />
+            )}
+            {!comuniBloccati && attivitaSelezionabili.length === 0 && (
               <p style={styles.hintCampo}>
                 {user?.isIstruttore
                   ? 'Non sei abilitato a nessuna attività: chiedi a un amministratore di assegnartene.'
@@ -491,6 +646,9 @@ export default function ElencoIncontri({
           {user?.isAdmin && istruttori.length > 0 && (
             <div style={styles.field}>
               <label style={styles.label} htmlFor='istruttore'>Istruttore</label>
+              {comuniBloccati ? (
+                <div style={styles.readOnlyField}>{form.istruttore_id ? istruttoreLabel(form.istruttore_id) : '— Nessuno'}</div>
+              ) : (
               <select
                 id='istruttore'
                 style={styles.selectPieno}
@@ -508,11 +666,16 @@ export default function ElencoIncontri({
                   <option value={form.istruttore_id}>Non più istruttore</option>
                 )}
               </select>
+              )}
             </div>
           )}
           <div style={styles.field}>
             <label style={styles.label}>Costo (€)</label>
-            <input type='number' step='0.01' min='0' style={styles.input} value={form.costo} onChange={e => setForm({ ...form, costo: e.target.value })} />
+            {comuniBloccati ? (
+              <div style={styles.readOnlyField}>{euro(form.costo)}</div>
+            ) : (
+              <input type='number' step='0.01' min='0' style={styles.input} value={form.costo} onChange={e => setForm({ ...form, costo: e.target.value })} />
+            )}
           </div>
           <div style={styles.field}>
             <div style={styles.labelRow}>
@@ -532,7 +695,7 @@ export default function ElencoIncontri({
               // all'incontro aperto, passando da "Modifica A" a "Modifica B"
               // resterebbe visualizzata la nota di A.
               <MarkdownEditor
-                key={editId ?? 'nuovo'}
+                key={editId ?? `nuovo-${chiaveNota}`}
                 markdown={form.note}
                 onChange={note => setForm(f => ({ ...f, note }))}
               />
@@ -541,13 +704,37 @@ export default function ElencoIncontri({
             )}
           </div>
           <div style={styles.formActions}>
-            <button style={styles.btnSecondary} onClick={() => setShowForm(false)}>Annulla</button>
+            <button style={styles.btnSecondary} onClick={chiudiForm} disabled={avanzamento !== null}>Annulla</button>
             {/* L'attività è obbligatoria (NOT NULL a db, validata anche dal
                 backend): il bottone resta disabilitato finché non è scelta,
                 così l'utente lo vede prima di provare a salvare invece di
                 ricevere un errore dopo. */}
-            <button style={styles.btn} onClick={save} disabled={saving || !form.attivita_id}>{saving ? 'Salvataggio...' : 'Salva'}</button>
+            {gruppoAttivo ? (
+              <button
+                style={styles.btn}
+                onClick={aggiungiAlGruppo}
+                disabled={!form.socio_id || !form.attivita_id || avanzamento !== null}
+              >
+                Aggiungi
+              </button>
+            ) : (
+              <button style={styles.btn} onClick={save} disabled={saving || !form.attivita_id}>{saving ? 'Salvataggio...' : 'Salva'}</button>
+            )}
           </div>
+        </div>
+        {gruppoAttivo && (
+          <RiquadroGruppo
+            riepilogo={comuniBloccati ? `${dataIso(form.data_incontro)} · ${nomeAttivita(form.attivita_id)} · ${euro(form.costo)}` : null}
+            istruttore={comuniBloccati && form.istruttore_id ? istruttoreLabel(form.istruttore_id) : null}
+            membri={membri}
+            nomeSocio={socioLabel}
+            onRimuovi={togliDalGruppo}
+            onSalva={salvaGruppo}
+            avanzamento={avanzamento}
+            esito={esitoGruppo}
+            onChiudiEsito={() => setEsitoGruppo('')}
+          />
+        )}
         </div>
       )}
 
@@ -704,6 +891,11 @@ const styles: Record<string, React.CSSProperties> = {
   // Al posto dei bottoni su una riga chiusa: dice perché non ci sono, invece
   // di lasciare un trattino che sembrerebbe una mancanza di permessi.
   chiuso: { fontSize: 12, color: '#6b7280', fontStyle: 'italic' },
+  // Form e riquadro del gruppo: affiancati sopra MD_BREAKPOINT, uno sotto
+  // l'altro sotto. La direzione la decide useSopraMd, perché gli stili inline
+  // non hanno media query.
+  coppiaRiquadri: { display: 'flex', gap: 24, alignItems: 'flex-start', marginBottom: 24 },
+  formAccanto: { flex: 1, minWidth: 0, marginBottom: 0, width: '100%', boxSizing: 'border-box' },
   readOnlyField: { width: '100%', padding: '8px 12px', borderRadius: 6, background: '#f1f5f9', color: '#555', fontSize: 14, boxSizing: 'border-box' },
   // Contenitore dell'ActivitySelect di filtro: il bordo/padding sono ora del
   // suo input interno, qui resta solo la larghezza nella riga dei filtri.

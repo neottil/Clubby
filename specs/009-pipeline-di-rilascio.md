@@ -18,7 +18,7 @@
 - [x] Draft
 - [x] Approvata
 - [x] In test (utente)
-- [ ] Completata
+- [x] Completata
 
 **Riaperta il 2026-10-16** per il [workflow unico](#workflow-unico): l'utente
 vuole una sola run che a ogni push in `main` builda, si ferma per
