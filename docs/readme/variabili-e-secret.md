@@ -3,15 +3,17 @@
 
 **Per Environment** (Repository → Settings → Environments), non a livello di repository: uno per
 `development` e uno per ogni club, ciascuno con i propri "Environment secrets"/"Environment variables".
-`Build & Deploy` e `Tag` leggono sempre l'Environment `development`; `Infra` e `Promote` quello scelto al
-lancio. Le tabelle sotto vanno quindi configurate **per ogni Environment**, con i valori di quell'ambiente
+La `Pipeline` legge sempre l'Environment `development`; `Infra` e `Promote` quello scelto al lancio, e la
+Pipeline, su `main`, quello di ciascun club in `CLUBS` (`Tag` non ne legge nessuno: usa solo secret di
+repository). Gli Environment di approvazione (vedi [in fondo](#approvazioni-del-rilascio)) non hanno né
+Variables né Secrets. Le tabelle sotto vanno quindi configurate **per ogni Environment**, con i valori di quell'ambiente
 (hostname, credenziali, nome del club). Le **Secrets** sono cifrate e mai visibili nei log; le **Variables**
 sono in chiaro, per valori non sensibili.
 
 Il **nome dell'Environment** conta: da lì derivano namespace, nomi dei database e cartelle sulla VPS (vedi
 [Multi-tenant](architettura.md#multi-tenant)), che quindi non si configurano.
 
-La colonna "Usato da" indica chi li legge; "deploy" = i workflow di deploy, chiamati da **Build & Deploy**
+La colonna "Usato da" indica chi li legge; "deploy" = i workflow di deploy, chiamati dalla **Pipeline**
 per `development` e da **Promote** per i club. Quelli obbligatori vengono controllati all'inizio di ogni
 workflow, che si ferma con l'elenco di ciò che manca. `DB_PASSWORD`, `AUTH_DB_PASSWORD`,
 `AUTH_JWT_PRIVATE_KEY` e `INITIAL_ADMIN_PASSWORD` **non vanno inventati a mano**: la prima volta Infra li
@@ -79,4 +81,31 @@ ritrova tutto lo storico.
 
 Nessun secret aggiuntivo serve per il registry immagini: le pipeline si autenticano su `ghcr.io` con il
 `GITHUB_TOKEN` automatico di Actions (permesso `packages: write`, già configurato nei workflow).
+
+## Approvazioni del rilascio
+
+Su `main`, dopo il deploy in `development`, la Pipeline si ferma in attesa di un'approvazione prima di Tag e
+di una per ciascun club prima di Promote (vedi [Pipeline](pipeline-ci-cd.md#approvazioni-del-rilascio)).
+Le attese sono Environment **dedicati e vuoti**, separati da quelli dei club. Configurazione una tantum:
+
+1. **Variable di repository `CLUBS`** (Settings → Secrets and variables → Actions → Variables, scheda
+   *Repository*, non un Environment): l'elenco dei club a cui proporre ogni rilascio, come array JSON di
+   nomi di Environment, es. `["romaasd","milanoasd"]`. Vuota o assente = dopo Tag non parte nessun Promote.
+   `development` non è ammesso. Un club fuori dall'elenco si aggiorna lanciando Promote a mano.
+2. **Environment `approvazione-tag`** (Settings → Environments → New environment):
+   - *Required reviewers*: aggiungi chi approva i rilasci;
+   - *Prevent self-review*: **disattivato**, altrimenti chi fa il push non può approvare la propria run;
+   - *Deployment branches and tags*: *Selected branches*, solo `main`;
+   - nessuna Variable, nessun Secret.
+3. **Un Environment `approvazione-<club>` per ogni club** in `CLUBS` (es. `approvazione-romaasd`), con le
+   stesse impostazioni del punto 2.
+
+Se un Environment di approvazione manca o non ha un revisore, l'attesa corrispondente **fallisce** invece di
+passare: GitHub crea al volo, senza protezioni, un Environment che non esiste, e senza questo controllo un
+club aggiunto a `CLUBS` verrebbe deployato senza chiedere niente. L'errore nella run dice quale Environment
+configurare.
+
+I revisori sugli Environment sono disponibili con tutti i piani GitHub sui repository **pubblici**; su un
+repository privato dipendono dal piano. Se in Settings → Environments non compare *Required reviewers*, il
+piano non li prevede per questo repository.
 

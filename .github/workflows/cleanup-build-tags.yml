@@ -1,32 +1,40 @@
 name: Cleanup build tags
 
-# Elimina i tag "<scope>-<branch>-<data>" creati da Build & Deploy per i tre
+# Elimina i tag "<scope>-<branch>-<data>" creati dalla Pipeline per i tre
 # moduli (backend, frontend, authorizer) — sia i tag Git nel repo, sia le
 # immagini Docker corrispondenti su ghcr.io (clubby-backend, clubby-frontend,
 # clubby-authorizer).
 #
-# Attivazione MANUALE, oppure AUTOMATICA (fire-and-forget) alla fine di ogni
-# promozione riuscita del workflow Tag, scoped a branch=main e
-# preserve_latest=true. I tre moduli sono scope indipendenti (vedi input
-# "scope" sotto): il trigger automatico da Tag lo passa quando ha promosso un
-# solo scope in quella run, per non ripulire (e non generare rumore nei
-# log/summary) uno scope che non ha subito nessuna modifica.
+# Tre modi di partire:
+# - MANUALE, con gli input sotto;
+# - AUTOMATICO (fire-and-forget) alla fine di ogni promozione riuscita del
+#   workflow Tag, scoped a branch=main e preserve_latest=true: i tag
+#   provvisori di main più vecchi non servono più. Il trigger passa "scope"
+#   quando Tag ha promosso un solo scope in quella run, per non ripulire (e
+#   non generare rumore nei log/summary) uno scope che non è cambiato;
+# - AUTOMATICO alla CANCELLAZIONE di un branch su GitHub (evento "delete"):
+#   il branch è chiuso, nessuno dei suoi tag serve più, e si ripulisce per
+#   intero (tutti gli scope, preserve_latest=false, dry_run=false). È il
+#   passo finale del flusso: merge in main, cancellazione del branch. GitHub
+#   lancia un workflow sull'evento delete solo se il file è nel branch
+#   predefinito, quindi questo trigger esiste solo da quando è in main.
 #
-# Questi tag non sono "usa e getta": sono anche la baseline che Build & Deploy
+# Questi tag non sono "usa e getta": sono anche la baseline che la Pipeline
 # usa per calcolare il diff della prossima run su quel branch (vedi
 # build-deploy.yml) e il riferimento che il workflow Tag usa per sapere cosa
-# promuovere. Per questo, di default (preserve_latest=true), per ciascuno
-# scope E per ciascun branch coinvolto viene sempre mantenuto il tag più
-# recente (Git + immagine Docker corrispondente) — solo quelli PIÙ VECCHI
-# vengono eliminati. Così è sicuro lanciarlo (anche in automatico) su un
-# branch ancora attivo come main: dopo la pulizia resta comunque un tag da
-# cui Build & Deploy può calcolare il prossimo diff.
+# promuovere. Per questo:
+# - con preserve_latest=true (default) per ciascuno scope E per ciascun
+#   branch coinvolto viene mantenuto il tag più recente (Git + immagine
+#   Docker corrispondente) — solo quelli PIÙ VECCHI vengono eliminati;
+# - l'ultimo tag <scope>-main-* di ciascuno scope non viene MAI eliminato,
+#   nemmeno con preserve_latest=false: main non si chiude mai, e senza quel
+#   tag la Pipeline ribuilderebbe tutto e Tag non troverebbe niente da
+#   promuovere. La protezione non dipende da cosa si scrive nel modulo.
 #
-# Metti preserve_latest=false solo quando un branch feature/fix è concluso e
-# mergiato: in quel caso nessuno dei suoi tag serve più a nessuno, e si può
-# ripulire per intero.
+# Metti preserve_latest=false a mano solo per un branch feature/fix concluso
+# che non è stato cancellato su GitHub (la cancellazione lo fa da sé).
 #
-# Non tocca mai i tag di versione reale (server-v*/client-v*).
+# Non tocca mai le immagini con un tag di versione reale (X.Y.Z).
 on:
   workflow_dispatch:
     inputs:
@@ -36,7 +44,7 @@ on:
           (default). Usa questo per limitare la pulizia a un solo scope — es.
           il trigger automatico da Tag lo imposta quando ha promosso un solo
           scope in quella run; per una pulizia manuale di un branch
-          feature/fix di solito si lascia vuoto (entrambi).
+          feature/fix di solito si lascia vuoto (tutti).
         required: false
         default: ''
       branch:
@@ -49,18 +57,24 @@ on:
         description: >-
           Se true, mantiene per ciascuno scope e per ciascun branch coinvolto
           il tag più recente (Git e immagine Docker), elimina solo quelli più
-          vecchi. Necessario per ripulire un branch ANCORA ATTIVO (es. main)
-          senza rompere il prossimo diff di Build & Deploy. Metti a false solo
-          quando il branch è concluso/mergiato.
+          vecchi. Se false elimina tutto, TRANNE l'ultimo tag di main di ogni
+          scope, che resta sempre. Metti a false solo quando il branch è
+          concluso/mergiato.
         type: boolean
         default: true
       dry_run:
         description: 'Se true, elenca solo cosa verrebbe eliminato (tag Git e immagini Docker), senza cancellare nulla'
         type: boolean
         default: true
+  delete:
 
 jobs:
   cleanup:
+    # Sull'evento delete: solo i branch (la cancellazione di un tag, comprese
+    # quelle fatte da questo stesso workflow, non c'entra) e mai main.
+    if: >-
+      github.event_name != 'delete' ||
+      (github.event.ref_type == 'branch' && github.event.ref != 'main')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -70,41 +84,85 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determina gli scope da processare
-        id: scopes
+      # Un solo posto in cui si decidono i parametri, per i due modi di
+      # partire. Tutto ciò che viene da fuori (input del modulo, nome del
+      # branch cancellato) arriva agli script SOLO come variabile d'ambiente:
+      # un ${{ … }} dentro run: verrebbe sostituito come testo prima che bash
+      # parta, e il nome di un branch lo sceglie chiunque possa fare push.
+      - name: Determina i parametri
+        id: params
+        env:
+          EVENTO: ${{ github.event_name }}
+          BRANCH_CANCELLATO: ${{ github.event.ref }}
+          IN_SCOPE: ${{ inputs.scope }}
+          IN_BRANCH: ${{ inputs.branch }}
+          IN_PRESERVE: ${{ inputs.preserve_latest }}
+          IN_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          case "${{ inputs.scope }}" in
-            '')
-              echo "list=backend frontend authorizer" >> "$GITHUB_OUTPUT"
-              ;;
-            backend|frontend|authorizer)
-              echo "list=${{ inputs.scope }}" >> "$GITHUB_OUTPUT"
-              ;;
+          if [ "$EVENTO" = "delete" ]; then
+            SCOPE_IN=""
+            BRANCH="$BRANCH_CANCELLATO"
+            PRESERVE=false
+            DRY_RUN=false
+            ORIGINE="cancellazione del branch"
+          else
+            SCOPE_IN="$IN_SCOPE"
+            BRANCH="$IN_BRANCH"
+            PRESERVE="$IN_PRESERVE"
+            DRY_RUN="$IN_DRY_RUN"
+            ORIGINE="manuale"
+          fi
+
+          case "$SCOPE_IN" in
+            '')                         LIST="backend frontend authorizer" ;;
+            backend|frontend|authorizer) LIST="$SCOPE_IN" ;;
             *)
-              echo "ERRORE: scope non valido '${{ inputs.scope }}' (valori ammessi: backend, frontend, authorizer, o vuoto per tutti)." >&2
+              echo "::error::scope non valido '$SCOPE_IN' (valori ammessi: backend, frontend, authorizer, o vuoto per tutti)."
               exit 1
               ;;
           esac
+
+          {
+            echo "list=$LIST"
+            echo "scope=$SCOPE_IN"
+            echo "branch=$BRANCH"
+            echo "preserve_latest=$PRESERVE"
+            echo "dry_run=$DRY_RUN"
+            echo "origine=$ORIGINE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Avvio: $ORIGINE. scope=${SCOPE_IN:-tutti} branch=${BRANCH:-tutti} preserve_latest=$PRESERVE dry_run=$DRY_RUN"
 
       # Per ciascuno scope, elenca i tag "<scope>-<branch>-<data>" che
       # matchano il branch richiesto (o tutti, se vuoto), li raggruppa per
       # branch — estraendo lo slug dal nome: tutto tra "<scope>-" e la data
       # finale nel formato fisso "-YYYYMMDD_HHMM" — e per ciascun gruppo, se
-      # preserve_latest=true, tiene da parte il più recente. Scrive su file
-      # gli elenchi "tag Git da eliminare" e "date_tag Docker da mantenere",
-      # riusati dagli step successivi.
+      # preserve_latest=true, tiene da parte il più recente. L'ultimo
+      # <scope>-main-* si tiene comunque. Scrive su file gli elenchi "tag Git
+      # da eliminare" e "date_tag Docker da mantenere", riusati dagli step
+      # successivi.
       - name: Calcola cosa mantenere e cosa eliminare
+        env:
+          SCOPES: ${{ steps.params.outputs.list }}
+          BRANCH: ${{ steps.params.outputs.branch }}
+          PRESERVE: ${{ steps.params.outputs.preserve_latest }}
         run: |
           mkdir -p /tmp/cleanup
-          BRANCH_FILTER=$(echo "${{ inputs.branch }}" | tr '/' '-')
+          BRANCH_FILTER=$(printf '%s' "$BRANCH" | tr '/' '-')
 
-          for SCOPE in ${{ steps.scopes.outputs.list }}; do
+          for SCOPE in $SCOPES; do
             : > "/tmp/cleanup/${SCOPE}_delete_git.txt"
             : > "/tmp/cleanup/${SCOPE}_keep_datetags.txt"
             # Stessi tag di _keep_datetags, ma col nome completo: quello serve
             # al confronto con i tag Docker, questo al riepilogo finale.
             : > "/tmp/cleanup/${SCOPE}_keep_git.txt"
+            : > "/tmp/cleanup/${SCOPE}_keep_main.txt"
             : > "/tmp/cleanup/${SCOPE}_docker.txt"
+
+            # Il tag di main da non toccare mai: lo stesso che leggono
+            # la Pipeline (baseline) e Tag (cosa promuovere).
+            # Regex e non solo il glob: "<scope>-main-*" prenderebbe anche i
+            # tag di un branch chiamato main-qualcosa.
+            MAIN_LATEST=$(git tag -l "${SCOPE}-main-*" --sort=-creatordate | grep -E "^${SCOPE}-main-[0-9]{8}_[0-9]{4}$" | head -1 || true)
 
             if [ -n "$BRANCH_FILTER" ]; then
               PATTERN="${SCOPE}-${BRANCH_FILTER}-*"
@@ -121,7 +179,7 @@ jobs:
             declare -A SEEN_BRANCH=()
             while IFS= read -r tag; do
               [ -z "$tag" ] && continue
-              REST="${tag#${SCOPE}-}"
+              REST="${tag#"${SCOPE}"-}"
               if [[ "$REST" =~ ^(.+)-([0-9]{8}_[0-9]{4})$ ]]; then
                 BR="${BASH_REMATCH[1]}"
                 DATE_TAG="${BR}-${BASH_REMATCH[2]}"
@@ -129,8 +187,19 @@ jobs:
                 echo "[$SCOPE] Tag '$tag' non nel formato atteso <scope>-<branch>-<data>, salto."
                 continue
               fi
+              # Il glob "<scope>-main-*" prende anche i tag di main-qualcosa:
+              # conta solo il branch esatto.
+              if [ -n "$BRANCH_FILTER" ] && [ "$BR" != "$BRANCH_FILTER" ]; then
+                continue
+              fi
 
-              if [ "${{ inputs.preserve_latest }}" = "true" ] && [ -z "${SEEN_BRANCH[$BR]:-}" ]; then
+              if [ -n "$MAIN_LATEST" ] && [ "$tag" = "$MAIN_LATEST" ]; then
+                SEEN_BRANCH[$BR]=1
+                echo "[$SCOPE/$BR] mantengo $tag (baseline di main, sempre mantenuto)"
+                echo "$DATE_TAG" >> "/tmp/cleanup/${SCOPE}_keep_datetags.txt"
+                echo "$tag" >> "/tmp/cleanup/${SCOPE}_keep_git.txt"
+                echo "$tag" >> "/tmp/cleanup/${SCOPE}_keep_main.txt"
+              elif [ "$PRESERVE" = "true" ] && [ -z "${SEEN_BRANCH[$BR]:-}" ]; then
                 SEEN_BRANCH[$BR]=1
                 echo "[$SCOPE/$BR] mantengo $tag"
                 echo "$DATE_TAG" >> "/tmp/cleanup/${SCOPE}_keep_datetags.txt"
@@ -140,11 +209,15 @@ jobs:
                 echo "$tag" >> "/tmp/cleanup/${SCOPE}_delete_git.txt"
               fi
             done <<< "$TAGS"
+            unset SEEN_BRANCH
           done
 
       - name: Elimina i tag Git
+        env:
+          SCOPES: ${{ steps.params.outputs.list }}
+          DRY_RUN: ${{ steps.params.outputs.dry_run }}
         run: |
-          for SCOPE in ${{ steps.scopes.outputs.list }}; do
+          for SCOPE in $SCOPES; do
             FILE="/tmp/cleanup/${SCOPE}_delete_git.txt"
             if [ ! -s "$FILE" ]; then
               echo "[$SCOPE] Nessun tag Git da eliminare."
@@ -154,7 +227,7 @@ jobs:
             echo "[$SCOPE] Tag Git da eliminare:"
             cat "$FILE"
 
-            if [ "${{ inputs.dry_run }}" = "true" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
               echo "[$SCOPE] dry_run=true: nessun tag Git eliminato."
               continue
             fi
@@ -174,14 +247,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
-          BRANCH_FILTER_RAW: ${{ inputs.branch }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          SCOPES: ${{ steps.params.outputs.list }}
+          BRANCH: ${{ steps.params.outputs.branch }}
+          DRY_RUN: ${{ steps.params.outputs.dry_run }}
         run: |
-          BRANCH_FILTER=$(echo "$BRANCH_FILTER_RAW" | tr '/' '-')
+          BRANCH_FILTER=$(printf '%s' "$BRANCH" | tr '/' '-')
           if [ -n "$BRANCH_FILTER" ]; then
-            DOCKER_REGEX="^${BRANCH_FILTER}-[0-9]{8}_[0-9]{4}$"
+            # Lo slug finisce dentro una regex: i caratteri speciali (es. il
+            # punto, ammesso nei nomi dei branch) vanno presi alla lettera.
+            SLUG_RE=$(printf '%s' "$BRANCH_FILTER" | sed 's/[][\.*^$+?(){}|]/\\&/g')
+            DOCKER_REGEX="^${SLUG_RE}-[0-9]{8}_[0-9]{4}$"
           else
-            DOCKER_REGEX='^[a-zA-Z0-9.-]+-[0-9]{8}_[0-9]{4}$'
+            DOCKER_REGEX='^[a-zA-Z0-9._-]+-[0-9]{8}_[0-9]{4}$'
           fi
 
           declare -A IMAGE=(
@@ -190,7 +267,7 @@ jobs:
             [authorizer]=clubby-authorizer
           )
 
-          for SCOPE in ${{ steps.scopes.outputs.list }}; do
+          for SCOPE in $SCOPES; do
             IMG="${IMAGE[$SCOPE]}"
             # Uno scope senza immagine qui produrrebbe una URL con doppio slash,
             # una risposta che non è la lista attesa e un errore di jq a valle,
@@ -214,8 +291,10 @@ jobs:
               MATCHED=$(echo "$TAGS" | grep -E "$DOCKER_REGEX" || true)
               [ -z "$MATCHED" ] && continue
 
+              # Basta che UNO dei tag di data della versione sia da mantenere
+              # (es. quello dell'ultimo tag di main) per non toccarla.
               SKIP=false
-              if [ -s "$KEEP_FILE" ] && grep -qxF "$MATCHED" "$KEEP_FILE"; then
+              if [ -s "$KEEP_FILE" ] && echo "$MATCHED" | grep -qxFf "$KEEP_FILE"; then
                 SKIP=true
               fi
               $SKIP && continue
@@ -240,8 +319,13 @@ jobs:
       - name: Riepilogo
         if: always()
         env:
-          DRY_RUN: ${{ inputs.dry_run }}
-          SCOPES: ${{ steps.scopes.outputs.list }}
+          SCOPES: ${{ steps.params.outputs.list }}
+          SCOPE_IN: ${{ steps.params.outputs.scope }}
+          BRANCH: ${{ steps.params.outputs.branch }}
+          PRESERVE: ${{ steps.params.outputs.preserve_latest }}
+          DRY_RUN: ${{ steps.params.outputs.dry_run }}
+          ORIGINE: ${{ steps.params.outputs.origine }}
+          STATO: ${{ job.status }}
         run: |
           # In dry-run non è stato cancellato nulla: il riepilogo deve dirlo al
           # tempo giusto, altrimenti si legge come un elenco di danni fatti.
@@ -258,10 +342,21 @@ jobs:
           elenco() {
             if [ -s "$1" ]; then sed 's/^/- `/; s/$/`/' "$1"; else echo "_nessuno_"; fi
           }
+          # Come elenco, ma segnala il tag di main tenuto per protezione.
+          elenco_mantenuti() {
+            if [ ! -s "$1" ]; then echo "_nessuno_"; return; fi
+            while IFS= read -r t; do
+              if [ -s "$2" ] && grep -qxF "$t" "$2"; then
+                echo "- \`$t\` (baseline di main)"
+              else
+                echo "- \`$t\`"
+              fi
+            done < "$1"
+          }
           conta() { [ -s "$1" ] && wc -l < "$1" || echo 0; }
 
           {
-            echo "## Cleanup build tags — riepilogo (${{ job.status }})"
+            echo "## Cleanup build tags — riepilogo ($STATO)"
             echo ""
             if [ "$DRY_RUN" = "true" ]; then
               echo "> **Prova a vuoto** (\`dry_run=true\`): non è stato eliminato nulla."
@@ -270,15 +365,17 @@ jobs:
             fi
             echo "| Parametro | Valore |"
             echo "|---|---|"
-            echo "| scope | \`${{ inputs.scope || 'tutti' }}\` |"
-            echo "| branch | \`${{ inputs.branch || 'tutti' }}\` |"
-            echo "| preserve_latest | \`${{ inputs.preserve_latest }}\` |"
-            echo "| dry_run | \`${{ inputs.dry_run }}\` |"
+            echo "| avvio | $ORIGINE |"
+            echo "| scope | \`${SCOPE_IN:-tutti}\` |"
+            echo "| branch | \`${BRANCH:-tutti}\` |"
+            echo "| preserve_latest | \`$PRESERVE\` |"
+            echo "| dry_run | \`$DRY_RUN\` |"
             echo ""
 
             for SCOPE in $SCOPES; do
               DEL="/tmp/cleanup/${SCOPE}_delete_git.txt"
               KEEP="/tmp/cleanup/${SCOPE}_keep_git.txt"
+              KEEP_MAIN="/tmp/cleanup/${SCOPE}_keep_main.txt"
               DOCK="/tmp/cleanup/${SCOPE}_docker.txt"
 
               echo "### $SCOPE"
@@ -292,17 +389,16 @@ jobs:
               elenco "$DOCK"
               echo ""
               # I tag mantenuti sono la baseline del prossimo diff di Build &
-              # Deploy: con preserve_latest=false non ne resta nessuno, e vale
-              # la pena che si veda.
+              # Deploy: con preserve_latest=false resta solo quello di main.
               echo "**Tag mantenuti** ($(conta "$KEEP"))"
               echo ""
-              elenco "$KEEP"
+              elenco_mantenuti "$KEEP" "$KEEP_MAIN"
               echo ""
             done
 
-            if [ "${{ inputs.preserve_latest }}" != "true" ]; then
-              echo "⚠️ \`preserve_latest=false\`: per i branch coinvolti non resta alcun tag di build."
-              echo "La prossima run di **Build & Deploy** su quei branch non ha una baseline da cui"
-              echo "calcolare il diff e ribuilderà tutti gli scope."
+            if [ "$PRESERVE" != "true" ]; then
+              echo "⚠️ \`preserve_latest=false\`: per i branch coinvolti non resta alcun tag di build,"
+              echo "tranne l'ultimo tag di **main** di ogni scope, che non si elimina mai. La prossima run di"
+              echo "della **Pipeline** su uno di quei branch partirà dall'ultimo tag di main contenuto nel branch."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

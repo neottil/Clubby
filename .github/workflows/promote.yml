@@ -1,28 +1,36 @@
 name: Promote
 
-# Attivazione MANUALE, con l'ambiente di destinazione e la versione da
-# deployare come INPUT ESPLICITI (backend_version/frontend_version/
-# authorizer_version, es. "1.4.0" — non un tag Git per esteso, solo il numero)
-# — non decide nulla, non tagga nulla: quello è compito esclusivo di tag.yml.
-# Questo workflow fa solo il deploy della versione indicata, già promossa da
-# Tag in precedenza, nell'ambiente scelto.
+# Porta in un club (un Environment) versioni GIÀ taggate da tag.yml: non
+# decide nulla, non tagga nulla. Si lancia a mano, oppure lo chiama la
+# Pipeline (build-deploy.yml) dopo Tag, una volta per club: in quel caso il
+# primo job si ferma sull'approvazione del club (approval_environment).
+#
+# Quali componenti deployare lo dicono tre checkbox (deploy_backend,
+# deploy_frontend, deploy_authorizer, tutte selezionate di default); quale
+# versione lo dice il campo accanto. Campo vuoto = ultima versione taggata di
+# quello scope, cioè il tag <scope>-vX.Y.Z con la versione SEMANTICA più alta
+# (2.10.0 sta sopra 2.6.0). Il caso tipico è quindi "scegli il club e premi
+# Run"; una versione scritta a mano serve per un rollback, e togliere due
+# checkbox per deployare un solo componente (es. l'authorizer dopo la
+# rotazione della chiave di firma).
 #
 # Ogni club è un Environment GitHub a sé, con namespace clubby-<env>-app e
 # clubby-<env>-db sullo stesso cluster (vedi .github/actions/ambiente): la
 # stessa versione si porta in un club alla volta, scegliendo l'Environment.
-# development resta escluso: lì deploya Build & Deploy a ogni push, e una
+# development resta escluso: lì deploya la Pipeline a ogni push, e una
 # promozione manuale ne scavalcherebbe lo stato.
 #
 # Separato da tag.yml perché tag/versioning e deploy hanno un ciclo di vita
 # diverso: taggare una versione è una decisione (rara, revisionabile via
 # GitHub Release), farla girare in un ambiente è un'operazione che può servire
 # ripetere (es. per riallineare un club dopo un incidente) senza dover
-# ripassare da Tag. Rilanciabile più volte con lo stesso input, in sicurezza.
+# ripassare da Tag. Rilanciabile più volte con lo stesso input, in sicurezza:
+# rideployare la stessa versione non cambia nulla, e le migrazioni già
+# applicate si saltano.
 #
-# Accetta uno o più scope: puoi promuovere solo backend, solo frontend, solo
-# authorizer, o più d'uno nella stessa run — ognuno deploya indipendentemente
-# tramite lo stesso workflow riutilizzabile usato da Build & Deploy per lo
-# sviluppo (deploy-backend.yml/deploy-frontend.yml/deploy-authorizer.yml).
+# Ogni scope deploya indipendentemente tramite lo stesso workflow
+# riutilizzabile usato dalla Pipeline per lo sviluppo
+# (deploy-backend.yml/deploy-frontend.yml/deploy-authorizer.yml).
 on:
   workflow_dispatch:
     inputs:
@@ -30,28 +38,108 @@ on:
         description: 'Ambiente di destinazione (il club): deve esistere come Environment del repo, con le proprie Variables/Secrets'
         type: environment
         required: true
+      deploy_backend:
+        description: 'Deploya il backend'
+        type: boolean
+        default: true
       backend_version:
-        description: 'Versione backend da deployare (es. 1.4.0) — deve esistere già come tag backend-vX.Y.Z (creato da Tag)'
+        description: 'Versione backend (es. 1.4.0). Vuoto = ultima taggata'
         required: false
         default: ''
+      deploy_frontend:
+        description: 'Deploya il frontend'
+        type: boolean
+        default: true
       frontend_version:
-        description: 'Versione frontend da deployare (es. 1.4.0) — deve esistere già come tag frontend-vX.Y.Z (creato da Tag)'
+        description: 'Versione frontend (es. 1.4.0). Vuoto = ultima taggata'
         required: false
         default: ''
+      deploy_authorizer:
+        description: 'Deploya l''authorizer'
+        type: boolean
+        default: true
       authorizer_version:
-        description: 'Versione authorizer da deployare (es. 1.0.0) — deve esistere già come tag authorizer-vX.Y.Z (creato da Tag)'
+        description: 'Versione authorizer (es. 1.0.0). Vuoto = ultima taggata'
         required: false
+        default: ''
+  # Stessi input, per la Pipeline, più l'Environment di approvazione. Il tipo
+  # "environment" esiste solo per workflow_dispatch: qui è una stringa, e la
+  # validazione sotto vale uguale.
+  workflow_call:
+    inputs:
+      # Environment dedicato (approvazione-<club>, con revisore obbligatorio e
+      # senza secret) su cui il primo job si ferma finché qualcuno non approva.
+      # Vuoto = nessuna attesa, come nel lancio a mano.
+      approval_environment:
+        type: string
+        default: ''
+      environment:
+        type: string
+        required: true
+      deploy_backend:
+        type: boolean
+        default: true
+      backend_version:
+        type: string
+        default: ''
+      deploy_frontend:
+        type: boolean
+        default: true
+      frontend_version:
+        type: string
+        default: ''
+      deploy_authorizer:
+        type: boolean
+        default: true
+      authorizer_version:
+        type: string
         default: ''
 
 jobs:
-  # Valida gli input PRIMA di deployare qualunque cosa: un input libero come
-  # questo (nessun menu a tendina, solo testo) rischia di deployare
-  # un'immagine sbagliata/inesistente su un typo. Verifica che il tag di
-  # versione esista davvero nel repo, altrimenti fallisce subito con un
-  # errore chiaro invece di procedere.
+  # L'attesa del club, solo quando lo chiama la Pipeline. Un job a parte, su
+  # un Environment dedicato: l'approvazione vale per job, e un revisore
+  # sull'Environment del club chiederebbe un'approvazione per migrate-db e
+  # una per ciascun deploy. concurrency: una run più recente che arriva
+  # all'attesa dello stesso club annulla quella vecchia.
+  approvazione:
+    if: inputs.approval_environment
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.approval_environment }}
+    concurrency:
+      group: ${{ inputs.approval_environment || 'nessuna-approvazione' }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/actions
+      - uses: ./.github/actions/verifica-approvazione
+        with:
+          environment: ${{ inputs.approval_environment }}
+
+  # Decide PRIMA di deployare qualunque cosa quale versione va a ciascuno
+  # scope, e fallisce con un errore chiaro su ogni input che non torna: un
+  # campo di testo libero rischia di deployare un'immagine sbagliata o
+  # inesistente su un typo.
+  #
+  # Gli input arrivano agli script SOLO come variabili d'ambiente: un
+  # ${{ inputs.* }} dentro run: verrebbe sostituito come testo prima che bash
+  # parta, e quello che si scrive nel modulo diventerebbe codice.
+  #
+  # !cancelled(): senza, l'approvazione saltata (lancio a mano) salterebbe
+  # anche validate; con, va chiesto per esteso che non sia fallita (rifiutata).
   validate:
+    needs: approvazione
+    if: |
+      !cancelled() &&
+      (needs.approvazione.result == 'success' || needs.approvazione.result == 'skipped')
     runs-on: ubuntu-24.04
     outputs:
+      backend_deploy: ${{ steps.check.outputs.backend_deploy }}
+      frontend_deploy: ${{ steps.check.outputs.frontend_deploy }}
+      authorizer_deploy: ${{ steps.check.outputs.authorizer_deploy }}
       backend_image_tag: ${{ steps.check.outputs.backend_image_tag }}
       frontend_image_tag: ${{ steps.check.outputs.frontend_image_tag }}
       authorizer_image_tag: ${{ steps.check.outputs.authorizer_image_tag }}
@@ -67,60 +155,106 @@ jobs:
           AMBIENTE: ${{ inputs.environment }}
         run: |
           if [ "$AMBIENTE" = "development" ]; then
-            echo "::error::development non si promuove: lì deploya Build & Deploy a ogni push. Scegli l'ambiente di un club."
+            echo "::error::development non si promuove: lì deploya la Pipeline a ogni push. Scegli l'ambiente di un club."
             exit 1
           fi
           echo "Ambiente di destinazione: $AMBIENTE"
 
-      - name: Verifica input e tag di versione esistenti
+      - name: Scegli le versioni da deployare
         id: check
+        env:
+          DEPLOY_BACKEND: ${{ inputs.deploy_backend }}
+          BACKEND_VERSION: ${{ inputs.backend_version }}
+          DEPLOY_FRONTEND: ${{ inputs.deploy_frontend }}
+          FRONTEND_VERSION: ${{ inputs.frontend_version }}
+          DEPLOY_AUTHORIZER: ${{ inputs.deploy_authorizer }}
+          AUTHORIZER_VERSION: ${{ inputs.authorizer_version }}
+          AMBIENTE: ${{ inputs.environment }}
+          RELEASES: ${{ github.server_url }}/${{ github.repository }}/releases/tag
         run: |
-          if [ -z "${{ inputs.backend_version }}" ] && [ -z "${{ inputs.frontend_version }}" ] && [ -z "${{ inputs.authorizer_version }}" ]; then
-            echo "::error::Specifica almeno una fra backend_version, frontend_version e authorizer_version."
+          if [ "$DEPLOY_BACKEND" != "true" ] && [ "$DEPLOY_FRONTEND" != "true" ] && [ "$DEPLOY_AUTHORIZER" != "true" ]; then
+            echo "::error::Nessun componente selezionato: spunta almeno uno fra backend, frontend e authorizer."
             exit 1
           fi
 
-          if [ -n "${{ inputs.backend_version }}" ]; then
-            TAG="backend-v${{ inputs.backend_version }}"
-            if ! git tag -l "$TAG" | grep -qx "$TAG"; then
-              echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
-              exit 1
-            fi
-            echo "backend_image_tag=${{ inputs.backend_version }}" >> "$GITHUB_OUTPUT"
-            echo "Backend: $TAG trovato, verrà deployata la versione ${{ inputs.backend_version }}."
-          fi
+          # Stessa forma che tag.yml usa per riconoscere un tag di versione:
+          # tutto il resto (backend-main-*, …) non è una versione.
+          VERSIONE_RE='^[0-9]+\.[0-9]+\.[0-9]+$'
+          RIGHE=""
 
-          if [ -n "${{ inputs.frontend_version }}" ]; then
-            TAG="frontend-v${{ inputs.frontend_version }}"
-            if ! git tag -l "$TAG" | grep -qx "$TAG"; then
-              echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
-              exit 1
-            fi
-            echo "frontend_image_tag=${{ inputs.frontend_version }}" >> "$GITHUB_OUTPUT"
-            echo "Frontend: $TAG trovato, verrà deployata la versione ${{ inputs.frontend_version }}."
-          fi
+          for SCOPE in backend frontend authorizer; do
+            case "$SCOPE" in
+              backend)    SEL="$DEPLOY_BACKEND";    VER="$BACKEND_VERSION" ;;
+              frontend)   SEL="$DEPLOY_FRONTEND";   VER="$FRONTEND_VERSION" ;;
+              authorizer) SEL="$DEPLOY_AUTHORIZER"; VER="$AUTHORIZER_VERSION" ;;
+            esac
 
-          if [ -n "${{ inputs.authorizer_version }}" ]; then
-            TAG="authorizer-v${{ inputs.authorizer_version }}"
-            if ! git tag -l "$TAG" | grep -qx "$TAG"; then
-              echo "::error::Tag '$TAG' non trovato nel repo. Esegui prima il workflow Tag per crearlo, poi rilancia Promote."
-              exit 1
+            if [ "$SEL" != "true" ]; then
+              echo "${SCOPE}_deploy=false" >> "$GITHUB_OUTPUT"
+              NOTA="—"
+              if [ -n "$VER" ]; then
+                NOTA="versione \`$VER\` ignorata: componente non selezionato"
+                echo "::notice::$SCOPE: versione '$VER' ignorata, il componente non è selezionato."
+              fi
+              RIGHE+="| $SCOPE | no | — | $NOTA | — |"$'\n'
+              continue
             fi
-            echo "authorizer_image_tag=${{ inputs.authorizer_version }}" >> "$GITHUB_OUTPUT"
-            echo "Authorizer: $TAG trovato, verrà deployata la versione ${{ inputs.authorizer_version }}."
-          fi
+
+            if [ -z "$VER" ]; then
+              # Ordinamento per versione (-v:refname), non per data né
+              # alfabetico: Tag può spostare un tag esistente con -f, e
+              # alfabeticamente 2.6.0 verrebbe dopo 2.10.0.
+              TAG=$(git tag -l "${SCOPE}-v*" --sort=-v:refname | grep -E "^${SCOPE}-v[0-9]+\.[0-9]+\.[0-9]+$" | head -1 || true)
+              if [ -z "$TAG" ]; then
+                echo "::error::$SCOPE: nessuna versione taggata (nessun tag ${SCOPE}-vX.Y.Z). Le versioni le crea Tag, dopo l'approvazione nella Pipeline su main; oppure togli la checkbox di $SCOPE."
+                exit 1
+              fi
+              VER="${TAG#"${SCOPE}"-v}"
+              ORIGINE="ultima taggata"
+            else
+              if ! [[ "$VER" =~ $VERSIONE_RE ]]; then
+                echo "::error::$SCOPE: versione '$VER' non valida. Va scritta come X.Y.Z, solo cifre (es. 2.10.0), senza 'v' e senza caratteri jolly."
+                exit 1
+              fi
+              TAG="${SCOPE}-v${VER}"
+              # rev-parse e non "git tag -l": quello tratta l'argomento come
+              # un pattern, qui serve il nome esatto.
+              if ! git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+                echo "::error::$SCOPE: tag '$TAG' non trovato nel repo. Le versioni le crea Tag, dopo l'approvazione nella Pipeline su main: controlla la versione."
+                exit 1
+              fi
+              ORIGINE="indicata"
+            fi
+
+            echo "${SCOPE}_deploy=true" >> "$GITHUB_OUTPUT"
+            echo "${SCOPE}_image_tag=$VER" >> "$GITHUB_OUTPUT"
+            echo "$SCOPE: verrà deployata la versione $VER ($ORIGINE)."
+            RIGHE+="| $SCOPE | sì | \`$VER\` | $ORIGINE | [$TAG]($RELEASES/$TAG) |"$'\n'
+          done
+
+          {
+            echo "## Promote verso \`$AMBIENTE\`"
+            echo ""
+            echo "| Scope | Selezionato | Versione | Origine | Release |"
+            echo "|---|---|---|---|---|"
+            printf '%s' "$RIGHE"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Migrazioni di schema prima dei deploy che usano un database, come in
   # build-deploy.yml: un club può essere fermo a una versione vecchia, quindi
   # qui possono risultarne pendenti parecchie in una volta. Sono applicate in
   # ordine e in transazioni separate, e quelle già presenti vengono saltate.
   #
-  # Qui NON serve !cancelled(): l'unico needs è validate, che non può essere
-  # saltato. Aggiungercelo toglierebbe il success() implicito, e un validate
-  # fallito non fermerebbe più le migrazioni.
+  # !cancelled() perché a monte c'è l'approvazione, saltata nel lancio a mano:
+  # senza, quello skip salterebbe anche le migrazioni. Con la funzione di
+  # stato il success() implicito sparisce, quindi "validate riuscito" va
+  # chiesto per esteso: un validate fallito deve fermare le migrazioni.
   migrate-db:
     needs: validate
-    if: inputs.backend_version != '' || inputs.authorizer_version != ''
+    if: |
+      !cancelled() &&
+      needs.validate.result == 'success' &&
+      (needs.validate.outputs.backend_deploy == 'true' || needs.validate.outputs.authorizer_deploy == 'true')
     uses: ./.github/workflows/migrate-db.yml
     with:
       environment: ${{ inputs.environment }}
@@ -139,7 +273,7 @@ jobs:
     if: |
       !cancelled() &&
       needs.validate.result == 'success' &&
-      inputs.backend_version != '' &&
+      needs.validate.outputs.backend_deploy == 'true' &&
       needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-backend.yml
     with:
@@ -156,7 +290,7 @@ jobs:
     if: |
       !cancelled() &&
       needs.validate.result == 'success' &&
-      inputs.frontend_version != '' &&
+      needs.validate.outputs.frontend_deploy == 'true' &&
       (needs.migrate-db.result == 'success' || needs.migrate-db.result == 'skipped')
     uses: ./.github/workflows/deploy-frontend.yml
     with:
@@ -170,7 +304,7 @@ jobs:
     if: |
       !cancelled() &&
       needs.validate.result == 'success' &&
-      inputs.authorizer_version != '' &&
+      needs.validate.outputs.authorizer_deploy == 'true' &&
       needs.migrate-db.result == 'success'
     uses: ./.github/workflows/deploy-authorizer.yml
     with:

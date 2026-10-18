@@ -1,0 +1,35 @@
+name: Verifica approvazione
+description: >-
+  Controlla che l'Environment di approvazione su cui gira il job abbia davvero
+  un revisore obbligatorio, e fallisce se non ce l'ha. GitHub crea al volo,
+  senza nessuna protezione, un Environment che un job dichiara ma che non
+  esiste: senza questo controllo un club aggiunto a CLUBS senza il suo
+  approvazione-<club> verrebbe deployato senza chiedere niente. Quando questo
+  step gira, l'approvazione (se c'era un revisore) è già stata data.
+  Richiede al job il permesso "actions: read".
+
+inputs:
+  environment:
+    description: Nome dell'Environment di approvazione (es. approvazione-tag)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Controlla il revisore obbligatorio
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        AMBIENTE: ${{ inputs.environment }}
+      run: |
+        if ! REVISORI=$(gh api "/repos/$REPO/environments/$AMBIENTE" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | (.reviewers // []) | length] | add // 0'); then
+          echo "::error::Non riesco a leggere la configurazione dell'Environment '$AMBIENTE'."
+          exit 1
+        fi
+        if [ "$REVISORI" -lt 1 ]; then
+          echo "::error::L'Environment '$AMBIENTE' non ha un revisore obbligatorio, quindi nessuno ha approvato questo passo. Configuralo in Settings → Environments → $AMBIENTE → Required reviewers (vedi docs/readme/variabili-e-secret.md) e rilancia la run."
+          exit 1
+        fi
+        echo "Approvazione su '$AMBIENTE' data ($REVISORI revisori configurati)."

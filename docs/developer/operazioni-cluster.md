@@ -121,9 +121,9 @@ sopra.
 
 3. **Rideploya l'authorizer.** Backend e frontend non leggono questa chiave e non
    serve toccarli.
-   - su un club: workflow **Promote**, compilando **solo**
-     `authorizer_version` con la versione già taggata;
-   - su `development`: workflow **Build & Deploy** con `force_all: true` (il
+   - su un club: workflow **Promote**, lasciando selezionato **solo**
+     `deploy_authorizer` (versione vuota = ultima taggata);
+   - su `development`: workflow **Pipeline** con `force_all: true` (il
      deploy dell'authorizer è `workflow_call`, non si lancia da solo).
 
 4. **Verifica che la chiave pubblicata sia cambiata.** Il `kid` deriva dal

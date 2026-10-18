@@ -1,5 +1,10 @@
-name: Build & Deploy
+name: Pipeline
 
+# La pipeline unica: a ogni push builda, testa e deploya in development; su
+# main, dopo il deploy, si ferma per l'approvazione di Tag e poi, club per
+# club, per quella di Promote (vedi i job da prepara-rilascio in giù). Sui
+# branch feature finisce dopo il deploy in development.
+#
 # Backend, frontend e authorizer sono tre scope completamente indipendenti:
 # ognuno ha i propri manifest k8s colocati nel proprio folder (backend/k8s/,
 # frontend/k8s/, authorizer/k8s/), il proprio tag Git
@@ -61,7 +66,17 @@ jobs:
       #   - niente cambiato sotto <scope>/ -> il job di deploy di quello scope
       #     non gira affatto, il suo Deployment resta esattamente com'era
       # Se non è mai stata fatta una build per quello scope su questo branch
-      # (nessun tag trovato), builda e deploya tutto per sicurezza.
+      # (nessun tag del branch), la baseline è l'ultimo <scope>-main-*
+      # contenuto nel branch: uno scope che il branch non ha toccato non si
+      # builda e non si deploya, e resta in development con l'immagine di
+      # main. Così dopo il merge non resta in uso nessuna immagine del
+      # branch, che la pulizia alla sua cancellazione toglierebbe dal
+      # registry. Uno scope cambiato rispetto a main, invece, si builda e
+      # deploya per intero anche se è cambiato solo il manifest: il branch
+      # non ha ancora un'immagine sua da riusare (e dare all'immagine di main
+      # un tag del branch ne farebbe un alias, cancellato insieme al branch).
+      # Senza nemmeno un tag di main nel branch, builda e deploya tutto per
+      # sicurezza.
       #
       # Eccezione: alcuni percorsi fuori da <scope>/ finiscono comunque
       # nell'immagine (branding/, scripts/migra.sh) — un loro cambiamento
@@ -82,17 +97,27 @@ jobs:
 
           for SCOPE in backend frontend authorizer; do
             PREV_TAG=$(git tag --merged HEAD --sort=-creatordate -l "${SCOPE}-${BRANCH_SLUG}-*" | head -1)
+            BASE_DA_MAIN=false
+            if [ -z "$PREV_TAG" ] && [ "$BRANCH_SLUG" != "main" ]; then
+              # Regex e non solo il glob: "<scope>-main-*" prenderebbe anche
+              # i tag di un branch chiamato main-qualcosa.
+              PREV_TAG=$(git tag --merged HEAD --sort=-creatordate -l "${SCOPE}-main-*" | grep -E "^${SCOPE}-main-[0-9]{8}_[0-9]{4}$" | head -1 || true)
+              if [ -n "$PREV_TAG" ]; then BASE_DA_MAIN=true; fi
+            fi
 
             if [ "$FORCE_ALL" = "true" ]; then
               echo "[$SCOPE] force_all attivo: rebuild e redeploy forzati, diff ignorato."
               HAS_CODE=true
               HAS_K8S=true
             elif [ -z "$PREV_TAG" ]; then
-              echo "[$SCOPE] Nessun tag precedente su questo branch: prima build, eseguo tutto."
+              echo "[$SCOPE] Nessun tag precedente su questo branch né di main: prima build, eseguo tutto."
               HAS_CODE=true
               HAS_K8S=true
             else
               CHANGED=$(git diff --name-only "$PREV_TAG" HEAD -- "${SCOPE}/")
+              if $BASE_DA_MAIN; then
+                echo "[$SCOPE] Nessun tag su questo branch: baseline l'ultimo tag di main contenuto nel branch."
+              fi
               echo "[$SCOPE] Diff rispetto a $PREV_TAG..HEAD:"
               echo "$CHANGED"
 
@@ -123,6 +148,12 @@ jobs:
                   echo "$EXTRA_CHANGED"
                   HAS_CODE=true
                 fi
+              fi
+
+              if $BASE_DA_MAIN && { $HAS_CODE || $HAS_K8S; }; then
+                echo "[$SCOPE] cambiato rispetto a main, prima build sul branch: builda e deploya per intero."
+                HAS_CODE=true
+                HAS_K8S=true
               fi
             fi
 
@@ -235,7 +266,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Tag pushati: solo quello di data + latest. Il tag di versione reale
-      # (server-vX.Y.Z) viene aggiunto dal workflow Tag dopo un deploy riuscito.
+      # (X.Y.Z) viene aggiunto dal workflow Tag dopo un deploy riuscito.
       #
       # Context = radice del repo (non ./backend): backend/Dockerfile copia
       # anche scripts/migra.sh e branding/, che stanno fuori da backend/ (vedi
@@ -404,7 +435,10 @@ jobs:
       # scope è stato ribuildato, altrimenti l'ultima davvero deployata su
       # questo branch. Non si riusa il job resolve perché quello gira solo per
       # gli scope in deploy, mentre la suite ha bisogno di ENTRAMBI i servizi
-      # anche quando ne è cambiato uno solo.
+      # anche quando ne è cambiato uno solo. Un branch che non ha ancora
+      # buildato uno scope usa l'immagine dell'ultimo tag di main contenuto
+      # nel branch: è la stessa baseline dell'analisi delle modifiche, ed è
+      # quella che resta in development.
       - name: Determina le immagini da provare
         id: immagini
         run: |
@@ -416,8 +450,11 @@ jobs:
               return
             fi
             prev=$(git tag -l "${scope}-${BRANCH_SLUG}-*" --sort=-creatordate | head -1)
+            if [ -z "$prev" ] && [ "$BRANCH_SLUG" != "main" ]; then
+              prev=$(git tag --merged HEAD --sort=-creatordate -l "${scope}-main-*" | grep -E "^${scope}-main-[0-9]{8}_[0-9]{4}$" | head -1 || true)
+            fi
             if [ -z "$prev" ]; then
-              echo "::error::Nessuna immagine $scope su questo branch, e questa run non ne ha buildata una: impossibile eseguire i test." >&2
+              echo "::error::Nessuna immagine $scope su questo branch né su main, e questa run non ne ha buildata una: impossibile eseguire i test." >&2
               exit 1
             fi
             echo "${prev#${scope}-}"
@@ -855,7 +892,11 @@ jobs:
   # A fine deploy, ripulisce dal registry le immagini taggate con la sola data,
   # mantenendo solo le 3 più recenti per repository immagine. I tag di versione
   # reale (X.Y.Z, assegnati dal workflow Tag) sono esclusi e non vengono mai
-  # toccati da questa pulizia.
+  # toccati da questa pulizia. Esclusa sempre anche l'immagine dell'ultimo
+  # <scope>-main-*, anche fuori dalle 3: bastano tre build di un branch
+  # feature per farla uscire, e senza Tag non avrebbe niente da promuovere,
+  # un deploy di soli manifest su main niente da riusare, e i branch nuovi
+  # niente da usare come baseline (vedi "Analizza modifiche").
   #
   # Non usa "actions/delete-package-versions" (dismessa: gira solo forzata su
   # un runtime Node deprecato, warning visibile nel summary di ogni run) — usa
@@ -873,24 +914,41 @@ jobs:
     runs-on: ubuntu-24.04
     environment: development
     permissions:
+      contents: read
       packages: write
     steps:
+      # Serve solo per leggere i tag <scope>-main-*.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - name: Rimuovi vecchie immagini Docker (mantieni le 3 più recenti per repository)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          for IMG in clubby-backend clubby-frontend clubby-authorizer; do
+          for SCOPE in backend frontend authorizer; do
+            IMG="clubby-$SCOPE"
             echo "=== $IMG ==="
             VERSIONS=$(gh api "/users/$OWNER/packages/container/$IMG/versions?per_page=100" --paginate 2>/dev/null || echo '[]')
 
-            # Esclude le versioni senza tag e quelle con un tag di versione
-            # reale (X.Y.Z): l'API cancella per digest, non per singolo tag,
-            # e un digest condiviso con un tag reale non va mai toccato.
-            NON_REAL=$(echo "$VERSIONS" | jq -c '
+            # Il tag Docker dell'ultimo <scope>-main-*: il nome del tag Git
+            # senza il prefisso dello scope.
+            MAIN_TAG=$(git tag -l "${SCOPE}-main-*" --sort=-creatordate | grep -E "^${SCOPE}-main-[0-9]{8}_[0-9]{4}$" | head -1 || true)
+            MAIN_DOCKER="${MAIN_TAG#"${SCOPE}"-}"
+            if [ -n "$MAIN_TAG" ]; then
+              echo "  Mantengo sempre l'immagine dell'ultimo tag di main: $MAIN_DOCKER"
+            fi
+
+            # Esclude le versioni senza tag, quelle con un tag di versione
+            # reale (X.Y.Z) e quella dell'ultimo tag di main: l'API cancella
+            # per digest, non per singolo tag, e un digest condiviso con uno di
+            # questi tag non va mai toccato.
+            NON_REAL=$(echo "$VERSIONS" | jq -c --arg main "$MAIN_DOCKER" '
               [.[] | select(
                 ((.metadata.container.tags // []) | length) > 0 and
-                ((.metadata.container.tags // []) | map(test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) | any | not)
+                ((.metadata.container.tags // []) | map(test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) | any | not) and
+                ($main == "" or ((.metadata.container.tags // []) | any(.[]; . == $main) | not))
               )] | sort_by(.created_at) | reverse
             ')
 
@@ -907,3 +965,144 @@ jobs:
               gh api -X DELETE "/users/$OWNER/packages/container/$IMG/versions/$ID"
             done
           done
+
+  # ---------------------------------------------------------------------------
+  # Rilascio: solo su main, dopo un deploy in development riuscito. La run si
+  # ferma due volte in attesa di una persona: prima di Tag (Environment
+  # approvazione-tag) e, per ciascun club della Variable CLUBS, prima di
+  # Promote (Environment approvazione-<club>, dentro promote.yml).
+  #
+  # Le attese stanno su Environment dedicati e vuoti, non su quelli dei club:
+  # l'approvazione vale per job, e in Promote migrazioni e deploy dichiarano
+  # ciascuno l'Environment del club (quattro approvazioni per club).
+  # ---------------------------------------------------------------------------
+
+  # Decide se proporre il rilascio e legge l'elenco dei club. Parte solo se la
+  # run è su main, ha deployato almeno uno scope in development e nessun job
+  # a monte è fallito: su un branch feature, o con una run che non ha
+  # cambiato niente, la pipeline finisce qui come prima.
+  prepara-rilascio:
+    needs:
+      - versions
+      - valida-branding
+      - build-backend
+      - build-frontend
+      - build-authorizer
+      - test
+      - migrate-db
+      - deploy-backend
+      - deploy-frontend
+      - deploy-authorizer
+      - register-backend-tag
+      - register-frontend-tag
+      - register-authorizer-tag
+    if: |
+      !cancelled() &&
+      github.ref == 'refs/heads/main' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (needs.deploy-backend.result == 'success' || needs.deploy-frontend.result == 'success' || needs.deploy-authorizer.result == 'success')
+    runs-on: ubuntu-24.04
+    outputs:
+      clubs: ${{ steps.clubs.outputs.clubs }}
+      has_clubs: ${{ steps.clubs.outputs.has_clubs }}
+    steps:
+      - name: Leggi l'elenco dei club
+        id: clubs
+        env:
+          CLUBS: ${{ vars.CLUBS }}
+        run: |
+          if [ -z "$CLUBS" ]; then
+            CLUBS='[]'
+          fi
+          if ! echo "$CLUBS" | jq -e 'type == "array" and all(.[]; type == "string" and test("^[a-z0-9][a-z0-9-]*$")) and (. | index("development") | not)' > /dev/null; then
+            echo "::error::La Variable di repository CLUBS deve essere un array JSON di nomi di Environment dei club (minuscole, cifre e trattini, senza development), es. [\"romaasd\",\"milanoasd\"]. Valore attuale: $CLUBS"
+            exit 1
+          fi
+          LISTA=$(echo "$CLUBS" | jq -c 'unique')
+          echo "clubs=$LISTA" >> "$GITHUB_OUTPUT"
+          if [ "$(echo "$LISTA" | jq 'length')" -gt 0 ]; then
+            echo "has_clubs=true" >> "$GITHUB_OUTPUT"
+            ELENCO=$(echo "$LISTA" | jq -r 'join(", ")')
+          else
+            echo "has_clubs=false" >> "$GITHUB_OUTPUT"
+            ELENCO="nessuno (la Variable CLUBS è vuota: dopo Tag non parte nessun Promote)"
+          fi
+          {
+            echo "## Rilascio"
+            echo
+            echo "Deploy in development riuscito. La run ora attende l'approvazione di **Tag** (approvazione-tag), poi quella di ciascun club da aggiornare."
+            echo
+            echo "Club proposti: $ELENCO"
+            echo
+            echo "Per approvare: *Review deployments* in questa pagina. Un nuovo push in main annulla le attese di questa run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Prima attesa. concurrency con cancel-in-progress: quando una run più
+  # recente arriva qui, l'attesa di quella vecchia viene annullata, e resta
+  # da approvare solo la più recente (Tag promuove comunque l'ultimo stato di
+  # main, non quello della run).
+  #
+  # Da qui in giù ogni if ha !cancelled() e chiede per esteso il successo del
+  # job precedente: senza una funzione di stato lo skip delle build a monte
+  # (vedi deploy-backend) si propagherebbe fin qui e salterebbe il rilascio.
+  approva-tag:
+    needs: prepara-rilascio
+    if: |
+      !cancelled() &&
+      needs.prepara-rilascio.result == 'success'
+    runs-on: ubuntu-24.04
+    environment: approvazione-tag
+    concurrency:
+      group: approvazione-tag
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/actions
+      - uses: ./.github/actions/verifica-approvazione
+        with:
+          environment: approvazione-tag
+
+  tag:
+    needs: approva-tag
+    if: |
+      !cancelled() &&
+      needs.approva-tag.result == 'success'
+    uses: ./.github/workflows/tag.yml
+    permissions:
+      contents: write
+      packages: write
+      actions: write
+    secrets: inherit
+
+  # Un ramo per club, indipendenti (fail-fast: false): ognuno si ferma
+  # sulla propria approvazione dentro promote.yml, quindi approvare un club
+  # deploya solo quello, e rifiutarne uno non tocca gli altri. L'attesa sta
+  # dentro promote.yml e non in un job a matrice qui: un job che dipende da
+  # un job a matrice aspetta TUTTI i club, e approvarne uno non basterebbe.
+  #
+  # Parte anche se Tag non ha promosso niente di nuovo: serve a portare
+  # l'ultimo rilascio in un club non ancora aggiornato.
+  promote:
+    needs: [prepara-rilascio, tag]
+    if: |
+      !cancelled() &&
+      needs.tag.result == 'success' &&
+      needs.prepara-rilascio.outputs.has_clubs == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        club: ${{ fromJSON(needs.prepara-rilascio.outputs.clubs || '[]') }}
+    uses: ./.github/workflows/promote.yml
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    with:
+      environment: ${{ matrix.club }}
+      approval_environment: approvazione-${{ matrix.club }}
+    secrets: inherit

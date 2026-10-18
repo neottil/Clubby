@@ -35,20 +35,31 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 | Workflow | Trigger | Scopo |
 |---|---|---|
 | [`infra.yml`](workflows/infra.yml) | Manuale (`workflow_dispatch`) | Provisiona/aggiorna infrastruttura condivisa e a lunga vita: namespace k8s, database, identity provider. Da lanciare una tantum per ambiente. |
-| [`build-deploy.yml`](workflows/build-deploy.yml) | Push su branch di sviluppo, o manuale (input `force_all`) | Builda le immagini Docker cambiate, esegue i test delle API su quelle immagini con un database usa-e-getta e, se passano, le deploya in **sviluppo**, in modo condizionale e indipendente per componente. Con `force_all` ribuilda e rideploya tutto, ignorando il diff. |
+| [`build-deploy.yml`](workflows/build-deploy.yml) (*Pipeline*) | Push su branch di sviluppo, o manuale (input `force_all`) | Builda le immagini Docker cambiate, esegue i test delle API su quelle immagini con un database usa-e-getta e, se passano, le deploya in **sviluppo**, in modo condizionale e indipendente per componente. Con `force_all` ribuilda e rideploya tutto, ignorando il diff. Su `main`, dopo il deploy, si ferma per l'approvazione di `tag.yml` e poi, club per club, di `promote.yml`. |
 | [`deploy-backend.yml`](workflows/deploy-backend.yml) / [`deploy-frontend.yml`](workflows/deploy-frontend.yml) / [`deploy-authorizer.yml`](workflows/deploy-authorizer.yml) | Solo `workflow_call` (riutilizzabile) | Applica i manifest k8s di un componente, verifica il rollout. Chiamati sia da `build-deploy.yml` (sviluppo) sia da `promote.yml` (club). |
-| [`tag.yml`](workflows/tag.yml) | Manuale | Promuove lo stato attualmente deployato a versione "reale" (tag Git, ri-tag Docker, GitHub Release), senza rebuild. **Non deploya nulla.** |
-| [`promote.yml`](workflows/promote.yml) | Manuale (con input `environment` e `<scope>_version`) | Deploya la versione indicata (già taggata da `tag.yml`) nell'**ambiente scelto**, cioè in un club. **Non tagga né rilascia nulla.** |
+| [`tag.yml`](workflows/tag.yml) | Solo `workflow_call`, dalla Pipeline su `main` dopo l'approvazione | Promuove lo stato attualmente deployato su `main` a versione "reale" (tag Git, ri-tag Docker, GitHub Release), senza rebuild. **Non deploya nulla.** |
+| [`promote.yml`](workflows/promote.yml) | Manuale (input `environment`, checkbox `deploy_<scope>` e `<scope>_version`), o `workflow_call` dalla Pipeline, un club alla volta, dopo l'approvazione del club | Deploya nell'**ambiente scelto**, cioè in un club, le versioni indicate o, con i campi vuoti, le ultime taggate. **Non tagga né rilascia nulla.** |
+| [`migrate-db.yml`](workflows/migrate-db.yml) | `workflow_call` da build-deploy e promote | Applica le migrazioni di schema ai due database di un ambiente, prima dei deploy. |
+| [`cleanup-build-tags.yml`](workflows/cleanup-build-tags.yml) | Manuale, automatico dopo `tag.yml`, o alla cancellazione di un branch | Ripulisce i tag Git e le immagini Docker superate di un branch. Non elimina mai l'ultimo tag di `main` di ogni scope. |
 
 Namespace, nomi dei database e cartelle sulla VPS di un ambiente non sono Variables: li ricava dal nome
 dell'Environment la composite action [`actions/ambiente`](actions/ambiente/action.yml), usata da Infra e
-da tutti i workflow di deploy.
-| [`migrate-db.yml`](workflows/migrate-db.yml) | `workflow_call` da build-deploy e promote | Applica le migrazioni di schema ai due database di un ambiente, prima dei deploy. |
-| [`cleanup-build-tags.yml`](workflows/cleanup-build-tags.yml) | Manuale, o automatico dopo `tag.yml` | Ripulisce i tag Git e le immagini Docker superate di un branch. |
+da tutti i workflow di deploy. La composite action [`actions/verifica-approvazione`](actions/verifica-approvazione/action.yml)
+fa fallire un'attesa di approvazione il cui Environment non ha un revisore obbligatorio.
+
+Il flusso di uno sviluppatore, dal branch al club:
+
+1. aprire il branch `feature/…`, lavorare la spec e provarla in locale;
+2. pushare: la **Pipeline** deploya in `development` solo gli scope cambiati rispetto a `main`;
+3. fare il merge in `main` e **cancellare il branch su GitHub**: la Pipeline deploya il merge in
+   `development`, e la cancellazione lancia da sola **Cleanup build tags** sul branch chiuso;
+4. nella run della Pipeline partita dal merge, **approvare Tag** e poi **approvare i club** da aggiornare
+   (*Review deployments*): ogni club approvato riceve Promote.
 
 Separazione di responsabilità: **Infra** gestisce ciò che ha un ciclo di vita lungo e stato persistente
-(database, identity provider) — va eseguito raramente, quasi mai in automatico. **Build & Deploy** gestisce
-il ciclo di sviluppo continuo. **Tag** decide le versioni. **Promote** le porta in produzione. Non mescolare
+(database, identity provider) — va eseguito raramente, quasi mai in automatico. La **Pipeline** gestisce
+il ciclo di sviluppo continuo. **Tag** decide le versioni. **Promote** le porta in produzione (la Pipeline
+li chiama uno dopo l'altro, dietro due approvazioni, ma restano due workflow distinti, vedi pattern 5). Non mescolare
 queste responsabilità nello stesso workflow: un push innocuo sul codice applicativo non deve mai rischiare di
 toccare un database o un provisioning con side-effect distruttivi, e taggare una versione non deve mai
 comportare un deploy involontario in produzione.
@@ -105,9 +116,16 @@ ridistribuire tutto ad ogni push quando magari è cambiato un solo componente. I
    cartella**.
 3. Se non è cambiato nulla sotto quella cartella → il job di build/deploy di quello scope **non gira
    affatto** (non solo "salta il rebuild": non tocca proprio il Deployment k8s esistente).
-4. Se non si trova nessun tag precedente (prima run in assoluto, o dopo una pulizia) → si builda/deploya
-   tutto per quello scope, per sicurezza.
-5. **Percorsi extra**: alcune cose stanno fuori da `<scope>/` ma finiscono comunque nell'immagine, e
+4. Se il branch non ha ancora un tag suo (primo push di un branch feature) → la baseline è l'ultimo tag
+   `<scope>-main-*` **contenuto nel branch**. Uno scope che il branch non ha toccato non si builda né si
+   deploya, e resta in `development` con l'immagine di `main`: dopo il merge non resta in uso nessuna
+   immagine del branch, che la pulizia alla sua cancellazione toglierebbe dal registry. Uno scope cambiato
+   si builda e deploya per intero, anche se è cambiato solo il manifest: il branch non ha ancora
+   un'immagine sua da riusare.
+5. Se non si trova nemmeno un tag di `main` (prima run in assoluto, o un branch aperto prima dell'ultimo
+   tag di `main` i cui tag più vecchi sono stati ripuliti) → si builda/deploya tutto per quello scope, per
+   sicurezza.
+6. **Percorsi extra**: alcune cose stanno fuori da `<scope>/` ma finiscono comunque nell'immagine, e
    vanno guardate esplicitamente o un commit che tocca solo loro non farebbe partire niente.
    `scripts/migra.sh` per il backend (lo esegue il Job delle migrazioni); `branding/` per **entrambi**
    (il backend ne stampa il logo sulle ricevute, il frontend lo serve al browser).
@@ -182,10 +200,10 @@ deploy-backend:
 ```
 
 ```yaml
-# promote.yml — ambiente e versione reale ricevuti come input
+# promote.yml — ambiente ricevuto come input, versione reale decisa da validate
 deploy-backend:
   needs: validate
-  if: inputs.backend_version != ''
+  if: needs.validate.outputs.backend_deploy == 'true'
   uses: ./.github/workflows/deploy-backend.yml
   with:
     environment: ${{ inputs.environment }}
@@ -217,9 +235,10 @@ ambiente di produzione fisicamente separato la promozione a versione reale e il 
   di rilasciare, **senza rebuild**: aggiunge solo un riferimento sullo stesso digest Docker già pushato
   (`docker buildx imagetools create --tag <img>:X.Y.Z <img>:<data-tag-esistente>`), crea/aggiorna una GitHub
   Release per quella versione. **Non deploya nulla.**
-- **`promote.yml`** — riceve la versione da deployare come **input esplicito** (non un `run_id`/lookup di
-  run specifica), insieme all'ambiente di destinazione, e fa **solo** il deploy, chiamando il workflow
-  riutilizzabile (pattern 4) con quell'ambiente. **Non decide nulla, non tagga nulla.**
+- **`promote.yml`** — riceve l'ambiente di destinazione e, per ciascuno scope, se deployarlo (checkbox) e
+  quale versione: un **input esplicito**, o con il campo vuoto l'ultima versione taggata (la più alta in
+  ordine semantico), mai un `run_id`/lookup di run specifica. Fa **solo** il deploy, chiamando il workflow
+  riutilizzabile (pattern 4) con quell'ambiente. **Non tagga nulla.**
 
 I due possono succedere in momenti diversi (tagga oggi, promuovi la settimana prossima) e `promote.yml` può
 essere rilanciato in ogni momento con la stessa versione per risincronizzare la produzione, senza dover
@@ -228,6 +247,17 @@ via Release) e farla girare in produzione (evento operativo, che può servire ri
 fallito, o per riallineare un ambiente dopo un incidente) sono azioni con un ciclo di vita diverso. Fonderle
 in un solo workflow costringerebbe a ritaggare (o a inventare logica ad hoc per evitarlo) ogni volta che
 serve solo ri-eseguire il deploy.
+
+In questo repo il caso frequente è comunque "tagga e porta subito nei club": per questo la Pipeline, su
+`main` e dopo il deploy in `development`, chiama `tag.yml` e poi `promote.yml` una volta per club, ciascuno
+dietro un'**approvazione** (un job che dichiara un Environment con *required reviewers*: la run si ferma lì
+finché qualcuno non approva in *Review deployments*). Le attese stanno su Environment dedicati e vuoti,
+`approvazione-tag` e `approvazione-<club>`, e non su quelli dei club: l'approvazione vale per job, e in
+`promote.yml` migrazioni e deploy dichiarano ciascuno l'Environment del club. Il prezzo è una run ferma a
+ogni push su `main`: un push successivo annulla le attese della run precedente (`concurrency` con
+`cancel-in-progress` sui job di approvazione), quindi ne resta in attesa una sola. `tag.yml` non si lancia
+da solo; `promote.yml` sì, senza approvazioni, per un rollback, una versione specifica, un solo componente
+o un club fuori dall'elenco `CLUBS`.
 
 Punto chiave se i componenti sono indipendenti (pattern 2/3): **non esiste "una singola run da
 promuovere"**, perché ogni scope può essere avanzato in run diverse. `tag.yml` quindi:
@@ -246,21 +276,26 @@ promuovere"**, perché ogni scope può essere avanzato in run diverse. `tag.yml`
 5. Ricava il tag Docker da riferire facendo lo string-stripping inverso del punto 4 sopra (nessun
    `run_id` da passare a mano, nessun artifact da scaricare).
 6. Se **almeno uno** scope è stato promosso, triggera (fire-and-forget) il workflow di pulizia (pattern 6)
-   scoped al branch di produzione con `preserve_latest=true` — sicuro perché mantiene comunque il tag
-   appena promosso come baseline per il prossimo diff. Se è stato promosso **un solo** scope, passa anche lo
-   scope specifico (l'altro non è cambiato, non c'è motivo di ripulirlo in questa run); se sono stati
-   promossi entrambi, lo scope resta vuoto (pulizia di entrambi). Se nessuno scope è stato promosso, questo
-   step non gira: non c'è nessuna nuova baseline da preservare.
+   scoped al branch di produzione con `preserve_latest=true`: i tag provvisori di `main` più vecchi non
+   servono più, e resta l'ultimo per scope, che è la baseline del prossimo diff e l'immagine in
+   `development`. Se è stato promosso **un solo** scope, passa anche lo scope specifico (gli altri non sono
+   cambiati, non c'è motivo di ripulirli in questa run); se ne sono stati promossi di più, lo scope resta
+   vuoto (pulizia di tutti). Se nessuno scope è stato promosso, questo step non gira.
 
-Sicurezza incorporata in `tag.yml`: se lo schema dei tag include sempre il nome del branch "di produzione"
-(qui `main`), il workflow **non ha bisogno di validare esplicitamente il branch** — strutturalmente non può
-trovare/promuovere nient'altro, dato che cerca solo tag con quel branch nel nome.
+Sicurezza incorporata in `tag.yml`: lo schema dei tag include sempre il nome del branch "di produzione"
+(qui `main`), quindi i **dati** che promuove sono per costruzione quelli di `main`. Il **codice** no: un
+workflow lanciato da un altro branch esegue il file di quel branch. Per questo il primo step di `tag.yml`
+rifiuta qualunque `github.ref` diverso da `refs/heads/main`, con un errore esplicito.
 
-Sicurezza in `promote.yml`, invece: un workflow di deploy con **input liberi** (`backend_version`/
-`frontend_version` come stringhe, non un menu a tendina) rischia di deployare qualunque cosa — un typo o una
-versione mai taggata potrebbe far fallire il deploy a metà, o peggio deployare qualcosa di sbagliato. Un job
-`validate` separato, eseguito **prima** dei job di deploy, verifica che il tag `<scope>-v<versione>` esista
-davvero — altrimenti fallisce subito con un errore chiaro invece di procedere.
+Sicurezza in `promote.yml`, invece: un workflow di deploy con **input liberi** (le versioni come stringhe,
+non un menu a tendina) rischia di deployare qualunque cosa — un typo o una versione mai taggata potrebbe far
+fallire il deploy a metà, o peggio deployare qualcosa di sbagliato. Un job `validate` separato, eseguito
+**prima** dei job di deploy, decide la versione di ogni scope selezionato e fallisce subito con un errore
+chiaro se qualcosa non torna: una versione scritta a mano deve avere la forma esatta `X.Y.Z` (`2.*` o
+`v2.10.0` sono rifiutati: `git tag -l` tratterebbe `2.*` come un pattern) e il tag `<scope>-v<versione>` deve
+esistere; un campo vuoto prende l'ultima versione taggata, e se non ce n'è nessuna è un errore, non un salto
+silenzioso. Gli input arrivano agli script solo come variabili d'ambiente (`env:`), mai interpolati con
+`${{ inputs.* }}` dentro `run:`, dove diventerebbero codice bash.
 
 **Non spostare mai in silenzio** un tag di versione reale già esistente su un commit diverso, senza che sia
 esplicitamente voluto: è quasi sempre sintomo di essersi dimenticati di alzare la versione prima del
@@ -287,7 +322,17 @@ lavoro (e rumore nei log) inutile. Per una pulizia manuale di un intero branch c
 vuoto (entrambi gli scope).
 
 `preserve_latest=false` è per un caso diverso: un branch **concluso/mergiato**, i cui tag non servono più a
-nessuno — lì si può ripulire per intero senza mantenere nulla.
+nessuno — lì si può ripulire per intero senza mantenere nulla. Succede da sé quando il branch viene
+**cancellato su GitHub**: l'evento `delete` lancia la pulizia di quel branch con tutti gli scope,
+`preserve_latest=false` e `dry_run=false` (GitHub lo lancia solo se il workflow è nel branch predefinito;
+la cancellazione di un tag o di `main` non lancia niente). Il nome del branch cancellato lo sceglie chi fa
+push, quindi arriva agli script solo come variabile d'ambiente.
+
+Salvaguardia per il branch di produzione, indipendente da qualunque input: l'**ultimo tag `<scope>-main-*`
+di ogni scope non si elimina mai**, nemmeno con `branch` vuoto e `preserve_latest=false`. `main` non si
+chiude mai, e senza quel tag la Pipeline ribuilderebbe tutto, Tag non troverebbe niente da promuovere e i
+branch nuovi non avrebbero una baseline. Per lo stesso motivo `cleanup-registry` della Pipeline esclude
+sempre l'immagine di quel tag dalle sue "3 più recenti".
 
 Per la pulizia delle immagini Docker, l'azione generica `actions/delete-package-versions` non supporta un
 filtro "elimina solo le versioni con questo tag": va usata direttamente l'API REST di GitHub Packages
@@ -426,14 +471,14 @@ il caso tipico è un namespace ricreato da zero: ConfigMap e Secret applicativi 
 diff "non è cambiato niente" e i job di deploy non girerebbero affatto. Come ogni altra run che ribuilda,
 crea tag `<scope>-<branch>-<data>` nuovi.
 
-**Cosa fa**: per ciascuno scope (qui: backend, frontend) applica i pattern 2 e 3 sopra — diff condizionale,
+**Cosa fa**: per ciascuno scope (qui: backend, frontend, authorizer) applica i pattern 2 e 3 sopra — diff condizionale,
 build solo se serve, deploy solo se serve, mai un rebuild "a vuoto" su un deploy manifest-only. Sequenza job
 per scope: `versions` (diff + calcolo tag di data) → `build-<scope>` (condizionale) →
 `resolve-<scope>-image` (determina quale tag deployare, condizionale con `if: always()` per girare comunque
 quando il build collegato è stato saltato non fallito) → `deploy-<scope>` (chiama il workflow riutilizzabile,
 pattern 4, `environment: development`) → `register-<scope>-tag` (ciclo di vita del tag, pattern 3) →
-`cleanup-registry` (pulizia immagini Docker, mantiene le N più recenti per repository indipendentemente dal
-branch).
+`cleanup-registry` (pulizia immagini Docker, mantiene le 3 più recenti per repository indipendentemente dal
+branch, più sempre quella dell'ultimo tag di `main`).
 
 **Il job `valida-branding`** gira in parallelo alle build e blocca `deploy-backend` e
 `deploy-frontend`. Verifica che ogni logo SVG in `branding/` abbia un gemello PNG/JPEG e che i raster
@@ -453,7 +498,8 @@ nessuno, quindi non vale la pena complicare la pipeline per impedirne la pubblic
 Sta dopo le build perché prova **le immagini appena buildate**, non il codice sorgente ricompilato: si
 verifica l'artefatto che verrà deployato, e non si paga due volte la stessa compilazione. Per lo scope non
 ribuildato in quella run vale la stessa regola di `resolve-<scope>-image` — l'ultima immagine davvero
-deployata sul branch — perché la suite ha bisogno di entrambi i servizi anche quando ne è cambiato uno solo.
+deployata sul branch, o quella dell'ultimo tag di `main` se il branch non ne ha ancora una — perché la
+suite ha bisogno di entrambi i servizi anche quando ne è cambiato uno solo.
 
 Esegue la suite `tests/api/`, che è **black-box via HTTP**: il job ricostruisce quindi un ambiente completo
 da zero — un container Postgres come `service`, i due database con i rispettivi utenti, le baseline
@@ -470,7 +516,17 @@ creazione dei dati di prova viene rifiutata, non essendoci tagli configurati), e
 `TEST_AUTH_DB_URL` non vanno impostate — sono le uniche variabili che potrebbero puntare una suite che
 crea e cancella righe verso un database che non è il suo.
 
-**Non tocca mai** l'infrastruttura di `infra.yml`, né la produzione.
+**Rilascio, solo su `main`**: dopo un deploy riuscito di almeno uno scope e senza nessun job fallito,
+`prepara-rilascio` legge la Variable di repository `CLUBS` (array JSON di nomi di Environment) e scrive nel
+riepilogo che la run attende le approvazioni. Poi `approva-tag` si ferma sull'Environment `approvazione-tag`;
+approvato, `tag` chiama `tag.yml`. Infine `promote` apre un ramo per club (matrice, `fail-fast: false`) e
+chiama `promote.yml` con `approval_environment: approvazione-<club>`: ogni ramo si ferma sulla propria
+approvazione, e approvarne uno deploya solo quel club. L'attesa del club sta dentro `promote.yml` e non in
+un job a matrice qui, perché un job che dipende da un job a matrice aspetta tutti i suoi elementi. I rami
+partono anche se Tag non ha promosso niente di nuovo. Un'approvazione rifiutata fa risultare fallita la run.
+Su un branch feature, o con una run che non ha deployato niente, questi job non partono.
+
+Fuori dal rilascio **non tocca mai** l'infrastruttura di `infra.yml`, né la produzione.
 
 ### `deploy-backend.yml` / `deploy-frontend.yml`
 
@@ -481,9 +537,11 @@ branch/run di `build-deploy.yml`, né dell'input di `promote.yml`).
 
 ### `tag.yml`
 
-**Trigger**: manuale, nessun input (vedi pattern 5 — non serve più specificare cosa promuovere).
+**Trigger**: solo `workflow_call`, dalla Pipeline su `main` dopo l'approvazione `approvazione-tag`; nessun input (vedi pattern 5 — non serve
+specificare cosa promuovere). Nessun Environment: usa solo `GITHUB_TOKEN` e `WORKFLOW_PAT`, secret di
+repository.
 
-**Cosa fa**: vedi pattern 5. Per ciascuno scope, risolve se serve una nuova versione reale (o se è già
+**Cosa fa**: vedi pattern 5. Rifiuta di girare da un ref diverso da `main`. Per ciascuno scope, risolve se serve una nuova versione reale (o se è già
 stata assegnata), crea/sposta il tag e la GitHub Release, ri-tagga l'immagine Docker esistente senza
 rebuild. **Non deploya.** Se almeno uno scope è stato promosso, triggera `cleanup-build-tags.yml`.
 
@@ -494,12 +552,19 @@ log.
 
 ### `promote.yml`
 
-**Trigger**: manuale, con input `environment` (il club) e `backend_version`/`frontend_version`/
-`authorizer_version` (opzionali, ma almeno uno richiesto).
+**Trigger**: manuale, o `workflow_call` dalla Pipeline (un club alla volta, con tutti gli scope e le
+versioni vuote, più `approval_environment`: il primo job, `approvazione`, si ferma su quell'Environment e
+verifica che abbia un revisore). Input: `environment` (il club), e per ciascuno scope una checkbox
+`deploy_<scope>` (predefinita selezionata) e un campo `<scope>_version` (vuoto = ultima versione taggata).
+Lanciato a mano non chiede approvazioni. Almeno una checkbox va lasciata selezionata; una versione scritta su un componente non
+selezionato viene ignorata e segnalata nel riepilogo.
 
-**Cosa fa**: vedi pattern 5. Rifiuta `development` (gestito da `build-deploy.yml`), valida che i tag di
-versione esistano, poi deploya nell'ambiente scelto tramite i workflow riutilizzabili. **Non tagga, non
-crea Release.** Sicuro da rilanciare più volte con lo stesso input.
+**Cosa fa**: vedi pattern 5. Rifiuta `development` (gestito da `build-deploy.yml`), decide e valida la
+versione di ogni scope selezionato, poi deploya nell'ambiente scelto tramite i workflow riutilizzabili.
+**Non tagga, non crea Release.** Sicuro da rilanciare più volte con lo stesso input.
+
+**Riepilogo**: una tabella con una riga per scope — selezionato, versione, origine (`indicata` o `ultima
+taggata`) e link alla Release.
 
 ### `migrate-db.yml`
 
@@ -543,14 +608,18 @@ se un giorno servirà.
 
 ### `cleanup-build-tags.yml`
 
-**Trigger**: manuale, oppure automatico (fire-and-forget) a fine `tag.yml`. Input: `scope` (opzionale:
+**Trigger**: manuale, automatico (fire-and-forget) a fine `tag.yml`, oppure alla cancellazione di un
+branch su GitHub (evento `delete`: quel branch, tutti gli scope, `preserve_latest=false`,
+`dry_run=false`). Input: `scope` (opzionale:
 vuoto = tutti e tre, `backend`/`frontend`/`authorizer` per uno solo), `branch` (opzionale: si scrive com'è,
 lo slug dei tag lo ricava il workflow; vuoto = tutti i branch),
 `preserve_latest` (default `true`) e `dry_run` (default `true`).
 
 **Cosa fa**: applica il pattern 6 — elimina i tag Git e le immagini Docker superate di un branch (e, se
 specificato, di un solo scope), raggruppati per (scope, branch), mantenendo sempre il più recente di
-ciascun gruppo se `preserve_latest=true`, con salvaguardia sulle versioni aliasate a un tag reale.
+ciascun gruppo se `preserve_latest=true`, con salvaguardia sulle versioni aliasate a un tag reale. L'ultimo
+tag `<scope>-main-*` di ogni scope resta sempre, e nel riepilogo compare come "baseline di main". Con
+`branch` indicato conta il branch esatto: `main` non prende i tag di un branch `main-qualcosa`.
 `dry_run=true` di default: primo lancio sempre "a vuoto" per rivedere cosa verrebbe toccato prima di
 cancellare davvero. Chiude con un **riepilogo** nella pagina della run (come `infra.yml`): per ciascuno
 scope, i tag Git e le immagini Docker eliminate — o che verrebbero eliminate in dry-run, con i verbi al
@@ -577,8 +646,12 @@ Checklist per portare questi pattern su un nuovo repo:
    workflow distinti** (pattern 5): uno decide/tagga la versione (nessun `run_id`/lookup di run specifica:
    legge sempre l'ultimo tag `<scope>-<branch-produzione>-*` per ciascuno scope indipendentemente), l'altro
    riceve la versione come input esplicito e deploya soltanto, validando che il tag esista prima di
-   procedere.
-6. Aggiungi un workflow di pulizia separato, mai auto-triggerato se i tag non sono usa-e-getta (pattern 6).
+   procedere. Se li vuoi in coda alla pipeline, chiamali come `workflow_call` dietro job di approvazione su
+   Environment dedicati e vuoti (uno per il tag, uno per ambiente di destinazione), non sugli Environment
+   che contengono i secret, e controlla che quegli Environment abbiano davvero un revisore.
+6. Aggiungi un workflow di pulizia separato (pattern 6): automatico solo dove è sicuro (alla chiusura di un
+   branch, o con il più recente sempre mantenuto), e con il tag più recente del branch di produzione
+   protetto qualunque sia l'input.
 7. Se un workflow genera segreti per infrastruttura persistente, applica il pattern "genera solo se non
    esiste già" (pattern 7) fin dall'inizio — è molto più facile da subito che da aggiungere dopo un
    incidente di credenziali disallineate.

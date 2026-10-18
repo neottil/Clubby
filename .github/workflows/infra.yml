@@ -12,7 +12,7 @@ name: Infra
 #
 # Da eseguire una volta per ambiente prima del primo deploy applicativo, o
 # quando serve riallineare l'infrastruttura. Scope volutamente separato da
-# Build & Deploy e Promote, che gestiscono i tre moduli applicativi.
+# Pipeline e Promote, che gestiscono i tre moduli applicativi.
 on:
   workflow_dispatch:
     inputs:
@@ -364,7 +364,7 @@ jobs:
               echo "1. Copia i valori qui sopra nell'Environment."
               echo "2. Fai puntare il DNS di \`APP_DOMAIN\` e \`AUTH_DOMAIN\` alla VPS (serve prima del deploy:"
               echo "   cert-manager deve poter emettere i certificati per quegli host)."
-              echo "3. Deploya i moduli: su \`development\` con **Build & Deploy**, su un club con **Promote**"
+              echo "3. Deploya i moduli: su \`development\` con la **Pipeline**, su un club con **Promote**"
               echo "   scegliendo l'ambiente \`${{ inputs.environment }}\`. L'authorizer creerà l'utente admin"
               echo "   iniziale \`${{ vars.INITIAL_ADMIN_EMAIL }}\` al primo avvio, con la password temporanea"
               echo "   generata qui sopra (\`INITIAL_ADMIN_PASSWORD\`), da sostituire al primo accesso."

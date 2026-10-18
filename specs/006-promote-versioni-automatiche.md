@@ -1,5 +1,10 @@
 # 006 — Promote con le ultime versioni, Tag senza Environment
 
+> **Confluita nella [009](009-pipeline-di-rilascio.md)** il 2026-10-14, per
+> decisione dell'utente: requisiti, decisioni e alternative scartate sono
+> riportati lì, ed è lì che si lavorano. Questo file resta come storico; il
+> numero 006 non si riusa.
+
 > Due ritocchi alla pipeline, decisi insieme mentre si valutava di concatenare
 > Build & Deploy, Tag e Promote in un'unica run (scartato: vedi
 > [Alternative scartate](#alternative-scartate)). I workflow restano separati e
@@ -72,6 +77,8 @@ legato a nessun Environment.
 | P8 | Se un componente selezionato con versione vuota **non ha nessun tag** `<scope>-vX.Y.Z`, `validate` fallisce con un errore che dice di lanciare prima Tag (non lo salta in silenzio: chi lancia si aspetta che venga deployato) | lettura dello step |
 | P9 | A fine `validate`, Promote scrive nel **riepilogo della run** una tabella con una riga per scope: selezionato sì/no, versione, origine (`indicata` / `ultima taggata`), link alla Release | run, pagina della run |
 | P10 | Rifiuto di `development`, migrazioni prima dei deploy e ordine dei job restano quelli di oggi; le condizioni dei job di deploy passano da "versione valorizzata" a "componente selezionato" | lettura del diff, run |
+| P11 | Una versione indicata a mano deve avere la forma esatta `X.Y.Z`, solo cifre (`^[0-9]+\.[0-9]+\.[0-9]+$`); altrimenti `validate` fallisce con un errore che indica il formato atteso, **prima** di cercare il tag. Valori come `2.*`, `v2.10.0` o `2.10` sono rifiutati | run con versione `2.*` e run con versione `v2.10.0` |
+| P12 | Negli step di `validate` gli input arrivano allo script come variabili d'ambiente (`env:`), mai interpolati con `${{ inputs.* }}` dentro `run:`: quello che si scrive nel modulo resta un dato e non diventa codice bash | lettura del diff: nessun `${{ inputs.` dentro i blocchi `run:` di `promote.yml` |
 
 ### Tag
 
@@ -121,6 +128,8 @@ si tolgono le checkbox di backend e frontend.
 | Componente selezionato senza nessun tag | Errore in `validate` | Saltarlo in silenzio lascerebbe il club con un componente non aggiornato senza che nessuno lo noti; un errore chiede di togliere la checkbox o di lanciare Tag |
 | Versione scritta su un componente non selezionato | Ignorata, segnalata nel riepilogo | La checkbox è la decisione esplicita; un fallimento per un campo dimenticato sarebbe pignolo, il silenzio confonderebbe |
 | Environment di Tag | Nessuno | Tag non legge Variables né secret di Environment: legarlo a uno gli dà accesso a secret che non usa e registra deployment falsi |
+| Formato della versione indicata a mano | Validato con una regex prima di cercare il tag | Oggi il controllo non basta: `git tag -l` tratta l'input come pattern glob e `grep -x` come regex, quindi `2.*` trova `backend-v2.10.0` e passa. L'errore arriva solo dopo, quando le migrazioni o il deploy cercano un'immagine `:2.*` che non esiste |
+| Input negli script | Passati con `env:` | `${{ … }}` viene sostituito come testo prima che bash parta: un valore come `1.0.0"; comando; echo "` verrebbe eseguito con i secret del job. Il rischio è basso (Promote lo lancia solo chi scrive sul repo, e P11 rifiuta i valori strani), ma lo step va riscritto comunque ed è la forma raccomandata da GitHub |
 
 ## Alternative scartate
 
@@ -128,6 +137,8 @@ si tolgono le checkbox di backend e frontend.
 |---|---|
 | **Un'unica pipeline** Build & Deploy → Tag → Promote, con Tag e Promote dietro un gate di approvazione (Environment con *required reviewers*) | Ogni push su `main` lascerebbe una run ferma in attesa di approvazione o rifiuto, fino a 30 giorni. Scartata dall'utente: le run in sospeso sono rumore, e la maggior parte dei push non diventa un rilascio |
 | Variante della precedente con un gate **per club** (matrix su una Variable con l'elenco dei club, una checkbox per club in *Review deployments*) | Stesso problema delle run in attesa, moltiplicato per club. In più l'approvazione vale per job: `migrate-db` e i tre `deploy-*` dichiarano ciascuno l'Environment, quindi 3–4 approvazioni per club senza ristrutturare i job |
+| Pulsante nel riepilogo che lancia Tag o Promote con gli input già compilati | Non esiste in GitHub Actions: nel riepilogo si possono mettere solo testo e link, e `workflow_dispatch` non accetta input precompilati da un URL. Proposto dall'utente il 2026-10-14 |
+| Link nel riepilogo di Build & Deploy alla pagina di Tag, e in quello di Tag alla pagina di Promote | Fattibile (sono solo link, senza input), ma rimandato dall'utente il 2026-10-14: per ora non serve. Si può riprendere in una spec a parte |
 | Tag che a fine run lancia Promote da sé (`gh workflow run`) | L'ambiente andrebbe deciso prima, e lanciare Tag non significa voler aggiornare un club adesso: taggare e deployare hanno cicli di vita diversi ([.github/README.md](../.github/README.md#5-tag-e-promote-separati)) |
 | Valore speciale nel campo versione (es. `-`) per "non deployare" | Un codice da ricordare, invisibile nel modulo; le checkbox dicono la stessa cosa a chi guarda |
 | "Vuoto = non deployare" come oggi, con un'unica checkbox "usa le ultime versioni" | Due modi di dire la stessa cosa, e con la checkbox attiva non si potrebbe deployare un solo componente all'ultima versione (caso della rotazione della chiave) |
@@ -147,10 +158,10 @@ si tolgono le checkbox di backend e frontend.
   checkbox valgono `true`. Nel repo non ci sono chiamate a `promote.yml` da
   altri workflow (verificato: è solo `workflow_dispatch`).
 - **Tag senza Environment**: se l'Environment `development` avesse una
-  *deployment branch policy* o dei reviewer, Tag ne uscirebbe. Il README le
-  cita solo come possibilità futura: **da verificare** in *Settings →
-  Environments → development* prima dell'implementazione. Tag resta comunque
-  limitato a `main` per costruzione (lavora solo su tag `*-main-*`).
+  *deployment branch policy* o dei reviewer, Tag ne uscirebbe. **Verificato
+  dall'utente il 2026-10-14**: `development` non ha né branch policy né
+  reviewer, quindi togliere l'Environment non toglie protezioni. Tag resta
+  comunque limitato a `main` per costruzione (lavora solo su tag `*-main-*`).
 - **Documentazione da allineare** nello stesso passaggio:
   - [.github/README.md](../.github/README.md) — sezione `promote.yml`, pattern 5
     ("riceve la versione da deployare come input esplicito"), tabella dei

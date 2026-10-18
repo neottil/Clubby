@@ -1,25 +1,35 @@
 # Pipeline CI/CD (GitHub Actions)
 
 
-Sette workflow in [.github/workflows](../../.github/workflows), scope separato: **Infra** provisiona una
-tantum namespace e Postgres; **Build & Deploy** builda e deploya i tre moduli in sviluppo a ogni push;
-**Deploy Backend**/**Deploy Frontend**/**Deploy Authorizer** sono workflow riutilizzabili (nessun
-trigger proprio) che applicano davvero i manifest k8s, chiamati sia da `Build & Deploy` sia da
-`Promote`; **Tag** promuove manualmente un deploy a "versione reale" (senza deployare nulla);
-**Promote** deploya una versione già taggata nell'ambiente di un club (senza taggare nulla).
+Workflow in [.github/workflows](../../.github/workflows), scope separato: **Infra** provisiona una
+tantum namespace e Postgres; la **Pipeline** builda e deploya i tre moduli in sviluppo a ogni push e, su
+`main`, dopo un'approvazione esegue **Tag** (promuove a "versione reale" lo stato deployato su `main`,
+senza deployare nulla) e, dopo un'approvazione per club, **Promote** (deploya le versioni taggate
+nell'ambiente di un club, senza taggare nulla; si lancia anche a mano); **Deploy Backend**/**Deploy
+Frontend**/**Deploy Authorizer** sono workflow riutilizzabili (nessun trigger proprio) che applicano
+davvero i manifest k8s, chiamati sia dalla `Pipeline` sia da `Promote`; **Cleanup build tags** ripulisce i
+tag di build superati.
 
-**GitHub Environments**: `Build & Deploy` e `Tag` sono agganciati (job-level `environment: development`)
-sempre e solo all'Environment `development` — ogni push builda e deploya in sviluppo, mai in un club.
+Il flusso di uno sviluppatore: branch `feature/…` → push (deploy in `development` dei soli scope cambiati
+rispetto a `main`) → merge in `main` e **cancellazione del branch su GitHub** (deploy del merge in
+`development`, e pulizia automatica dei tag del branch chiuso) → nella run partita dal merge, approvazione
+di Tag e poi dei club da aggiornare.
+
+**GitHub Environments**: i job di build e deploy della `Pipeline` sono agganciati (job-level
+`environment: development`) sempre e solo all'Environment `development` — ogni push builda e deploya in
+sviluppo; in un club deploya solo Promote, chiamato dalla Pipeline dopo un'approvazione o lanciato a mano. `Tag` non è
+agganciato a nessun Environment: usa solo `GITHUB_TOKEN` e `WORKFLOW_PAT`, secret di repository.
 `Infra` e `Promote` ricevono invece l'Environment come input (di tipo `environment`: il menu a tendina in
 GitHub mostra gli Environment realmente configurati sul repo) e agganciano i job a quello scelto: `Infra`
 per preparare `development` o un club, `Promote` per portare una versione in un club (rifiuta
-`development`). Le **Variables/Secrets** vanno quindi configurate per Environment (Settings →
+`development`). Le approvazioni del rilascio usano Environment dedicati e vuoti (`approvazione-tag`,
+`approvazione-<club>`), vedi [sotto](#approvazioni-del-rilascio). Le **Variables/Secrets** vanno quindi configurate per Environment (Settings →
 Environments), uno per `development` e uno per ogni club.
 
 Namespace, nomi dei database e cartelle sulla VPS **non** sono Variables: li ricava dal nome
 dell'Environment l'action [`.github/actions/ambiente`](../../.github/actions/ambiente/action.yml), che valida il
 nome ed è usata da Infra e da tutti i workflow di deploy, così la convenzione è scritta in un punto solo.
-`Promote` riusa le immagini Docker già pushate su `ghcr.io` da `Build & Deploy` (già taggate per versione
+`Promote` riusa le immagini Docker già pushate su `ghcr.io` dalla `Pipeline` (già taggate per versione
 reale da `Tag`) — nessun rebuild.
 
 ## Infra
@@ -60,7 +70,7 @@ Database e utenti non li creano script di init di Postgres: quelli girano solo a
 dell'istanza, e su un'istanza condivisa i club successivi non avrebbero mai i propri database.
 
 L'utente admin iniziale **non** viene creato qui: lo crea l'authorizer al suo primo avvio (durante
-`Build & Deploy`), leggendo `INITIAL_ADMIN_EMAIL`/`INITIAL_ADMIN_PASSWORD`, e solo se il database degli
+`Pipeline`), leggendo `INITIAL_ADMIN_EMAIL`/`INITIAL_ADMIN_PASSWORD`, e solo se il database degli
 account è ancora vuoto.
 
 Il riepilogo della run (`GITHUB_STEP_SUMMARY`) stampa i valori da copiare a mano nei GitHub
@@ -76,7 +86,7 @@ cluster. L'authorizer lo scrive nel claim `iss` dei token e il backend lo confro
 fallire ogni verifica. Il backend raggiunge però l'authorizer sul Service interno
 (`AUTH_INTERNAL_URL`), che è cosa diversa e non deve coincidere.
 
-## `Build & Deploy` ([build-deploy.yml](../../.github/workflows/build-deploy.yml))
+## `Pipeline` ([build-deploy.yml](../../.github/workflows/build-deploy.yml))
 
 Si attiva su push su `main`, `feature/**`, `fix/**` (o manualmente). Tutti i branch deployano sullo
 **stesso ambiente**, `development` (namespace `clubby-development-app`, a cui il workflow è sempre
@@ -106,8 +116,14 @@ incluso in quanto sottocartella) — e decide:
 - nessuna modifica in nessuno dei due scope → l'intera run si ferma dopo `versions` (nessuna build, nessun
   deploy, nessun tag spostato), con un `::warning::` nel log
 
-Se non trova nessun tag `<scope>-<branch>-*` precedente per uno scope su questo branch (prima run in
-assoluto, o dopo una pulizia con il workflow **Cleanup build tags**, vedi sotto), builda e deploya sempre
+Se non trova nessun tag `<scope>-<branch>-*` per uno scope su questo branch (primo push di un branch
+feature), la baseline è l'ultimo tag `<scope>-main-*` **contenuto nel branch**: uno scope che il branch non
+ha toccato non si builda né si deploya, e resta in `development` con l'immagine di `main` — così dopo il
+merge non resta in uso nessuna immagine del branch, che la pulizia alla sua cancellazione toglierebbe dal
+registry. Uno scope cambiato rispetto a `main` si builda e deploya per intero, anche se è cambiato solo il
+manifest (il branch non ha ancora un'immagine sua da riusare). Il job `test` usa per gli scope non
+ribuildati la stessa baseline. Senza nemmeno un tag di `main` nel branch (prima run in assoluto, o un
+branch aperto prima dell'ultimo tag di `main`, i cui tag più vecchi sono stati ripuliti) builda e deploya
 tutto per quello scope, per sicurezza.
 
 **Forzare tutto** — lanciandolo manualmente c'è l'input `force_all` (default `false`): se attivo, il diff
@@ -157,8 +173,9 @@ Job (per ciascuno scope: nomi mostrati per `backend`, `frontend` è identico):
    sopra "Come avanza il tag").
 7. **cleanup-registry**: dopo almeno un deploy riuscito, ripulisce dal registry le immagini taggate solo con
    la data, mantenendo le **3 più recenti** per repository immagine (`clubby-backend`,
-   `clubby-frontend`), a prescindere dal branch. I tag di versione reale (`X.Y.Z`) sono sempre esclusi
-   da questa pulizia. Non usa più `actions/delete-package-versions` (dismessa, girava forzata su un runtime
+   `clubby-frontend`, `clubby-authorizer`), a prescindere dal branch. Sono sempre escluse le immagini con
+   un tag di versione reale (`X.Y.Z`) e quella dell'ultimo tag `<scope>-main-*`: bastano tre build di un
+   branch feature per farla uscire dalle 3, e Tag ne ha bisogno per promuoverla. Non usa più `actions/delete-package-versions` (dismessa, girava forzata su un runtime
    Node deprecato): usa direttamente l'API di GitHub Packages via `gh api`.
 
 I manifest renderizzati (`k8s/rendered/`, contengono credenziali in chiaro) non vengono mai committati
@@ -166,110 +183,100 @@ I manifest renderizzati (`k8s/rendered/`, contengono credenziali in chiaro) non 
 
 ## `Cleanup build tags` ([cleanup-build-tags.yml](../../.github/workflows/cleanup-build-tags.yml))
 
-**Attivazione manuale**, oppure **automatica** (fire-and-forget) alla fine di ogni promozione riuscita del
-workflow **Tag**, scoped a `branch=main` e `preserve_latest=true` (e a `scope` limitato al solo scope
-appena promosso, se **Tag** ne ha promosso uno solo in quella run — vedi sotto). I tag `<scope>-<branch>-*`
-**non sono usa-e-getta**: sono anche la baseline del diff della prossima run di `Build & Deploy` su quel
-branch e il riferimento del workflow **Tag** — per questo, di default (`preserve_latest=true`), per
-ciascuno scope e per ciascun branch coinvolto viene sempre **mantenuto il tag più recente** (Git e immagine
-Docker corrispondente), eliminando solo quelli più vecchi. Così è sicuro lanciarlo — anche in automatico —
-su un branch ancora attivo come `main`: dopo la pulizia resta comunque un tag da cui `Build & Deploy` può
-calcolare il prossimo diff.
+Tre modi di partire:
+- **alla cancellazione di un branch su GitHub** (evento `delete`): ripulisce per intero quel branch —
+  tutti gli scope, `preserve_latest=false`, `dry_run=false`. È l'ultimo passo del flusso: dopo il merge il
+  branch si cancella, e i suoi tag non servono più. La cancellazione di un tag o di `main` non lancia
+  niente. Un branch cancellato solo in locale non lancia niente: lì resta la pulizia manuale;
+- **in automatico** (fire-and-forget) alla fine di ogni promozione riuscita di **Tag**, scoped a
+  `branch=main` e `preserve_latest=true` (e a `scope` limitato al solo scope appena promosso, se Tag ne ha
+  promosso uno solo): i tag provvisori di `main` più vecchi non servono più;
+- **a mano**, con gli input sotto.
 
-Accetta quattro input:
-- `scope` (opzionale): `backend`, `frontend`, `authorizer`, o vuoto per **tutti e tre** (default). I tre
-  moduli sono processati come scope completamente indipendenti (tag Git, immagini Docker, tutto separato) —
-  questo input limita la pulizia a uno solo. Usato dal trigger automatico da **Tag** quando ha promosso un
-  solo scope in quella run (gli altri non sono cambiati, non c'è motivo di ripulirli). Per una pulizia manuale di
-  un branch `feature/**`/`fix/**` concluso, di solito si lascia vuoto (tutti gli scope).
+I tag `<scope>-<branch>-*` **non sono usa-e-getta**: sono la baseline del diff della prossima run di
+`Pipeline` e il riferimento di **Tag**. Per questo, con `preserve_latest=true`, per ciascuno scope e
+per ciascun branch coinvolto resta sempre il **tag più recente** (Git e immagine Docker), e **l'ultimo tag
+`<scope>-main-*` di ogni scope non si elimina mai**, qualunque siano gli input: nel riepilogo compare fra i
+mantenuti come "baseline di main".
+
+Input:
+- `scope` (opzionale): `backend`, `frontend`, `authorizer`, o vuoto per **tutti e tre** (default).
 - `branch` (opzionale): si scrive com'è (es. `main`, `feature/refactoring`); alla conversione nello slug dei
-  tag (`/` → `-`) pensa il workflow. Se valorizzato, ripulisce **solo** i tag di quel branch — sia Git
-  (`<scope>-<branch>-*`) sia le immagini Docker corrispondenti su `ghcr.io`
-  (`clubby-backend`, `clubby-frontend`, `clubby-authorizer`), tramite l'API di GitHub Packages (non
-  `actions/delete-package-versions`, che non supporta un filtro per tag). Se vuoto, ripulisce i tag di
-  **tutti** i branch (`preserve_latest` si applica per singolo branch, non globalmente). In tutti i casi,
-  un'immagine il cui digest è aliasato anche da un tag di versione reale (`X.Y.Z`) viene sempre saltata, mai
-  eliminata.
+  tag (`/` → `-`) pensa il workflow. Se valorizzato, ripulisce **solo** i tag di quel branch esatto — sia Git
+  (`<scope>-<branch>-*`) sia le immagini Docker corrispondenti su `ghcr.io`, tramite l'API di GitHub
+  Packages. Se vuoto, ripulisce i tag di **tutti** i branch. In tutti i casi un'immagine il cui digest è
+  aliasato anche da un tag di versione reale (`X.Y.Z`) viene sempre saltata.
 - `preserve_latest` (default `true`): mantiene il tag più recente per scope+branch, elimina solo i più
-  vecchi. Mettilo a `false` **solo** quando un branch `feature/**`/`fix/**` è concluso e mergiato — in quel
-  caso nessuno dei suoi tag serve più a nessuno e si può ripulire per intero (la prossima run di
-  `Build & Deploy` su quel branch, se mai ce ne sarà un'altra, ribuilderà/redeployerà tutto da capo).
-- `dry_run` (default `true`): elenca solo cosa verrebbe eliminato (tag Git e immagini Docker), senza
-  cancellare nulla.
+  vecchi. A `false` elimina tutto tranne l'ultimo tag di `main`: serve a mano solo per un branch concluso
+  che non è stato cancellato su GitHub.
+- `dry_run` (default `true`): elenca solo cosa verrebbe eliminato, senza cancellare nulla.
 
-Al termine scrive un **riepilogo** nella pagina della run: i parametri usati e, per ciascuno scope, i tag
-Git e le immagini Docker eliminate, oltre ai tag mantenuti. In `dry_run` il riepilogo è al condizionale
-("che verrebbero eliminati") e lo dichiara in apertura, così non si scambia per un elenco di cose già
-cancellate.
+Al termine scrive un **riepilogo** nella pagina della run: come è partito, i parametri e, per ciascuno
+scope, i tag Git e le immagini Docker eliminate, oltre ai tag mantenuti. In `dry_run` il riepilogo è al
+condizionale e lo dichiara in apertura.
+
+## Approvazioni del rilascio
+
+Su `main`, dopo un deploy riuscito in `development` (almeno uno scope deployato, nessun job fallito), la
+`Pipeline` non finisce: scrive nel riepilogo che attende le approvazioni e si ferma.
+
+1. **Approva Tag** — la run aspetta sull'Environment `approvazione-tag`. Nella pagina della run si apre
+   *Review deployments*, si spunta `approvazione-tag` e si approva: parte **Tag**.
+2. **Promote, club per club** — dopo Tag la run apre un ramo per ciascun club della Variable di
+   repository `CLUBS`, e ogni ramo aspetta sul proprio `approvazione-<club>`. Si approvano solo i club da
+   aggiornare: ogni club approvato riceve Promote con tutti i componenti alle ultime versioni taggate, gli
+   altri restano in attesa senza bloccare nessuno. I rami partono anche se Tag non ha promosso niente di
+   nuovo: così si porta l'ultimo rilascio in un club rimasto indietro.
+
+Un'approvazione rifiutata fa fallire quel passo, e la run risulta fallita anche se il resto è andato bene.
+Un **nuovo push in `main`** annulla le attese ancora aperte della run precedente: resta da approvare solo la
+più recente, che promuove comunque l'ultimo stato di `main`. Un'attesa mai approvata scade dopo 30 giorni.
+Su un branch feature, o con una run che non ha deployato niente, la Pipeline finisce dopo il deploy.
+
+Ogni attesa controlla che il suo Environment abbia davvero un revisore obbligatorio, e altrimenti fallisce
+(composite action [`verifica-approvazione`](../../.github/actions/verifica-approvazione/action.yml)): un
+Environment che non esiste GitHub lo crea al volo senza protezioni. La configurazione degli Environment di
+approvazione e di `CLUBS` è in [variabili-e-secret.md](variabili-e-secret.md#approvazioni-del-rilascio).
+
+Per un rollback, una versione specifica, un solo componente o un club fuori da `CLUBS` si lancia
+**Promote** a mano, senza approvazioni.
 
 ## `Tag` ([tag.yml](../../.github/workflows/tag.yml))
 
-**Attivazione manuale** (`workflow_dispatch`, nessun input, tab Actions → Tag → Run workflow): non parte da
-solo dopo `Build & Deploy`. Anche questo workflow è sempre agganciato all'Environment `dev`
-(`environment: development`): assegna il tag di versione reale alle immagini già buildate in sviluppo, e crea
-la GitHub Release corrispondente. **Non deploya nulla** — il deploy nei club di una versione già
-taggata qui è compito separato del workflow **Promote** (vedi sotto). Promuove sempre e solo **main**, per
-costruzione (vedi sotto) — coerente col fatto che `feature/**` e `fix/**` deployano sullo stesso namespace di
-sviluppo di `main` e non rappresentano una produzione separata.
+**Solo `workflow_call`**: non si lancia da solo, lo esegue la **Pipeline** su `main` dopo l'approvazione
+`approvazione-tag`. Nessun Environment. Assegna il tag
+di versione reale alle immagini già buildate in sviluppo e crea la GitHub Release corrispondente. **Non
+deploya nulla.** Promuove sempre e solo **main**: legge solo tag `<scope>-main-*`, e il primo step rifiuta di
+girare da un ref diverso da `main` (chiamato da una run su un altro branch eseguirebbe il `tag.yml` di quel
+branch; la Pipeline comunque lo chiama solo su `main`).
 
-Non prende in input l'ID di una run di `Build & Deploy` da promuovere: dato che backend e frontend deployano
-in modo indipendente (vedi sopra), non esiste "la run da promuovere" — ogni scope avanza per conto suo,
-potenzialmente in run diverse. Agisce **solo sugli scope che ne hanno davvero bisogno**: non sposta mai un tag
-di versione reale se quello scope non ha nulla di nuovo da promuovere. Per ciascuno dei due scope (`backend`,
-`frontend`), il workflow:
+Non prende in input l'ID di una run della `Pipeline`: i tre scope deployano in modo indipendente, quindi
+non esiste "la run da promuovere". Per ciascuno scope:
 
-1. Cerca l'ultimo tag `<scope>-main-*` (creato/avanzato da `deploy-backend`/`deploy-frontend` solo dopo un
-   rollout riuscito, vedi sopra) — se non lo trova, **salta** quello scope (non è mai stato deployato su
-   main, non c'è nulla da promuovere; non è più un errore fatale).
-2. Controlla se il commit di quel tag è **già coperto da un tag di versione reale** (`git tag --points-at
-   <commit>` filtrato su `server-v*`/`client-v*`) — se sì, quello scope è già stato promosso l'ultima volta:
-   **salta** (nessuno spostamento di tag, nessun ri-tag Docker). Questo controllo si basa solo sui tag Git già
-   nel repo — niente artifact né `run_id` da `Build & Deploy`: backend e frontend buildano/promuovono in run
-   indipendenti e asincrone, quindi "l'ultima run di Build & Deploy" non sarebbe comunque un riferimento
-   affidabile su cosa è cambiato dall'ultima promozione (i tag Git, essendo stato persistente nel repo, lo sono).
-3. Se invece c'è qualcosa di nuovo, legge la versione dal `package.json` **al commit di quel tag specifico**
-   (`git show <tag>:<scope>/package.json` — non da `HEAD`: backend e frontend possono essere più
-   avanti/indietro l'uno rispetto all'altro).
-4. **Crea o sposta** (force-update) il tag di versione reale corrispondente su quel commit:
-
-   | Scope | Tag reale | Fonte versione |
-   |---|---|---|
-   | `backend` | `server-vX.Y.Z` | `backend/package.json` → `version` |
-   | `frontend` | `client-vX.Y.Z` | `frontend/package.json` → `version` |
-
-5. **Assegna il tag di versione reale** (`X.Y.Z`) all'immagine già pushata col tag di data ricavato dal nome
-   del tag `<scope>-*` stesso (nessuna variabile/artifact separato), tramite `docker buildx imagetools
-   create` (nessun rebuild: aggiunge solo un riferimento sullo stesso digest già presente sul registry).
-6. **Crea la GitHub Release** per quel tag di versione reale (idempotente: se esiste già — es. dopo uno
-   spostamento del tag sullo stesso nome — la lascia invariata invece di fallire).
-7. Se **almeno uno** scope è stato promosso, **triggera** (fire-and-forget, non aspetta che finisca) il
-   workflow **Cleanup build tags** scoped a `branch=main` e `preserve_latest=true`, per ripulire i tag
-   `backend-main-*`/`frontend-main-*` (Git e Docker) rimasti da eventuali tentativi precedenti su `main` mai
-   promossi — mantenendo sempre il più recente per scope, così il prossimo diff di `Build & Deploy` ha ancora
-   una baseline da cui partire. Se è stato promosso **un solo** scope, il trigger passa anche `scope=<quello>`
-   — l'altro scope non è cambiato, non c'è motivo di ripulirlo in questa run; se sono stati promossi
-   entrambi, `scope` resta vuoto (pulisce entrambi). Se nessuno scope è stato promosso (tutto già allineato), questo step non gira:
-   non c'è nessuna nuova baseline da preservare.
-8. Scrive il **riepilogo** della run (summary del job): una riga per scope con tag di deploy, commit,
-   versione, esito (`promosso`, `già promosso`, `mai deployato su main`) e link alla Release, più una riga
-   sulla pulizia dei tag — se è partita e con quale scope. Per sapere cosa ha fatto una run di Tag basta
-   aprirla, senza leggere il log.
+1. Cerca l'ultimo tag `<scope>-main-*` — se non c'è, **salta** quello scope (mai deployato su main).
+2. Se il commit di quel tag è **già coperto da un tag di versione reale** (`<scope>-vX.Y.Z`), **salta**:
+   nessuno spostamento di tag, nessun ri-tag Docker.
+3. Altrimenti legge la versione dal `package.json` **al commit di quel tag** (`git show
+   <tag>:<scope>/package.json`, non da `HEAD`), crea o sposta su quel commit il tag di versione reale
+   `backend-vX.Y.Z` / `frontend-vX.Y.Z` / `authorizer-vX.Y.Z`, assegna il tag Docker `X.Y.Z` all'immagine
+   già pushata (`docker buildx imagetools create`, nessun rebuild) e crea la GitHub Release (idempotente).
+4. Se **almeno uno** scope è stato promosso, lancia **Cleanup build tags** su `branch=main` con
+   `preserve_latest=true` (vedi sopra).
+5. Scrive il **riepilogo** della run: una riga per scope con tag di deploy, commit, versione, esito
+   (`promosso`, `già promosso`, `mai deployato su main`) e link alla Release, più la riga sulla pulizia.
 
 **Nota sul tag di data e i limiti di GHCR**: il tag di data **non** viene eliminato dall'immagine appena
-promossa nello step 4. L'API di GitHub Packages cancella per *versione* (= digest), non per singolo tag:
-poiché il tag di versione reale appena creato punta allo stesso digest del tag di data, cancellare quella
-versione rimuoverebbe anche il tag reale appena assegnato — sia `cleanup-registry` di `Build & Deploy` sia il
-`Cleanup build tags` triggerato dallo step 5 lo sanno e saltano sempre le immagini che hanno anche un tag
-`X.Y.Z`.
+promossa. L'API di GitHub Packages cancella per *versione* (= digest), non per singolo tag: cancellarla
+rimuoverebbe anche il tag reale appena assegnato — `cleanup-registry` e `Cleanup build tags` saltano sempre
+le immagini che hanno anche un tag `X.Y.Z`.
 
-Per rilasciare una nuova versione di un componente, alza a mano il campo `version` nel `package.json`
-corrispondente prima del push su `main`: la pipeline la userà per il tag Git e per il tag Docker al momento
-della promozione.
+Per rilasciare una nuova versione di un componente, alza il campo `version` nel `package.json`
+corrispondente prima del push su `main` (`npm run version -- <modulo> <livello>`).
 
 ## `Deploy Backend` / `Deploy Frontend` / `Deploy Authorizer` ([deploy-backend.yml](../../.github/workflows/deploy-backend.yml) / [deploy-frontend.yml](../../.github/workflows/deploy-frontend.yml) / [deploy-authorizer.yml](../../.github/workflows/deploy-authorizer.yml))
 
 **Solo `workflow_call`**: non compaiono nella tab Actions come workflow lanciabili direttamente — esistono
-solo per essere chiamati da `Build & Deploy` (development) e da `Promote` (club). Prendono in input
+solo per essere chiamati dalla `Pipeline` (development) e da `Promote` (club). Prendono in input
 `environment` (Environment GitHub da usare) e `image_tag` (tag dell'immagine da deployare — di data o
 versione reale, indifferentemente). Ricavano namespace, nomi dei database e cartella sulla VPS dal nome
 dell'Environment (action `ambiente`), renderizzano i manifest k8s del proprio scope con `envsubst` leggendo
@@ -285,22 +292,27 @@ authorizer, colori e logo — e la mette nel ConfigMap del frontend, da cui ngin
 
 ## `Promote` ([promote.yml](../../.github/workflows/promote.yml))
 
-**Attivazione manuale**, con input `environment` — l'Environment del club, dal menu a tendina — e
-`backend_version`/`frontend_version`/`authorizer_version` (opzionali come stringa, es. `1.4.0` — ma
-**almeno uno richiesto**): puoi promuovere un solo componente o più d'uno nella stessa run. La stessa
-versione si porta in più club lanciando Promote una volta per club. **Non tagga nulla, non crea Release** —
-richiede che la versione indicata sia già stata creata da **Tag** in precedenza.
+**Attivazione manuale**, o chiamato dalla **Pipeline** una volta per club, dopo l'approvazione del club
+(con tutti i componenti e le ultime versioni taggate). Lanciato a mano non chiede approvazioni. Input: `environment` — l'Environment del club, dal
+menu a tendina — e per ciascuno scope una checkbox `deploy_backend` / `deploy_frontend` /
+`deploy_authorizer` (predefinite selezionate) e un campo `backend_version` / `frontend_version` /
+`authorizer_version`. Campo vuoto = **ultima versione taggata** (la più alta in ordine semantico: `2.10.0`
+sta sopra `2.6.0`). Il caso tipico è quindi scegliere il club e premere Run; si tolgono checkbox per
+deployare un solo componente, e si scrive una versione per un rollback. La stessa versione si porta in più
+club lanciando Promote una volta per club. **Non tagga nulla, non crea Release.**
 
-1. **validate**: rifiuta `development` (lì deploya `Build & Deploy` a ogni push, e una promozione manuale
-   ne scavalcherebbe lo stato), poi per ciascuna versione indicata verifica che il tag
-   `server-v<versione>`/`client-v<versione>`/`auth-v<versione>` esista davvero nel repo — altrimenti
-   fallisce subito con un `::error::` esplicito, invece di procedere con un'immagine inesistente/sbagliata.
+1. **validate**: rifiuta `development` e che nessuna checkbox sia selezionata. Per ogni scope selezionato:
+   con il campo vuoto prende l'ultimo tag `<scope>-vX.Y.Z` (errore se non ce n'è nessuno: le versioni le crea
+   Tag, dopo l'approvazione nella Pipeline); con una versione scritta, ne verifica la forma esatta `X.Y.Z` (`2.*` e `v2.10.0` sono
+   rifiutati) e che il tag esista. Una versione scritta su un componente non selezionato viene ignorata e
+   segnalata. Scrive nel riepilogo una riga per scope: selezionato, versione, origine (`indicata` o
+   `ultima taggata`) e link alla Release.
 2. **migrate-db**: applica le migrazioni pendenti ai database del club, prima dei deploy (vedi
    [Migrazioni dello schema](migrazioni.md)). Un club fermo a una versione vecchia può averne
    parecchie in una volta: vengono applicate in ordine, e quelle già presenti saltate.
-3. **deploy-backend** / **deploy-frontend** / **deploy-authorizer** (a seconda degli input valorizzati):
-   chiamano i workflow riutilizzabili con l'ambiente scelto e il tag di versione validato — stesso identico
-   workflow di deploy usato da `Build & Deploy` per lo sviluppo, nessuna logica duplicata.
+3. **deploy-backend** / **deploy-frontend** / **deploy-authorizer** (per gli scope selezionati):
+   chiamano i workflow riutilizzabili con l'ambiente scelto e la versione decisa da `validate` — stesso
+   workflow di deploy usato dalla `Pipeline` per lo sviluppo, nessuna logica duplicata.
 
 Sicuro da rilanciare più volte con lo stesso input (es. per riallineare un club dopo un incidente):
 non essendoci alcuno stato/tag da spostare, non ha effetti collaterali oltre al deploy stesso.

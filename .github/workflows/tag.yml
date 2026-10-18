@@ -1,27 +1,30 @@
 name: Tag
 
-# Attivazione MANUALE: promuove lo stato attualmente deployato su `main` a
-# versione "reale" (rilascio). Backend e frontend builda/deploya in modo
-# indipendente (vedi build-deploy.yml): ognuno avanza con le proprie run, nei
-# propri momenti — non esiste un singolo "run da promuovere".
+# Solo workflow riutilizzabile: lo chiama la Pipeline (build-deploy.yml) su
+# main, dopo l'approvazione "approvazione-tag" e prima dei Promote dei club, e
+# non compare come workflow lanciabile a sé. Promuove lo stato
+# attualmente deployato su `main` a versione "reale" (rilascio). Backend,
+# frontend e authorizer buildano/deployano in modo indipendente (vedi build-deploy.yml): ognuno avanza con le proprie run,
+# nei propri momenti — non esiste un singolo "run da promuovere".
 #
 # Per questo, invece di un run_id, questo workflow legge sempre l'ultimo tag
-# "<scope>-main-*" per ciascuno dei due scope (backend, frontend)
-# indipendentemente — creato da Build & Deploy solo dopo un rollout riuscito
-# (vedi build-deploy.yml, job deploy-backend/deploy-frontend). È
-# intrinsecamente "solo main": questi tag esistono solo con "-main-" nel
-# nome, quindi non c'è modo di promuovere per sbaglio un branch diverso.
+# "<scope>-main-*" per ciascuno dei tre scope indipendentemente — creato dalla
+# Pipeline solo dopo un rollout riuscito (vedi build-deploy.yml, job
+# register-*-tag). I DATI sono quindi sempre quelli di `main`; il CODICE no:
+# chiamato da una run su un altro branch girerebbe il tag.yml di quel branch,
+# mai entrato in `main`. La Pipeline lo chiama solo su main, e il primo step
+# rifiuta comunque qualunque ref diverso da `main`.
 #
 # Agisce SOLO sugli scope che ne hanno davvero bisogno: per ciascuno scope,
 # se il commit dell'ultimo tag "<scope>-main-*" ha GIÀ un tag di versione
-# reale (server-v*/client-v*) che punta esattamente lì, quello scope è già
+# reale (<scope>-vX.Y.Z) che punta esattamente lì, quello scope è già
 # stato promosso l'ultima volta — non c'è nulla di nuovo, viene saltato
 # (nessuno spostamento di tag, nessun ri-tag Docker). Stesso discorso se
 # quello scope non ha mai avuto un tag "<scope>-main-*" (mai deployato su
 # main): salta invece di fallire. Il controllo si basa solo sui tag Git già
-# presenti nel repo — non c'è bisogno di leggere lo stato di Build & Deploy
-# (né artefatti né run_id): i due scope buildano/promuovono in run
-# indipendenti e asincrone, quindi "l'ultima run di Build & Deploy" non è
+# presenti nel repo — non c'è bisogno di leggere lo stato della Pipeline
+# (né artefatti né run_id): i tre scope buildano/promuovono in run
+# indipendenti e asincrone, quindi "l'ultima run della Pipeline" non è
 # comunque un riferimento affidabile per sapere cosa è cambiato dall'ultima
 # promozione — i tag Git invece sì, sono stato persistente nel repo.
 #
@@ -29,13 +32,18 @@ name: Tag
 # (idempotente: se esiste già, la lascia invariata). Questo workflow decide
 # le versioni e basta — NON deploya nulla: il deploy in produzione di una
 # versione già taggata qui è compito separato del workflow Promote.
+#
+# Nessun Environment: il job non legge Variables né secret di Environment
+# (usa GITHUB_TOKEN e WORKFLOW_PAT, secret di repository). Legarlo a uno gli
+# darebbe accesso a secret che non usa e registrerebbe deployment falsi.
 on:
-  workflow_dispatch: {}
+  # Chi lo chiama deve passare secrets: inherit (serve WORKFLOW_PAT) e
+  # concedere gli stessi permessi del job.
+  workflow_call: {}
 
 jobs:
   tag:
     runs-on: ubuntu-24.04
-    environment: development
     permissions:
       contents: write
       packages: write
@@ -43,6 +51,18 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      # Prima di tutto, anche del checkout: un errore che dice cosa fare, non
+      # un job saltato in silenzio che sembrerebbe "niente da promuovere".
+      # In un workflow chiamato github.ref è quello della run che lo chiama.
+      - name: Verifica che si stia lanciando da main
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Tag gira solo su main (run su '$REF'): la Pipeline lo propone solo dopo un deploy di main."
+            exit 1
+          fi
+
       # Il checkout usa WORKFLOW_PAT (non il GITHUB_TOKEN di default) perché
       # questo job tagga un commit "vecchio" (l'ultimo <scope>-main-* deployato,
       # non necessariamente la punta attuale di main): GitHub blocca un push di
@@ -197,21 +217,21 @@ jobs:
       # reale appena creato punta allo stesso digest del tag di data,
       # cancellare quella versione rimuoverebbe anche il tag reale appena
       # assegnato. Il tag di data resta quindi come alias secondario finché
-      # non viene rimosso da cleanup-registry (Build & Deploy) o dal Cleanup
+      # non viene rimosso da cleanup-registry (Pipeline) o dal Cleanup
       # build tags triggerato sotto — entrambi saltano sempre le immagini che
       # hanno anche un tag X.Y.Z.
 
-      # Ripulisce i tag backend-main-*/frontend-main-* (Git e Docker) rimasti
+      # Ripulisce i tag <scope>-main-* (Git e Docker) rimasti
       # da tentativi precedenti su main non promossi, MANTENENDO il più
       # recente per scope (preserve_latest=true, il default): quello appena
       # promosso qui sopra resta come baseline per il prossimo diff di
-      # Build & Deploy. Fire-and-forget: non aspetta che finisca. Gira solo
+      # della Pipeline. Fire-and-forget: non aspetta che finisca. Gira solo
       # se è stato promosso almeno uno scope (altrimenti non c'è nessun nuovo
       # tag da usare come baseline, e non ha senso rilanciare la pulizia).
       # Se è stato promosso UN SOLO scope, la pulizia viene limitata a quello
       # (steps.promuovi.outputs.cleanup_scope) — l'altro scope non è cambiato,
       # non c'è motivo di ripulirlo/toccarlo in questa run.
-      - name: Pulisci i vecchi tag backend-main-*/frontend-main-* (Git e Docker)
+      - name: Pulisci i vecchi tag <scope>-main-* (Git e Docker)
         if: steps.promuovi.outputs.promoted_any == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -41,6 +41,17 @@ specifica, poi si implementa.
    - Se la spec è Approvata → implementare seguendo i requisiti documentati
    - **ECCEZIONE**: Bug fix che non cambia il comportamento documentato nella spec
 
+1-bis. **GATE: Una spec, un branch `feature/spec-xxx`**
+   - Ogni spec si lavora sul proprio branch, `feature/spec-xxx` con il numero
+     della spec a tre cifre (es. `feature/spec-006`): dalla stesura in Draft
+     fino all'implementazione e alle correzioni durante il test dell'utente
+   - PRIMA di toccare qualsiasi file per una spec, controllare il branch
+     corrente (`git branch --show-current`). Se non è quello della spec, ci si
+     sposta: se esiste già si usa quello, altrimenti lo si crea da `main`
+   - Se ci sono modifiche non committate di un altro lavoro, ci si ferma e si
+     chiede all'utente: non si portano su un branch che non è il loro, e non si
+     committano senza che lo chieda (vedi [Git](#git))
+
 2. **Una spec per feature** - Ogni cambiamento significativo ha la propria spec
    - Aggiungere una pagina → nuova spec
    - Aggiungere un endpoint API → aggiornare spec esistente o crearne una nuova
@@ -160,7 +171,8 @@ specifica, poi si implementa.
 ```
 UTENTE: "Aggiungi la feature X"
 AGENTE:
-  1. Verifica se esiste una spec in specs/ per X
+  1. Verifica se esiste una spec in specs/ per X, e si porta sul branch
+     feature/spec-xxx (lo crea da main se non esiste)
   2. Se NON esiste → CREARE la spec (Draft) → mostrare all'utente → chiedere approvazione
   3. Se esiste Draft → chiedere approvazione
   4. Se esiste Approvata → implementare
