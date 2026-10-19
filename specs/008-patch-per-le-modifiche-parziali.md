@@ -7,15 +7,20 @@
 ## Stato
 
 - [x] Draft
-- [ ] Approvata
-- [ ] In test (utente)
+- [x] Approvata
+- [x] In test (utente)
 - [ ] Completata
 
-**Versioni**: da compilare alla chiusura. Previsti, per fase:
+Approvata dall'utente il 2026-10-18; fase 1 implementata lo stesso giorno. La
+spec resta In test (utente) fino alla fase 2 (vedi
+[Gestione delle due fasi](#gestione-delle-due-fasi)).
 
-- fase 1: `backend` minor (aggiunge `PATCH`, nessun client si rompe), `frontend` patch;
-- fase 2: `backend` **major** (toglie `PUT`: un client che lo usa ancora smette di
-  funzionare, regola 5 di AGENTS.md).
+**Versioni**:
+
+- fase 1: `backend 2.14.0` (minor: aggiunge `PATCH`, nessun client si rompe),
+  `frontend 2.12.1` (patch);
+- fase 2: `backend` **major**, da compilare (toglie `PUT`: un client che lo usa
+  ancora smette di funzionare, regola 5 di AGENTS.md).
 
 `authorizer` non si alza: non ha endpoint `PUT`.
 
@@ -108,9 +113,10 @@ Nessuna variazione di schema.
 Corpo, risposte, permessi e codici d'errore restano quelli di oggi. Nessuno dei
 quattro sta dietro un modulo opzionale.
 
-Nel codice l'alias è un solo punto per handler (`method === 'PATCH' || method === 'PUT'`
-più la riga di log), in modo che la fase 2 sia la rimozione di quella condizione
-e non una riscrittura.
+Nel codice l'alias è un solo punto: `modificaParziale(event)` in
+`backend/src/util/metodi.ts`, vero per `PATCH` e per `PUT` (con la riga di log),
+che i quattro handler usano al posto del confronto sul metodo. La fase 2 è
+togliere il ramo `PUT` da quella funzione, non una riscrittura degli handler.
 
 ## Interfaccia
 
@@ -142,7 +148,7 @@ non cambia.
 
 ## Gestione delle due fasi
 
-Confermata dall'utente (la spec resta in Draft finché non viene approvata):
+Confermate dall'utente:
 
 1. **Fase 2 dentro questa spec.** La spec resta In test (utente) fra le due fasi
    e si chiude dopo la fase 2.
@@ -162,7 +168,7 @@ Confermata dall'utente (la spec resta in Draft finché non viene approvata):
 - **Client esterni** (Bruno, script, chi chiama le API a mano): in fase 1
   funzionano e lasciano una riga nel log; in fase 2 ricevono 404. Il log serve
   proprio a scoprirli prima.
-- **Test**: diciotto chiamate `PUT` in `tests/api/` (in `dati.ts`,
+- **Test**: diciannove chiamate `PUT` in `tests/api/` (in `dati.ts`,
   `documenti-emissione`, `documenti-tesseramenti`, `incontri-scrittura`,
   `rendicontazione`, `ricariche`, `richieste-non-valide`); diventano `PATCH`
   tranne le due sulle abilitazioni degli istruttori in `dati.ts`.
@@ -173,7 +179,16 @@ Confermata dall'utente (la spec resta in Draft finché non viene approvata):
 
 ## Test dell'utente
 
-Da compilare.
+Da compilare. Cosa provare nella fase 1 (R5 e R7 sono le righe con un controllo
+manuale):
+
+- dall'interfaccia, modificare un socio, un incontro, un'attività del listino e
+  le impostazioni: nella scheda Rete del browser il metodo è `PATCH` e i dati
+  salvati sono quelli attesi;
+- nel log del backend, durante quelle prove, nessuna riga `[deprecato]`;
+- una chiamata `PUT` a mano (per esempio da Bruno, cambiando il metodo di
+  *Modifica socio*) funziona ancora e lascia nel log
+  `[deprecato] PUT /api/soci/<id>: usare PATCH`.
 
 ## Verifica
 

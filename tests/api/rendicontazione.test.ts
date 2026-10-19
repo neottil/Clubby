@@ -109,7 +109,7 @@ describe('Rendicontazione', () => {
     // Il costo è il caso evidente; la data lo farebbe uscire dal periodo in
     // cui è stato conteggiato, e anche una nota passa dallo stesso endpoint.
     for (const modifica of [{ costo: 999 }, { data_incontro: '2020-01-01' }, { note: 'cambiata' }]) {
-      const r = await api(admin, 'PUT', `/api/incontri/${rendicontato.id}`, modifica);
+      const r = await api(admin, 'PATCH', `/api/incontri/${rendicontato.id}`, modifica);
       assert.equal(r.status, 400, JSON.stringify(r.body));
       assert.match(r.body.error, /rendicontato/i);
     }
@@ -127,7 +127,7 @@ describe('Rendicontazione', () => {
       costo: 10,
     });
     assert.equal(creato.status, 201, JSON.stringify(creato.body));
-    assert.equal((await api(admin, 'PUT', `/api/incontri/${creato.body.id}`, { costo: 15 })).status, 200);
+    assert.equal((await api(admin, 'PATCH', `/api/incontri/${creato.body.id}`, { costo: 15 })).status, 200);
     assert.equal((await api(admin, 'DELETE', `/api/incontri/${creato.body.id}`)).status, 204);
   });
 });

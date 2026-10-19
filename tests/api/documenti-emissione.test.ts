@@ -59,13 +59,13 @@ describe('Documenti: emissione delle ricevute', () => {
     const pie = 'Operazione esente da imposta di bollo (prova_test).';
 
     try {
-      const put = await api(admin, 'PUT', '/api/impostazioni', {
+      const patch = await api(admin, 'PATCH', '/api/impostazioni', {
         ricevuta_intestazione: intestazione,
         ricevuta_pie_pagina: pie,
       });
-      assert.equal(put.status, 200, JSON.stringify(put.body));
-      assert.equal(put.body.ricevuta_intestazione, intestazione);
-      assert.equal(put.body.ricevuta_pie_pagina, pie);
+      assert.equal(patch.status, 200, JSON.stringify(patch.body));
+      assert.equal(patch.body.ricevuta_intestazione, intestazione);
+      assert.equal(patch.body.ricevuta_pie_pagina, pie);
 
       const get = await api(admin, 'GET', '/api/impostazioni');
       assert.equal(get.body.ricevuta_intestazione, intestazione);
@@ -74,7 +74,7 @@ describe('Documenti: emissione delle ricevute', () => {
       // Le altre impostazioni non devono essere state toccate dalla scrittura.
       assert.ok(get.body.quota_tesseramento !== undefined);
     } finally {
-      await api(admin, 'PUT', '/api/impostazioni', {
+      await api(admin, 'PATCH', '/api/impostazioni', {
         ricevuta_intestazione: originali.ricevuta_intestazione ?? '',
         ricevuta_pie_pagina: originali.ricevuta_pie_pagina ?? '',
       });
@@ -236,7 +236,7 @@ describe('Documenti: emissione delle ricevute', () => {
 
     // Né si modifica: cambiarne il costo dopo l'emissione farebbe dire al
     // documento una cifra e al database un'altra.
-    const modifica = await api(admin, 'PUT', `/api/incontri/${creato.body.id}`, { costo: 99 });
+    const modifica = await api(admin, 'PATCH', `/api/incontri/${creato.body.id}`, { costo: 99 });
     assert.equal(modifica.status, 400, JSON.stringify(modifica.body));
     assert.match(modifica.body.error, /ricevuta/i);
   });

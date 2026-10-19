@@ -11,6 +11,7 @@ import {
 } from '../middleware/auth.js';
 import { ok, errorResponse } from '../middleware/response.js';
 import { corpoJson } from '../util/corpo.js';
+import { modificaParziale } from '../util/metodi.js';
 import { leggiImpostazioni, aggiornaImpostazioni } from '../service/impostazioni.service.js';
 
 export const handler = async (
@@ -26,7 +27,7 @@ export const handler = async (
       return ok(await leggiImpostazioni());
     }
 
-    // PUT /api/impostazioni
+    // PATCH /api/impostazioni   (PUT: alias deprecato, vedi util/metodi.ts)
     // Body: { quota_tesseramento?, percentuale_ricarica?,
     //         ricevuta_intestazione?, ricevuta_pie_pagina? }
     //
@@ -34,7 +35,7 @@ export const handler = async (
     // Il rovescio è che una chiave nuova dimenticata qui viene scartata in
     // silenzio, e la risposta sembra comunque un successo — quindi ogni
     // impostazione aggiunta al servizio va aggiunta anche a questo elenco.
-    if (method === 'PUT') {
+    if (modificaParziale(event)) {
       const body = corpoJson(event);
       return ok(await aggiornaImpostazioni({
         quota_tesseramento: body.quota_tesseramento,

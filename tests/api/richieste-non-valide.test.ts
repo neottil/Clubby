@@ -22,7 +22,7 @@ describe('Richieste non valide', () => {
 
     for (const testo of ['null', '42', '[]']) {
       it(`il backend rifiuta un corpo che non è un oggetto (${testo}) con 400`, async () => {
-        const r = await api(d.sessioni.istruttore1, 'PUT', '/api/impostazioni', new CorpoGrezzo(testo));
+        const r = await api(d.sessioni.istruttore1, 'PATCH', '/api/impostazioni', new CorpoGrezzo(testo));
         assert.equal(r.status, 400);
         assert.equal(r.body.error, 'Il corpo della richiesta deve essere un oggetto JSON');
       });

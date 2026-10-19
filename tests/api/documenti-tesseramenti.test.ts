@@ -47,7 +47,7 @@ describe('Ricevute e tesseramenti', () => {
         assert.equal((await api(s, 'GET', path)).status, 403, path);
       }
       assert.equal((await api(s, 'POST', '/api/tesseramenti', { socio_id: d.soci.socio1, scadenza: giorniFa(-365) })).status, 403);
-      assert.equal((await api(s, 'PUT', '/api/impostazioni', { quota_tesseramento: 1 })).status, 403);
+      assert.equal((await api(s, 'PATCH', '/api/impostazioni', { quota_tesseramento: 1 })).status, 403);
     }
   });
 
@@ -209,7 +209,7 @@ describe('Ricevute e tesseramenti', () => {
 
   describe('impostazioni e voucher', () => {
     it('la quota non può essere negativa (400)', async () => {
-      const r = await api(admin, 'PUT', '/api/impostazioni', { quota_tesseramento: -1 });
+      const r = await api(admin, 'PATCH', '/api/impostazioni', { quota_tesseramento: -1 });
       assert.equal(r.status, 400, JSON.stringify(r.body));
     });
 
@@ -217,7 +217,7 @@ describe('Ricevute e tesseramenti', () => {
       // Si risalva il valore attuale: la quota è configurazione reale
       // dell'associazione, non un dato di prova da poter sporcare.
       const attuale = Number((await api(admin, 'GET', '/api/impostazioni')).body.quota_tesseramento);
-      const r = await api(admin, 'PUT', '/api/impostazioni', { quota_tesseramento: attuale });
+      const r = await api(admin, 'PATCH', '/api/impostazioni', { quota_tesseramento: attuale });
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(Number(r.body.quota_tesseramento), attuale);
     });

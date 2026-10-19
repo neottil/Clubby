@@ -281,7 +281,7 @@ async function creaDati(): Promise<DatiTest> {
   for (const [chiave, nome, costo, attiva] of LISTINO) {
     const creata = await esegui('POST', '/api/attivita', { nome, costo_default: costo }, `attività ${nome}`);
     attivita[chiave] = creata.id;
-    if (!attiva) await esegui('PUT', `/api/attivita/${creata.id}`, { attiva: false }, `disattivazione di ${nome}`);
+    if (!attiva) await esegui('PATCH', `/api/attivita/${creata.id}`, { attiva: false }, `disattivazione di ${nome}`);
   }
 
   const soci = {} as Record<NomeSocio, string>;

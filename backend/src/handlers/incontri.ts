@@ -20,6 +20,7 @@ import {
 } from '../middleware/auth.js';
 import { ok, created, noContent, errorResponse } from '../middleware/response.js';
 import { corpoJson } from '../util/corpo.js';
+import { modificaParziale } from '../util/metodi.js';
 import {
   listIncontri,
   getIncontroById,
@@ -197,9 +198,9 @@ export const handler = async (
     }
 
     // -----------------------------------------------------------
-    // PUT /api/incontri/{id}
+    // PATCH /api/incontri/{id}   (PUT: alias deprecato, vedi util/metodi.ts)
     // -----------------------------------------------------------
-    if (method === 'PUT' && incontroId) {
+    if (incontroId && modificaParziale(event)) {
       if (!auth.isAdmin && !auth.isIstruttore) throw new ForbiddenError();
       const body = corpoJson(event);
 

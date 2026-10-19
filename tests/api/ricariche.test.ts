@@ -86,13 +86,13 @@ describe('Ricariche', () => {
   });
 
   it('la percentuale di ricarica si configura fra le impostazioni, 0-100', async () => {
-    const r = await api(admin, 'PUT', '/api/impostazioni', { percentuale_ricarica: 12.5 });
+    const r = await api(admin, 'PATCH', '/api/impostazioni', { percentuale_ricarica: 12.5 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(Number(r.body.percentuale_ricarica), 12.5);
-    assert.equal((await api(admin, 'PUT', '/api/impostazioni', { percentuale_ricarica: 101 })).status, 400);
-    assert.equal((await api(admin, 'PUT', '/api/impostazioni', { percentuale_ricarica: -1 })).status, 400);
+    assert.equal((await api(admin, 'PATCH', '/api/impostazioni', { percentuale_ricarica: 101 })).status, 400);
+    assert.equal((await api(admin, 'PATCH', '/api/impostazioni', { percentuale_ricarica: -1 })).status, 400);
     // Ripristino: la percentuale è configurazione condivisa, non dato di prova.
-    await api(admin, 'PUT', '/api/impostazioni', { percentuale_ricarica: 0 });
+    await api(admin, 'PATCH', '/api/impostazioni', { percentuale_ricarica: 0 });
   });
 
   it('in modalità free pagato e accreditato coincidono (importo_pagato null)', async () => {

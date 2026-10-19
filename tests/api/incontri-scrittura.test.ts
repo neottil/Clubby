@@ -48,7 +48,7 @@ describe('Incontri: scrittura', () => {
 
   it('si modifica il costo di un incontro su un voucher già negativo e l\'addebito si riallinea', async () => {
     assert.ok(suNegativo, 'incontro di prova non creato');
-    const r = await api(d.sessioni.istruttore2, 'PUT', `/api/incontri/${suNegativo}`, { costo: 40 });
+    const r = await api(d.sessioni.istruttore2, 'PATCH', `/api/incontri/${suNegativo}`, { costo: 40 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(await saldo(d.sessioni.istruttore1, d.soci.socio2), ATTESE.saldoSocio2 - 40);
     // Si rimette il saldo com'era: i test che seguono partono dalle ATTESE.
@@ -67,7 +67,7 @@ describe('Incontri: scrittura', () => {
 
   it('modificando il costo si riallinea l\'addebito', async () => {
     assert.ok(creato, 'incontro di prova non creato');
-    const r = await api(d.sessioni.istruttore2, 'PUT', `/api/incontri/${creato}`, { costo: 20 });
+    const r = await api(d.sessioni.istruttore2, 'PATCH', `/api/incontri/${creato}`, { costo: 20 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(await saldo(d.sessioni.istruttore1, d.soci.socio1), ATTESE.saldoSocio1 - 20);
   });
@@ -75,7 +75,7 @@ describe('Incontri: scrittura', () => {
   it('un istruttore non modifica né elimina incontri tenuti da altri (403)', async () => {
     const altrui = await api(d.sessioni.istruttore1, 'GET', `/api/incontri?istruttore_id=${d.sessioni.istruttore1.id}&limit=1`);
     const id = altrui.body.data[0].id;
-    assert.equal((await api(d.sessioni.istruttore2, 'PUT', `/api/incontri/${id}`, { costo: 1 })).status, 403);
+    assert.equal((await api(d.sessioni.istruttore2, 'PATCH', `/api/incontri/${id}`, { costo: 1 })).status, 403);
     assert.equal((await api(d.sessioni.istruttore2, 'DELETE', `/api/incontri/${id}`)).status, 403);
   });
 

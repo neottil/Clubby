@@ -251,13 +251,13 @@ Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`, tranne `/a
 | `/api/version` | GET | Versione del backend (`null` se non dichiarata) e del database (`db`, ultima migrazione applicata) — **pubblica**, senza token |
 | `/api/auth/socio` | GET | Scheda socio di chi chiama (204 se non collegata) |
 | `/api/soci` | GET/POST | Elenco paginato / creazione |
-| `/api/soci/:id` | GET/PUT/DELETE | Scheda socio |
+| `/api/soci/:id` | GET/PATCH/DELETE | Scheda socio (`PUT` alias deprecato di `PATCH`) |
 | `/api/attivita` | GET/POST | Listino delle attività |
-| `/api/attivita/:id` | PUT/DELETE | Voce di listino |
+| `/api/attivita/:id` | PATCH/DELETE | Voce di listino (`PUT` alias deprecato di `PATCH`) |
 | `/api/istruttori` | GET | Elenco istruttori |
 | `/api/istruttori/:id/attivita` | PUT | Abilitazioni di un istruttore |
 | `/api/incontri` | GET/POST | Elenco paginato / creazione |
-| `/api/incontri/:id` | GET/PUT/DELETE | Incontro |
+| `/api/incontri/:id` | GET/PATCH/DELETE | Incontro (`PUT` alias deprecato di `PATCH`) |
 | `/api/incontri/rendiconta` | POST | Segna incontri come rendicontati (admin) |
 | `/api/voucher` | GET/POST | Voucher prepagati |
 | `/api/voucher/:id/movimenti` | GET/POST | Movimenti di un voucher |
@@ -271,7 +271,7 @@ Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`, tranne `/a
 | `/api/documenti/anteprima` | POST | Anteprima della ricevuta, senza scrivere *(modulo ricevute)* |
 | `/api/documenti` | GET/POST | Ricevute emesse / emissione *(modulo ricevute)* |
 | `/api/documenti/:id` | GET | Scarica il PDF: admin o socio intestatario *(modulo ricevute)* |
-| `/api/impostazioni` | GET/PUT | Quota di tesseramento, percentuale di ricarica, testi delle ricevute (admin) |
+| `/api/impostazioni` | GET/PATCH | Quota di tesseramento, percentuale di ricarica, testi delle ricevute (admin; `PUT` alias deprecato di `PATCH`) |
 | `/api/admin/users` | GET | Account con la scheda socio collegata |
 | `/api/admin/associa-viewer` | POST | Collega un account a una scheda socio |
 | `/api/admin/associa-viewer/:socioId` | DELETE | Scollega |
@@ -394,6 +394,12 @@ schema è rotta subito. Rimuovere qualcosa si fa in **due release**.
   poter diventare un servizio a sé. Il vincolo che lo rende possibile è uno
   solo: `pdf.ts` **non importa il client del database**. Chi genera un
   documento passa i dati, non un id.
+- **Metodo HTTP**: `POST` crea o esegue un'azione, `PUT` sostituisce
+  l'intera risorsa (un campo omesso si perde), `PATCH` ne modifica una parte
+  (un campo omesso resta com'è). Un endpoint che aggiorna solo i campi inviati
+  è `PATCH`, anche se quelli accanto sono `PUT`: è così che i quattro `PUT`
+  parziali erano nati, copiandosi (spec 008). `PUT /api/istruttori/:id/attivita`
+  resta `PUT` perché il corpo è l'insieme completo delle abilitazioni.
 - **Documentazione delle API**: `backend/docs/openapi.yaml` e `bruno/` si
   aggiornano **nello stesso passaggio** in cui cambia l'endpoint, non dopo.
 

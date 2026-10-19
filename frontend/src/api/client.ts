@@ -559,7 +559,7 @@ export function createApiClient(token: string | null) {
     getSociPagina:  (params: SociQuery)   => request<Paginated<Socio>>(`/api/soci${qsDi(params)}`, {}, token),
     getSocio:       (id: string)          => request<Socio>(`/api/soci/${id}`, {}, token),
     createSocio:    (body: SocioInput)    => request<Socio>('/api/soci', { method: 'POST', body: JSON.stringify(body) }, token),
-    updateSocio:    (id: string, body: Partial<SocioInput>) => request<Socio>(`/api/soci/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+    updateSocio:    (id: string, body: Partial<SocioInput>) => request<Socio>(`/api/soci/${id}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
     deleteSocio:    (id: string)          => request<void>(`/api/soci/${id}`, { method: 'DELETE' }, token),
 
     // Incontri — elenco paginato: filtri e ordinamento sono applicati dal
@@ -567,7 +567,7 @@ export function createApiClient(token: string | null) {
     getIncontri:    (params: IncontriQuery = {}) => request<Paginated<Incontro>>(`/api/incontri${queryString(params as Record<string, string | number | undefined>)}`, {}, token),
     getIncontro:    (id: string)          => request<Incontro>(`/api/incontri/${id}`, {}, token),
     createIncontro: (body: IncontroInput) => request<Incontro>('/api/incontri', { method: 'POST', body: JSON.stringify(body) }, token),
-    updateIncontro: (id: string, body: Partial<IncontroInput>) => request<Incontro>(`/api/incontri/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+    updateIncontro: (id: string, body: Partial<IncontroInput>) => request<Incontro>(`/api/incontri/${id}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
     deleteIncontro: (id: string)          => request<void>(`/api/incontri/${id}`, { method: 'DELETE' }, token),
     // Segna come rendicontati gli incontri indicati (solo admin). Risponde con
     // quanti lo sono diventati davvero: chi era già stato rendicontato da un
@@ -579,7 +579,7 @@ export function createApiClient(token: string | null) {
     // backend le sole attività a cui è abilitato, senza doverlo chiedere.
     getAttivita:    (tutte = false)        => request<Attivita[]>(`/api/attivita${tutte ? '?tutte=1' : ''}`, {}, token),
     createAttivita: (body: Partial<Attivita>) => request<Attivita>('/api/attivita', { method: 'POST', body: JSON.stringify(body) }, token),
-    updateAttivita: (id: string, body: Partial<Attivita>) => request<Attivita>(`/api/attivita/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+    updateAttivita: (id: string, body: Partial<Attivita>) => request<Attivita>(`/api/attivita/${id}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
     deleteAttivita: (id: string)          => request<void>(`/api/attivita/${id}`, { method: 'DELETE' }, token),
 
     // Istruttori e loro abilitazioni
@@ -648,7 +648,7 @@ export function createApiClient(token: string | null) {
     // Impostazioni dell'associazione (solo admin)
     getImpostazioni: () => request<Impostazioni>('/api/impostazioni', {}, token),
     aggiornaImpostazioni: (body: Partial<Impostazioni>) =>
-      request<Impostazioni>('/api/impostazioni', { method: 'PUT', body: JSON.stringify(body) }, token),
+      request<Impostazioni>('/api/impostazioni', { method: 'PATCH', body: JSON.stringify(body) }, token),
 
     // Tagli di ricarica (solo admin). Esistono in ogni modalità: si possono
     // preparare prima di attivare RECHARGE_MODE=map.
