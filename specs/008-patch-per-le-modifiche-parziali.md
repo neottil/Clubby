@@ -11,16 +11,18 @@
 - [x] In test (utente)
 - [ ] Completata
 
-Approvata dall'utente il 2026-10-18; fase 1 implementata lo stesso giorno. La
-spec resta In test (utente) fino alla fase 2 (vedi
+Approvata dall'utente il 2026-10-18; fase 1 implementata lo stesso giorno e in
+produzione il 2026-10-20. Fase 2 implementata il 2026-10-20, su richiesta
+dell'utente. La spec si chiude dopo il test della fase 2 (vedi
 [Gestione delle due fasi](#gestione-delle-due-fasi)).
 
 **Versioni**:
 
 - fase 1: `backend 2.14.0` (minor: aggiunge `PATCH`, nessun client si rompe),
   `frontend 2.12.1` (patch);
-- fase 2: `backend` **major**, da compilare (toglie `PUT`: un client che lo usa
-  ancora smette di funzionare, regola 5 di AGENTS.md).
+- fase 2: `backend 3.0.0` (**major**: toglie `PUT`, un client che lo usa ancora
+  smette di funzionare, regola 5 di AGENTS.md). `frontend` non si alza: usa già
+  `PATCH` dalla fase 1.
 
 `authorizer` non si alza: non ha endpoint `PUT`.
 
@@ -113,10 +115,11 @@ Nessuna variazione di schema.
 Corpo, risposte, permessi e codici d'errore restano quelli di oggi. Nessuno dei
 quattro sta dietro un modulo opzionale.
 
-Nel codice l'alias è un solo punto: `modificaParziale(event)` in
+Nel codice, in fase 1, l'alias era un solo punto: `modificaParziale(event)` in
 `backend/src/util/metodi.ts`, vero per `PATCH` e per `PUT` (con la riga di log),
-che i quattro handler usano al posto del confronto sul metodo. La fase 2 è
-togliere il ramo `PUT` da quella funzione, non una riscrittura degli handler.
+che i quattro handler usavano al posto del confronto sul metodo. In fase 2, tolto
+il ramo `PUT`, la funzione si riduceva a `method === 'PATCH'`: è stata eliminata
+e gli handler confrontano il metodo come tutti gli altri.
 
 ## Interfaccia
 
@@ -160,6 +163,9 @@ Confermate dall'utente:
 > aprire una issue che tracci la fase 2, e proporgliene il testo (titolo, cosa
 > togliere, la condizione di avvio del punto 2, il riferimento a questa spec e
 > ai requisiti R11–R12). Non aprirla da soli: è l'utente a farlo.
+>
+> Superato: l'utente ha chiesto la fase 2 subito dopo la fase 1, il 2026-10-20,
+> e non c'è più niente da tracciare.
 
 ## Rischi e impatti
 
@@ -179,8 +185,19 @@ Confermate dall'utente:
 
 ## Test dell'utente
 
-Da compilare. Cosa provare nella fase 1 (R5 e R7 sono le righe con un controllo
-manuale):
+- 2026-10-20: l'utente segnala la fase 1 in produzione e chiede di passare
+  alla fase 2. Al momento della richiesta la settimana senza righe
+  `[deprecato]` nel log (punto 2 di Gestione delle due fasi) non era ancora
+  trascorsa.
+
+Cosa provare nella fase 2:
+
+- dall'interfaccia, modificare un socio, un incontro, un'attività del listino e
+  le impostazioni: salvano come in fase 1;
+- da Bruno, *Modifica socio* (metodo `patch`) funziona; la stessa richiesta con
+  il metodo cambiato in `put` riceve 404.
+
+Cosa provare nella fase 1 (R5 e R7 sono le righe con un controllo manuale):
 
 - dall'interfaccia, modificare un socio, un incontro, un'attività del listino e
   le impostazioni: nella scheda Rete del browser il metodo è `PATCH` e i dati

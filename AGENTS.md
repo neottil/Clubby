@@ -251,13 +251,13 @@ Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`, tranne `/a
 | `/api/version` | GET | Versione del backend (`null` se non dichiarata) e del database (`db`, ultima migrazione applicata) — **pubblica**, senza token |
 | `/api/auth/socio` | GET | Scheda socio di chi chiama (204 se non collegata) |
 | `/api/soci` | GET/POST | Elenco paginato / creazione |
-| `/api/soci/:id` | GET/PATCH/DELETE | Scheda socio (`PUT` alias deprecato di `PATCH`) |
+| `/api/soci/:id` | GET/PATCH/DELETE | Scheda socio |
 | `/api/attivita` | GET/POST | Listino delle attività |
-| `/api/attivita/:id` | PATCH/DELETE | Voce di listino (`PUT` alias deprecato di `PATCH`) |
+| `/api/attivita/:id` | PATCH/DELETE | Voce di listino |
 | `/api/istruttori` | GET | Elenco istruttori |
 | `/api/istruttori/:id/attivita` | PUT | Abilitazioni di un istruttore |
 | `/api/incontri` | GET/POST | Elenco paginato / creazione |
-| `/api/incontri/:id` | GET/PATCH/DELETE | Incontro (`PUT` alias deprecato di `PATCH`) |
+| `/api/incontri/:id` | GET/PATCH/DELETE | Incontro |
 | `/api/incontri/rendiconta` | POST | Segna incontri come rendicontati (admin) |
 | `/api/voucher` | GET/POST | Voucher prepagati |
 | `/api/voucher/:id/movimenti` | GET/POST | Movimenti di un voucher |
@@ -271,7 +271,7 @@ Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`, tranne `/a
 | `/api/documenti/anteprima` | POST | Anteprima della ricevuta, senza scrivere *(modulo ricevute)* |
 | `/api/documenti` | GET/POST | Ricevute emesse / emissione *(modulo ricevute)* |
 | `/api/documenti/:id` | GET | Scarica il PDF: admin o socio intestatario *(modulo ricevute)* |
-| `/api/impostazioni` | GET/PATCH | Quota di tesseramento, percentuale di ricarica, testi delle ricevute (admin; `PUT` alias deprecato di `PATCH`) |
+| `/api/impostazioni` | GET/PATCH | Quota di tesseramento, percentuale di ricarica, testi delle ricevute (admin) |
 | `/api/admin/users` | GET | Account con la scheda socio collegata |
 | `/api/admin/associa-viewer` | POST | Collega un account a una scheda socio |
 | `/api/admin/associa-viewer/:socioId` | DELETE | Scollega |

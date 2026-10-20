@@ -1,10 +1,10 @@
 /**
- * Metodo HTTP delle modifiche (spec 008, fase 1).
+ * Metodo HTTP delle modifiche (spec 008).
  *
  * Le quattro modifiche parziali (soci, incontri, attività, impostazioni) si
- * fanno con PATCH; PUT resta come alias deprecato finché la fase 2 non lo
- * toglie. Le abilitazioni degli istruttori restano PUT: il corpo sostituisce
- * l'intero insieme.
+ * fanno con PATCH; dalla fase 2 un PUT su di esse risponde 404, come ogni
+ * metodo non previsto. Le abilitazioni degli istruttori restano PUT: il corpo
+ * sostituisce l'intero insieme.
  *
  * Le impostazioni sono una riga sola per club, non un dato con il suffisso
  * _test: quelle toccate qui si rimettono com'erano anche se un assert fallisce.
@@ -41,10 +41,9 @@ describe('Metodi HTTP delle modifiche', () => {
       assert.equal(r.status, 403);
     });
 
-    it('PUT su un socio funziona ancora (fase 1)', async () => {
+    it('PUT su un socio → 404 (fase 2)', async () => {
       const r = await api(admin, 'PUT', `/api/soci/${d.soci.senzaAccount}`, { note: 'nota da PUT_test' });
-      assert.equal(r.status, 200, JSON.stringify(r.body));
-      assert.equal(r.body.note, 'nota da PUT_test');
+      assert.equal(r.status, 404);
     });
   });
 
@@ -72,6 +71,12 @@ describe('Metodi HTTP delle modifiche', () => {
       assert.equal((await api(d.sessioni.istruttore2, 'DELETE', `/api/incontri/${creato}`)).status, 204);
     });
 
+    it('PUT su un incontro → 404 (fase 2)', async () => {
+      const altrui = await api(admin, 'GET', `/api/incontri?istruttore_id=${admin.id}&limit=1`);
+      const r = await api(admin, 'PUT', `/api/incontri/${altrui.body.data[0].id}`, { costo: 1 });
+      assert.equal(r.status, 404);
+    });
+
     it('PATCH di un istruttore su un incontro non suo → 403', async () => {
       const altrui = await api(admin, 'GET', `/api/incontri?istruttore_id=${admin.id}&limit=1`);
       const id = altrui.body.data[0].id;
@@ -90,6 +95,11 @@ describe('Metodi HTTP delle modifiche', () => {
       assert.equal(r.body.nome, prima.nome);
       assert.equal(r.body.attiva, prima.attiva);
     });
+
+    it('PUT su un\'attività → 404 (fase 2)', async () => {
+      const r = await api(admin, 'PUT', `/api/attivita/${d.attivita.passeggiata}`, { costo_default: 1 });
+      assert.equal(r.status, 404);
+    });
   });
 
   describe('impostazioni', () => {
@@ -106,6 +116,13 @@ describe('Metodi HTTP delle modifiche', () => {
       } finally {
         await api(admin, 'PATCH', '/api/impostazioni', { ricevuta_pie_pagina: originali.ricevuta_pie_pagina ?? '' });
       }
+    });
+
+    it('PUT sulle impostazioni → 404 (fase 2)', async () => {
+      const prima = (await api(admin, 'GET', '/api/impostazioni')).body;
+      const r = await api(admin, 'PUT', '/api/impostazioni', { ricevuta_pie_pagina: 'da PUT (prova_test)' });
+      assert.equal(r.status, 404);
+      assert.deepEqual((await api(admin, 'GET', '/api/impostazioni')).body, prima);
     });
   });
 

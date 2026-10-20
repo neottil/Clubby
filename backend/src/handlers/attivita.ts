@@ -18,7 +18,6 @@ import {
 } from '../middleware/auth.js';
 import { ok, created, noContent, errorResponse } from '../middleware/response.js';
 import { corpoJson } from '../util/corpo.js';
-import { modificaParziale } from '../util/metodi.js';
 import {
   listAttivita,
   attivitaDiIstruttore,
@@ -59,9 +58,9 @@ export const handler = async (
     }
 
     // -----------------------------------------------------------
-    // PATCH /api/attivita/{id}   (PUT: alias deprecato, vedi util/metodi.ts)
+    // PATCH /api/attivita/{id}
     // -----------------------------------------------------------
-    if (attivitaId && modificaParziale(event)) {
+    if (method === 'PATCH' && attivitaId) {
       requireAdmin(auth);
       const body = corpoJson(event);
       return ok(await updateAttivita(attivitaId, body));

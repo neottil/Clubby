@@ -26,9 +26,8 @@ info:
     numeri.
 
     **Metodi**: `POST` crea o esegue un'azione, `PUT` sostituisce l'intera risorsa,
-    `PATCH` ne modifica una parte (si aggiornano solo i campi inviati). Sulle quattro
-    modifiche parziali (soci, attività, incontri, impostazioni) `PUT` resta per ora
-    come alias deprecato di `PATCH` (spec 008, fase 1).
+    `PATCH` ne modifica una parte (si aggiornano solo i campi inviati). Un metodo non
+    previsto su una route esistente risponde 404 (spec 008).
 
     **Date**: le date di calendario sono stringhe `YYYY-MM-DD`; gli istanti
     (`created_at`, `updated_at`) sono date-time ISO in UTC.
@@ -277,38 +276,6 @@ paths:
           $ref: '#/components/responses/AccessoNegato'
         '404':
           $ref: '#/components/responses/NonTrovato'
-    put:
-      tags: [Soci]
-      summary: Modifica un socio (deprecato, usare PATCH)
-      deprecated: true
-      description: |
-        **Deprecato** (spec 008, fase 1): alias di `PATCH`, con lo stesso corpo e le
-        stesse risposte. Ogni chiamata lascia nel log del backend la riga
-        `[deprecato] PUT <percorso>: usare PATCH`; nella fase 2 risponde 404.
-
-        Solo admin. Si aggiornano solo i campi presenti. L'email di un socio collegato
-        a un account non è modificabile: è quella con cui la persona accede.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ModificaSocio'
-      responses:
-        '200':
-          description: Socio aggiornato
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Socio'
-        '400':
-          $ref: '#/components/responses/RichiestaNonValida'
-        '401':
-          $ref: '#/components/responses/NonAutenticato'
-        '403':
-          $ref: '#/components/responses/AccessoNegato'
-        '404':
-          $ref: '#/components/responses/NonTrovato'
     delete:
       tags: [Soci]
       summary: Elimina un socio
@@ -396,48 +363,6 @@ paths:
       tags: [Attività]
       summary: Modifica un'attività
       description: Solo admin. Si aggiornano solo i campi presenti.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              minProperties: 1
-              properties:
-                nome:
-                  type: string
-                costo_default:
-                  type: number
-                  minimum: 0
-                attiva:
-                  type: boolean
-      responses:
-        '200':
-          description: Attività aggiornata
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Attivita'
-        '400':
-          $ref: '#/components/responses/RichiestaNonValida'
-        '401':
-          $ref: '#/components/responses/NonAutenticato'
-        '403':
-          $ref: '#/components/responses/AccessoNegato'
-        '404':
-          $ref: '#/components/responses/NonTrovato'
-        '409':
-          $ref: '#/components/responses/Conflitto'
-    put:
-      tags: [Attività]
-      summary: Modifica un'attività (deprecato, usare PATCH)
-      deprecated: true
-      description: |
-        **Deprecato** (spec 008, fase 1): alias di `PATCH`, con lo stesso corpo e le
-        stesse risposte. Ogni chiamata lascia nel log del backend la riga
-        `[deprecato] PUT <percorso>: usare PATCH`; nella fase 2 risponde 404.
-
-        Solo admin. Si aggiornano solo i campi presenti.
       requestBody:
         required: true
         content:
@@ -699,42 +624,6 @@ paths:
       tags: [Incontri]
       summary: Modifica un incontro
       description: |
-        Admin, oppure l'istruttore che lo ha tenuto, che non può cambiare `istruttore_id`
-        e può scegliere solo attività a cui è abilitato. Il socio non è modificabile.
-
-        Il movimento di addebito collegato segue le modifiche: importo se cambia il costo,
-        data e descrizione se cambiano data o attività. Un nuovo costo si addebita anche
-        se il voucher è già sotto zero.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ModificaIncontro'
-      responses:
-        '200':
-          description: Incontro aggiornato
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Incontro'
-        '400':
-          $ref: '#/components/responses/RichiestaNonValida'
-        '401':
-          $ref: '#/components/responses/NonAutenticato'
-        '403':
-          $ref: '#/components/responses/AccessoNegato'
-        '404':
-          $ref: '#/components/responses/NonTrovato'
-    put:
-      tags: [Incontri]
-      summary: Modifica un incontro (deprecato, usare PATCH)
-      deprecated: true
-      description: |
-        **Deprecato** (spec 008, fase 1): alias di `PATCH`, con lo stesso corpo e le
-        stesse risposte. Ogni chiamata lascia nel log del backend la riga
-        `[deprecato] PUT <percorso>: usare PATCH`; nella fase 2 risponde 404.
-
         Admin, oppure l'istruttore che lo ha tenuto, che non può cambiare `istruttore_id`
         e può scegliere solo attività a cui è abilitato. Il socio non è modificabile.
 
@@ -1429,35 +1318,6 @@ paths:
       tags: [Impostazioni]
       summary: Modifica i parametri dell'associazione
       description: Solo admin. Si aggiornano solo i campi presenti.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Impostazioni'
-      responses:
-        '200':
-          description: Impostazioni aggiornate
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Impostazioni'
-        '400':
-          $ref: '#/components/responses/RichiestaNonValida'
-        '401':
-          $ref: '#/components/responses/NonAutenticato'
-        '403':
-          $ref: '#/components/responses/AccessoNegato'
-    put:
-      tags: [Impostazioni]
-      summary: Modifica i parametri dell'associazione (deprecato, usare PATCH)
-      deprecated: true
-      description: |
-        **Deprecato** (spec 008, fase 1): alias di `PATCH`, con lo stesso corpo e le
-        stesse risposte. Ogni chiamata lascia nel log del backend la riga
-        `[deprecato] PUT <percorso>: usare PATCH`; nella fase 2 risponde 404.
-
-        Solo admin. Si aggiornano solo i campi presenti.
       requestBody:
         required: true
         content:

@@ -13,7 +13,6 @@ import {
 } from '../middleware/auth.js';
 import { ok, created, noContent, errorResponse } from '../middleware/response.js';
 import { corpoJson } from '../util/corpo.js';
-import { modificaParziale } from '../util/metodi.js';
 import { intParam, paginazioneRichiesta } from '../util/paginazione.js';
 import {
   listSoci,
@@ -101,9 +100,9 @@ export const handler = async (
     }
 
     // -----------------------------------------------------------
-    // PATCH /api/soci/{id}   (PUT: alias deprecato, vedi util/metodi.ts)
+    // PATCH /api/soci/{id}
     // -----------------------------------------------------------
-    if (socioId && modificaParziale(event)) {
+    if (method === 'PATCH' && socioId) {
       requireAdmin(auth);
       const body = corpoJson(event);
       const socio = await updateSocio(socioId, body);
