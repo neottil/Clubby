@@ -12,8 +12,8 @@ post {
 
 body:json {
   {
-    "email": "admin@clubby.local",
-    "password": "Admin12345!"
+    "email": "admin@clubby.dev",
+    "password": "CambiaSubito123"
   }
 }
 
@@ -30,10 +30,10 @@ script:post-response {
 docs {
   Accesso con email e password: salva automaticamente access token e refresh
   token nelle variabili token_admin e refresh_token_admin.
-
+  
   L'access token dura 15 minuti. Quando scade usa "Rinnova sessione admin"
   invece di rifare l'accesso.
-
+  
   Se l'account ha ancora una password temporanea, la risposta contiene
   cambio_password_richiesto: true e le operazioni di amministrazione vengono
   rifiutate finché non viene impostata una password definitiva.
