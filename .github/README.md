@@ -26,6 +26,7 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
     - [`tag.yml`](#tagyml)
     - [`promote.yml`](#promoteyml)
     - [`cleanup-build-tags.yml`](#cleanup-build-tagsyml)
+    - [`cleanup-runs.yml`](#cleanup-runsyml)
   - [Come adattarlo a un altro progetto](#come-adattarlo-a-un-altro-progetto)
 
 ---
@@ -41,6 +42,7 @@ segnalate; il resto è pensato per essere portato così com'è o quasi.
 | [`promote.yml`](workflows/promote.yml) | Manuale (input `environment`, checkbox `deploy_<scope>` e `<scope>_version`), o `workflow_call` dalla Pipeline, un club alla volta, dopo l'approvazione del club | Deploya nell'**ambiente scelto**, cioè in un club, le versioni indicate o, con i campi vuoti, le ultime taggate. **Non tagga né rilascia nulla.** |
 | [`migrate-db.yml`](workflows/migrate-db.yml) | `workflow_call` da build-deploy e promote | Applica le migrazioni di schema ai due database di un ambiente, prima dei deploy. |
 | [`cleanup-build-tags.yml`](workflows/cleanup-build-tags.yml) | Manuale, automatico dopo `tag.yml`, o alla cancellazione di un branch | Ripulisce i tag Git e le immagini Docker superate di un branch. Non elimina mai l'ultimo tag di `main` di ogni scope. |
+| [`cleanup-runs.yml`](workflows/cleanup-runs.yml) | Ogni lunedì notte, manuale, o alla cancellazione di un branch | Cancella le run superate: per workflow e branch restano le ultime 10, su `main` anche gli ultimi 10 rilasci della Pipeline; un branch chiuso perde tutte le sue run. Non tocca mai una run non conclusa. |
 
 Namespace, nomi dei database e cartelle sulla VPS di un ambiente non sono Variables: li ricava dal nome
 dell'Environment la composite action [`actions/ambiente`](actions/ambiente/action.yml), usata da Infra e
@@ -52,7 +54,8 @@ Il flusso di uno sviluppatore, dal branch al club:
 1. aprire il branch `feature/…`, lavorare la spec e provarla in locale;
 2. pushare: la **Pipeline** deploya in `development` solo gli scope cambiati rispetto a `main`;
 3. fare il merge in `main` e **cancellare il branch su GitHub**: la Pipeline deploya il merge in
-   `development`, e la cancellazione lancia da sola **Cleanup build tags** sul branch chiuso;
+   `development`, e la cancellazione lancia da sola **Cleanup build tags** e **Cleanup run** sul branch
+   chiuso;
 4. nella run della Pipeline partita dal merge, **approvare Tag** e poi **approvare i club** da aggiornare
    (*Review deployments*): ogni club approvato riceve Promote.
 
@@ -625,6 +628,30 @@ cancellare davvero. Chiude con un **riepilogo** nella pagina della run (come `in
 scope, i tag Git e le immagini Docker eliminate — o che verrebbero eliminate in dry-run, con i verbi al
 condizionale — e i tag mantenuti. Ha `if: always()`, così dopo un fallimento a metà si legge comunque
 cosa era già stato toccato.
+
+### `cleanup-runs.yml`
+
+**Trigger**: ogni lunedì alle 3 UTC (`schedule`, default e `dry_run=false`), manuale, oppure alla
+cancellazione di un branch su GitHub (evento `delete`: solo le run di quel branch, `dry_run=false`).
+Input della partenza manuale: `keep` (default `10`), `keep_releases` (default `10`) e `dry_run` (default
+`true`). Spec 011.
+
+**Cosa fa**: cancella le run dei workflow, non tag né immagini (quelli sono di `cleanup-build-tags.yml`).
+Raggruppa le run per (workflow, branch) e tiene le ultime `keep` concluse. Sulla Pipeline di `main` tiene
+in più le ultime `keep_releases` **run di rilascio**, cioè quelle con il job `approva-tag` riuscito: sono lo
+storico di cosa è andato in produzione, e la cronologia degli Environment dei club punta lì. Le run di un
+branch che non esiste più su GitHub si cancellano tutte; la run settimanale recupera anche i branch chiusi
+prima che il workflow esistesse. Una run **non conclusa** (in coda, in corso, ferma a `approvazione-tag` o
+a un `approvazione-<club>`) non si tocca mai.
+
+I job si leggono (`/actions/runs/{id}/jobs`) solo per le run di `main` della Pipeline e solo finché non
+si sono trovati tutti i rilasci da tenere. Una singola run cancella al massimo **500** run (`MAX_DELETE`),
+perché il `GITHUB_TOKEN` ha 1000 richieste l'ora: le altre restano per la volta dopo, e il riepilogo lo
+dice. Il riepilogo riporta, per workflow, quante run restano e quante se ne cancellano con il motivo, e
+l'elenco delle run cancellate con il link. Permessi: `actions: write`, `contents: read`.
+
+Cancellare una run non rompe niente: nessun workflow legge `run_id` o artefatti di altre run. Come per
+`cleanup-build-tags.yml`, `schedule` e `delete` partono solo dal file presente nel branch predefinito.
 
 ## Come adattarlo a un altro progetto
 

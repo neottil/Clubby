@@ -8,11 +8,11 @@ senza deployare nulla) e, dopo un'approvazione per club, **Promote** (deploya le
 nell'ambiente di un club, senza taggare nulla; si lancia anche a mano); **Deploy Backend**/**Deploy
 Frontend**/**Deploy Authorizer** sono workflow riutilizzabili (nessun trigger proprio) che applicano
 davvero i manifest k8s, chiamati sia dalla `Pipeline` sia da `Promote`; **Cleanup build tags** ripulisce i
-tag di build superati.
+tag di build superati, **Cleanup run** le run dei workflow superate.
 
 Il flusso di uno sviluppatore: branch `feature/…` → push (deploy in `development` dei soli scope cambiati
 rispetto a `main`) → merge in `main` e **cancellazione del branch su GitHub** (deploy del merge in
-`development`, e pulizia automatica dei tag del branch chiuso) → nella run partita dal merge, approvazione
+`development`, e pulizia automatica dei tag e delle run del branch chiuso) → nella run partita dal merge, approvazione
 di Tag e poi dei club da aggiornare.
 
 **GitHub Environments**: i job di build e deploy della `Pipeline` sono agganciati (job-level
@@ -214,6 +214,31 @@ Input:
 Al termine scrive un **riepilogo** nella pagina della run: come è partito, i parametri e, per ciascuno
 scope, i tag Git e le immagini Docker eliminate, oltre ai tag mantenuti. In `dry_run` il riepilogo è al
 condizionale e lo dichiara in apertura.
+
+## `Cleanup run` ([cleanup-runs.yml](../../.github/workflows/cleanup-runs.yml))
+
+Cancella le **run** dei workflow superate, perché la scheda Actions mostri solo quelle che interessano
+(spec 011). Tag Git e immagini restano compito di **Cleanup build tags**.
+
+Cosa resta:
+- per ciascun workflow e ciascun branch che esiste su GitHub, le ultime **10** run concluse;
+- sulla `Pipeline` di `main`, in più, le ultime **10 run di rilascio** (job `approva-tag` riuscito):
+  lo storico di cosa è andato in produzione;
+- ogni run **non conclusa**: in coda, in corso o ferma a un'approvazione di Tag o di un club.
+
+Le run di un branch cancellato su GitHub si cancellano tutte.
+
+Tre modi di partire:
+- **ogni lunedì alle 3 UTC**, con i valori sopra: recupera anche i branch chiusi prima che il workflow
+  esistesse;
+- **alla cancellazione di un branch su GitHub**: solo le run di quel branch;
+- **a mano**, con gli input `keep` (default `10`), `keep_releases` (default `10`) e `dry_run` (default
+  `true`).
+
+Una run cancella al massimo 500 run, per stare nel limite dell'API: l'eventuale arretrato si smaltisce
+nelle settimane successive, e il riepilogo dice quante ne restano. Il riepilogo nella pagina della run
+mostra, per workflow, quante run restano e quante se ne cancellano con il motivo, più l'elenco con i link.
+Le partenze automatiche funzionano solo da `main`: la prima volta conviene lanciarlo a mano in dry run.
 
 ## Approvazioni del rilascio
 

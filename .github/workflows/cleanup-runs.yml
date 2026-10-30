@@ -1,0 +1,289 @@
+name: Cleanup run
+
+# Cancella le run dei workflow che non servono più, perché la scheda Actions
+# mostri solo quelle che interessano (spec 011). Non tocca tag Git né immagini
+# Docker: quelli sono compito di cleanup-build-tags.yml.
+#
+# Cosa resta, per ciascun workflow e per ciascun branch che esiste su GitHub:
+# - le ultime `keep` run concluse (default 10);
+# - su main, per la Pipeline, anche le ultime `keep_releases` run di rilascio
+#   (default 10), cioè quelle in cui il job approva-tag è riuscito: sono lo
+#   storico di cosa è andato in produzione, e la cronologia degli Environment
+#   dei club punta lì;
+# - tutte le run non concluse: in coda, in corso, o ferme a un'approvazione
+#   (approvazione-tag, approvazione-<club>). Una run ferma a un gate può
+#   restarci giorni, e cancellarla toglierebbe il rilascio da approvare.
+# Le run di un branch che non esiste più su GitHub si cancellano tutte.
+#
+# Tre modi di partire:
+# - ogni lunedì notte (schedule), con i default e dry_run=false: recupera
+#   anche i branch cancellati prima che questo workflow esistesse;
+# - alla CANCELLAZIONE di un branch su GitHub (evento "delete"): solo le run
+#   di quel branch, tutte. Come per cleanup-build-tags, GitHub lancia
+#   schedule e delete solo per i workflow presenti nel branch predefinito;
+# - a mano, con gli input sotto e dry_run=true di default.
+#
+# Cancellare una run non rompe niente: nessun workflow legge run_id o
+# artefatti di altre run (Pipeline e Tag lavorano sui tag Git).
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: 'Run concluse da tenere per ciascun workflow e branch'
+        required: false
+        default: '10'
+      keep_releases:
+        description: 'Run di rilascio della Pipeline su main (approva-tag riuscito) da tenere in più'
+        required: false
+        default: '10'
+      dry_run:
+        description: 'Se true, elenca solo cosa verrebbe cancellato, senza cancellare nulla'
+        type: boolean
+        default: true
+  delete:
+
+# Due pulizie insieme si contenderebbero le stesse run: la seconda aspetta.
+concurrency:
+  group: cleanup-runs
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    # Sull'evento delete: solo i branch, mai main (come cleanup-build-tags).
+    if: >-
+      github.event_name != 'delete' ||
+      (github.event.ref_type == 'branch' && github.event.ref != 'main')
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      # Una run ne cancella al massimo tante: il limite dell'API per il
+      # GITHUB_TOKEN è di 1000 richieste l'ora, e la prima esecuzione ha
+      # un arretrato. Quelle in eccesso restano per la run successiva.
+      MAX_DELETE: '500'
+      # Il workflow della Pipeline, di cui si riconoscono le run di rilascio.
+      PIPELINE_FILE: build-deploy.yml
+    steps:
+      # Come in cleanup-build-tags: quello che viene da fuori (input, nome del
+      # branch cancellato) arriva agli script solo come variabile d'ambiente.
+      - name: Determina i parametri
+        id: params
+        env:
+          EVENTO: ${{ github.event_name }}
+          BRANCH_CANCELLATO: ${{ github.event.ref }}
+          IN_KEEP: ${{ inputs.keep }}
+          IN_KEEP_RELEASES: ${{ inputs.keep_releases }}
+          IN_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          case "$EVENTO" in
+            delete)
+              BRANCH="$BRANCH_CANCELLATO"; KEEP=10; KEEP_RELEASES=10; DRY_RUN=false
+              ORIGINE="cancellazione del branch" ;;
+            schedule)
+              BRANCH=""; KEEP=10; KEEP_RELEASES=10; DRY_RUN=false
+              ORIGINE="settimanale" ;;
+            *)
+              BRANCH=""; KEEP="$IN_KEEP"; KEEP_RELEASES="$IN_KEEP_RELEASES"; DRY_RUN="$IN_DRY_RUN"
+              ORIGINE="manuale" ;;
+          esac
+
+          for N in "$KEEP" "$KEEP_RELEASES"; do
+            if ! [[ "$N" =~ ^[0-9]+$ ]] || [ "$N" -lt 1 ]; then
+              echo "::error::keep e keep_releases devono essere numeri interi da 1 in su (ricevuto '$N')."
+              exit 1
+            fi
+          done
+
+          {
+            echo "branch=$BRANCH"
+            echo "keep=$KEEP"
+            echo "keep_releases=$KEEP_RELEASES"
+            echo "dry_run=$DRY_RUN"
+            echo "origine=$ORIGINE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Avvio: $ORIGINE. branch=${BRANCH:-tutti} keep=$KEEP keep_releases=$KEEP_RELEASES dry_run=$DRY_RUN"
+
+      # Scarica l'elenco delle run e dei branch esistenti. Sull'evento delete
+      # basta il branch cancellato (filtro lato API); altrimenti tutte, senza
+      # filtri: con un filtro l'API si ferma a 1000 risultati.
+      - name: Elenca run e branch
+        env:
+          BRANCH: ${{ steps.params.outputs.branch }}
+        run: |
+          mkdir -p /tmp/runs
+          if [ -n "$BRANCH" ]; then
+            gh api -X GET "repos/$REPO/actions/runs" -f per_page=100 -f branch="$BRANCH" --paginate \
+              --jq '.workflow_runs[]' > /tmp/runs/raw.jsonl
+          else
+            gh api -X GET "repos/$REPO/actions/runs" -f per_page=100 --paginate \
+              --jq '.workflow_runs[]' > /tmp/runs/raw.jsonl
+          fi
+          jq -s '[.[] | {id, workflow_id, name, head_branch, status, conclusion, created_at, run_number, html_url}]
+                 | sort_by(.created_at) | reverse' /tmp/runs/raw.jsonl > /tmp/runs/runs.json
+
+          gh api "repos/$REPO/branches?per_page=100" --paginate --jq '.[].name' > /tmp/runs/branches.txt
+          jq -R . /tmp/runs/branches.txt | jq -s . > /tmp/runs/branches.json
+
+          gh api "repos/$REPO/actions/workflows/$PIPELINE_FILE" --jq '.id' > /tmp/runs/pipeline_id.txt
+
+          echo "Run trovate: $(jq length /tmp/runs/runs.json). Branch esistenti: $(wc -l < /tmp/runs/branches.txt)."
+
+      # Decide run per run, senza ancora guardare i job. Per ciascun gruppo
+      # (workflow, branch) numera le run concluse dalla più recente: le prime
+      # `keep` restano. Le run concluse di main della Pipeline sono tutte
+      # "da verificare": se sono di rilascio lo dice lo step successivo.
+      - name: Calcola cosa tenere
+        env:
+          KEEP: ${{ steps.params.outputs.keep }}
+        run: |
+          jq --argjson keep "$KEEP" \
+             --slurpfile branches /tmp/runs/branches.json \
+             --argjson pipeline "$(cat /tmp/runs/pipeline_id.txt)" '
+            ($branches[0]) as $esistenti
+            | group_by([.workflow_id, .head_branch])
+            | map(
+                ([.[] | select(.status == "completed")] | sort_by(.created_at) | reverse | map(.id)) as $concluse
+                | map(. as $r
+                    | ($concluse | index($r.id)) as $pos
+                    | . + {decisione:
+                        (if .status != "completed" then "tieni:non conclusa"
+                         elif .head_branch == null then "tieni:senza branch"
+                         elif ($esistenti | index($r.head_branch)) == null then "cancella:branch chiuso"
+                         elif .head_branch == "main" and .workflow_id == $pipeline then "verifica:rilascio"
+                         elif $pos < $keep then "tieni:recente"
+                         else "cancella:oltre le ultime \($keep)" end),
+                      posizione: $pos})
+              )
+            | add // [] | sort_by(.created_at) | reverse
+          ' /tmp/runs/runs.json > /tmp/runs/piano.json
+
+      # Run concluse della Pipeline su main, dalla più recente: le prime
+      # `keep` restano comunque; in più restano le ultime `keep_releases` di
+      # rilascio, ovunque siano. Si leggono i job solo finché non si sono
+      # trovati tutti i rilasci da tenere: da lì in poi, oltre le prime
+      # `keep`, si cancella senza guardare.
+      - name: Riconosci le run di rilascio
+        env:
+          KEEP: ${{ steps.params.outputs.keep }}
+          KEEP_RELEASES: ${{ steps.params.outputs.keep_releases }}
+        run: |
+          : > /tmp/runs/esito_main.tsv
+          TROVATI=0
+          while IFS=$'\t' read -r ID POS; do
+            RILASCIO=false
+            if [ "$TROVATI" -lt "$KEEP_RELEASES" ]; then
+              ESITO=$(gh api "repos/$REPO/actions/runs/$ID/jobs?filter=latest&per_page=100" \
+                --jq '[.jobs[] | select(.name == "approva-tag") | .conclusion] | first // ""')
+              if [ "$ESITO" = "success" ]; then
+                RILASCIO=true
+                TROVATI=$((TROVATI + 1))
+              fi
+            fi
+            if [ "$POS" -lt "$KEEP" ]; then
+              $RILASCIO && D="tieni:recente (rilascio)" || D="tieni:recente"
+            elif $RILASCIO; then
+              D="tieni:rilascio"
+            else
+              D="cancella:oltre le ultime $KEEP"
+            fi
+            printf '%s\t%s\n' "$ID" "$D" >> /tmp/runs/esito_main.tsv
+          done < <(jq -r '.[] | select(.decisione == "verifica:rilascio") | [.id, .posizione] | @tsv' /tmp/runs/piano.json)
+
+          jq --rawfile esiti /tmp/runs/esito_main.tsv '
+            ($esiti | split("\n") | map(select(. != "") | split("\t") | {(.[0]): .[1]}) | add // {}) as $m
+            | map(if .decisione == "verifica:rilascio" then .decisione = $m[(.id | tostring)] else . end)
+          ' /tmp/runs/piano.json > /tmp/runs/piano_finale.json
+          echo "Run di rilascio trovate fra quelle lette: $TROVATI"
+
+      - name: Cancella le run
+        env:
+          DRY_RUN: ${{ steps.params.outputs.dry_run }}
+        run: |
+          : > /tmp/runs/cancellate.txt
+          N=0
+          while IFS=$'\t' read -r ID; do
+            if [ "$N" -ge "$MAX_DELETE" ]; then
+              break
+            fi
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "[dry-run] Cancellerei la run $ID"
+            else
+              # Una run sparita nel frattempo (cancellata a mano) non è un
+              # errore: si va avanti.
+              gh api -X DELETE "repos/$REPO/actions/runs/$ID" --silent || echo "::warning::Run $ID non cancellata"
+            fi
+            echo "$ID" >> /tmp/runs/cancellate.txt
+            N=$((N + 1))
+          done < <(jq -r '.[] | select(.decisione | startswith("cancella:")) | .id' /tmp/runs/piano_finale.json)
+          echo "Run cancellate (o da cancellare): $N"
+
+      # Riepilogo nella pagina della run. if: always(): dopo un errore a metà
+      # dice comunque cosa era già stato toccato.
+      - name: Riepilogo
+        if: always()
+        env:
+          BRANCH: ${{ steps.params.outputs.branch }}
+          KEEP: ${{ steps.params.outputs.keep }}
+          KEEP_RELEASES: ${{ steps.params.outputs.keep_releases }}
+          DRY_RUN: ${{ steps.params.outputs.dry_run }}
+          ORIGINE: ${{ steps.params.outputs.origine }}
+          STATO: ${{ job.status }}
+        run: |
+          PIANO=/tmp/runs/piano_finale.json
+          [ -s "$PIANO" ] || PIANO=/tmp/runs/piano.json
+          [ -s "$PIANO" ] || echo '[]' > "$PIANO"
+          [ -f /tmp/runs/cancellate.txt ] || : > /tmp/runs/cancellate.txt
+
+          if [ "$DRY_RUN" = "true" ]; then VERBO="Da cancellare"; else VERBO="Cancellate"; fi
+          FATTE=$(wc -l < /tmp/runs/cancellate.txt)
+          PREVISTE=$(jq '[.[] | select(.decisione | startswith("cancella:"))] | length' "$PIANO")
+
+          {
+            echo "## Cleanup run — riepilogo ($STATO)"
+            echo ""
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "> **Prova a vuoto** (\`dry_run=true\`): non è stata cancellata nessuna run."
+              echo "> Rilancia con \`dry_run=false\` per applicare quanto segue."
+              echo ""
+            fi
+            echo "| Parametro | Valore |"
+            echo "|---|---|"
+            echo "| avvio | $ORIGINE |"
+            echo "| branch | \`${BRANCH:-tutti}\` |"
+            echo "| keep | \`$KEEP\` |"
+            echo "| keep_releases | \`$KEEP_RELEASES\` |"
+            echo "| dry_run | \`$DRY_RUN\` |"
+            echo ""
+            if [ "$PREVISTE" -gt "$FATTE" ]; then
+              echo "⚠️ $((PREVISTE - FATTE)) run oltre il limite di $MAX_DELETE per esecuzione: restano per la prossima."
+              echo ""
+            fi
+            echo "### Per workflow"
+            echo ""
+            echo "| Workflow | Tenute | $VERBO | Motivi |"
+            echo "|---|---|---|---|"
+            jq -r --rawfile fatte /tmp/runs/cancellate.txt '
+              ($fatte | split("\n") | map(select(. != ""))) as $ids
+              | map(select(.decisione != null))
+              | group_by(.name)[]
+              | (map(select(.decisione | startswith("tieni:"))) | length) as $tenute
+              | (map(select((.id | tostring) as $i | $ids | index($i))) | length) as $canc
+              | (map(.decisione) | group_by(.) | map("\(.[0]): \(length)") | join(", ")) as $motivi
+              | "| \(.[0].name) | \($tenute) | \($canc) | \($motivi) |"
+            ' "$PIANO"
+            echo ""
+            echo "<details><summary>$VERBO ($FATTE)</summary>"
+            echo ""
+            jq -r --rawfile fatte /tmp/runs/cancellate.txt '
+              ($fatte | split("\n") | map(select(. != ""))) as $ids
+              | .[] | select((.id | tostring) as $i | $ids | index($i))
+              | "- [\(.name) #\(.run_number)](\(.html_url)) `\(.head_branch // "-")` \(.created_at[0:10]) — \(.decisione | sub("^cancella:"; ""))"
+            ' "$PIANO"
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
