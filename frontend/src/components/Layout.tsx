@@ -5,6 +5,7 @@ import { theme } from '../theme';
 import { config } from '../config';
 import { createApiClient } from '../api/client';
 import { MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
+import { inAppInstallata, installa, mostraIstruzioniIos, suSafariIos, useInstallabile } from '../utils/installazione';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -25,6 +26,12 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [spiegazioneAperta, setSpiegazioneAperta] = useState('');
+  // "Installa l'app" solo dove l'app non è già installata. Dove il browser lo
+  // permette da un pulsante (Chrome e simili) apre la sua finestra; su Safari
+  // per iPhone, che non ha un pulsante da offrire, riapre le istruzioni
+  // dell'avviso (vedi AvvisiApp), anche dopo che l'avviso è stato chiuso.
+  const installabile = useInstallabile();
+  const [istruzioniIos] = useState(() => suSafariIos() && !inAppInstallata());
 
   // Il modulo Ricevute acceso non basta: senza intestazione la pagina
   // produrrebbe documenti monchi e irreversibili. null = non ancora saputo,
@@ -163,6 +170,18 @@ export default function Layout({ children }: LayoutProps) {
                 {link.label}
               </Link>
             )))}
+            {(installabile || istruzioniIos) && (
+              <button
+                style={styles.menuInstallaBtn}
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (installabile) void installa();
+                  else mostraIstruzioniIos();
+                }}
+              >
+                Installa l'app
+              </button>
+            )}
             {user && (
               <>
                 <div style={styles.menuDivider} />
@@ -302,6 +321,23 @@ const styles: Record<string, React.CSSProperties> = {
     color: theme.navText,
     fontSize: 13,
     lineHeight: 1.5,
+  },
+  // Stessa metrica di menuLink: è una voce del menu, solo che apre la
+  // finestra del browser invece di una pagina.
+  menuInstallaBtn: {
+    color: theme.navText,
+    background: 'transparent',
+    border: 'none',
+    padding: '12px 14px',
+    minHeight: 44,
+    display: 'flex',
+    alignItems: 'center',
+    borderRadius: 6,
+    fontSize: 15,
+    fontWeight: 500,
+    fontFamily: 'inherit',
+    textAlign: 'left',
+    cursor: 'pointer',
   },
   menuDivider: {
     height: 1,

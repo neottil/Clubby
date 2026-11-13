@@ -52,8 +52,9 @@ interface AuthContextValue {
    * non fa l'abbinamento; null finché non lo si è ancora saputo.
    */
   socioCollegato: boolean | null;
-  login: (email: string, password: string) => Promise<void>;
-  register: (dati: DatiRegistrazione) => Promise<void>;
+  /** `restaCollegato`: la sessione sopravvive alla chiusura del browser e dell'app. */
+  login: (email: string, password: string, restaCollegato?: boolean) => Promise<void>;
+  register: (dati: DatiRegistrazione, restaCollegato?: boolean) => Promise<void>;
   cambiaPassword: (attuale: string, nuova: string) => Promise<void>;
   logout: () => void;
 }
@@ -61,6 +62,28 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const CHIAVE_TOKEN = 'clubby_tokens';
+
+/**
+ * Dove sta la sessione (spec 012).
+ *
+ * Di default in sessionStorage: muore con la scheda, come prima. Con "Resta
+ * collegato" in localStorage, che sopravvive alla chiusura del browser e
+ * dell'app installata fino alla scadenza del refresh token. La scelta è
+ * esplicita perché un PC condiviso non deve restare collegato da solo.
+ */
+function archivio(persistente: boolean): Storage {
+  return persistente ? localStorage : sessionStorage;
+}
+
+function leggiDa(storage: Storage): TokenSet | null {
+  const raw = storage.getItem(CHIAVE_TOKEN);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as TokenSet;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Legge il payload del JWT senza verificarne la firma: serve solo a sapere
@@ -103,22 +126,35 @@ function utenteDa(token: string): AuthUser | null {
   };
 }
 
-function leggiTokenSalvati(): TokenSet | null {
-  const raw = sessionStorage.getItem(CHIAVE_TOKEN);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as TokenSet;
-  } catch {
-    return null;
-  }
+/**
+ * La sessione salvata, e se è persistente. Prima la scheda: una sessione
+ * aperta qui senza "Resta collegato" vale più di una persistente lasciata da
+ * un accesso precedente.
+ */
+function leggiTokenSalvati(): { tokenSet: TokenSet | null; persistente: boolean } {
+  const diScheda = leggiDa(sessionStorage);
+  if (diScheda) return { tokenSet: diScheda, persistente: false };
+  const persistente = leggiDa(localStorage);
+  return { tokenSet: persistente, persistente: persistente !== null };
+}
+
+/**
+ * Esegue `fn` in esclusiva fra le schede e le finestre dell'app aperte sullo
+ * stesso dispositivo, dove il browser lo permette (Web Locks). Serve al
+ * rinnovo della sessione persistente, che tutte condividono: vedi
+ * rinnovaSessione.
+ */
+function inEsclusiva<T>(fn: () => Promise<T>): Promise<T> {
+  return navigator.locks ? navigator.locks.request('clubby-rinnovo', () => fn()) as Promise<T> : fn();
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [tokenSet, setTokenSet] = useState<TokenSet | null>(leggiTokenSalvati);
+  const [salvati] = useState(leggiTokenSalvati);
+  const [tokenSet, setTokenSet] = useState<TokenSet | null>(salvati.tokenSet);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   // true collegato, false nessun socio da collegare, null non ancora saputo
-  // (sessione ripresa da sessionStorage, o tentativo fallito).
+  // (sessione ripresa dal browser, o tentativo fallito).
   const [socioCollegato, setSocioCollegato] = useState<boolean | null>(null);
   const tokenTentato = useRef<string | null>(null);
   const timerRinnovo = useRef<number | null>(null);
@@ -130,21 +166,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // (rotazione): due rinnovi in parallelo con lo stesso token farebbero
   // fallire il secondo, e l'utente verrebbe disconnesso senza motivo.
   const rinnovoInCorso = useRef<Promise<string | null> | null>(null);
+  // La sessione corrente sta in localStorage ("Resta collegato")? Decisa
+  // all'accesso, vale anche per i rinnovi e per il cambio password.
+  const persistenteRef = useRef(salvati.persistente);
 
-  const salvaSessione = useCallback((sessione: Sessione) => {
-    const ts: TokenSet = {
-      accessToken: sessione.access_token,
-      refreshToken: sessione.refresh_token,
-      expiresAt: Date.now() + sessione.expires_in * 1000,
-    };
-    sessionStorage.setItem(CHIAVE_TOKEN, JSON.stringify(ts));
+  /** Adotta in memoria una sessione già salvata (da questa o da un'altra scheda). */
+  const usaSessione = useCallback((ts: TokenSet) => {
     tokenRef.current = ts;
     setTokenSet(ts);
     setSessionExpired(false);
   }, []);
 
+  const salvaSessione = useCallback((sessione: Sessione, persistente = persistenteRef.current) => {
+    const ts: TokenSet = {
+      accessToken: sessione.access_token,
+      refreshToken: sessione.refresh_token,
+      expiresAt: Date.now() + sessione.expires_in * 1000,
+    };
+    persistenteRef.current = persistente;
+    archivio(persistente).setItem(CHIAVE_TOKEN, JSON.stringify(ts));
+    // Una sessione sola: passando da un modo all'altro non resta indietro
+    // quella vecchia, che al prossimo avvio verrebbe ripresa al posto di questa.
+    archivio(!persistente).removeItem(CHIAVE_TOKEN);
+    usaSessione(ts);
+  }, [usaSessione]);
+
   const pulisci = useCallback(() => {
+    // Da entrambi: "Esci" deve chiudere anche una sessione persistente, e le
+    // altre schede la vedono sparire (evento storage, sotto).
     sessionStorage.removeItem(CHIAVE_TOKEN);
+    localStorage.removeItem(CHIAVE_TOKEN);
     tokenRef.current = null;
     setTokenSet(null);
     setSocioCollegato(null);
@@ -172,10 +223,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    */
   const rinnovaSessione = useCallback((): Promise<string | null> => {
     if (rinnovoInCorso.current) return rinnovoInCorso.current;
-    const attuale = tokenRef.current;
-    if (!attuale) return Promise.resolve(null);
+    if (!tokenRef.current) return Promise.resolve(null);
 
-    rinnovoInCorso.current = (async () => {
+    /**
+     * Con "Resta collegato" la sessione è una sola per tutte le schede e le
+     * finestre dell'app aperte sul dispositivo, e il refresh token vale una
+     * volta sola: se due rinnovassero insieme, la seconda verrebbe respinta e
+     * disconnetterebbe tutti. Il rinnovo avviene quindi in esclusiva, e chi
+     * arriva per secondo trova in localStorage la sessione già rinnovata
+     * dall'altra e la adotta invece di rinnovare di nuovo.
+     */
+    const giaRinnovataAltrove = (): TokenSet | null => {
+      if (!persistenteRef.current) return null;
+      const salvata = leggiDa(localStorage);
+      return salvata && salvata.refreshToken !== tokenRef.current?.refreshToken ? salvata : null;
+    };
+
+    rinnovoInCorso.current = inEsclusiva(async () => {
+      const altrove = giaRinnovataAltrove();
+      if (altrove) {
+        usaSessione(altrove);
+        if (altrove.expiresAt - Date.now() > 60_000) return altrove.accessToken;
+      }
+      const attuale = tokenRef.current;
+      if (!attuale) return null;
       try {
         const sessione = await authApi.rinnova(attuale.refreshToken);
         salvaSessione(sessione);
@@ -185,18 +256,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // valida, disconnettere sarebbe sbagliato. Si riproverà alla prossima
         // chiamata o al ritorno sulla scheda.
         if (e instanceof AuthError && e.status === 0) return null;
+        // Respinto perché un'altra scheda, senza Web Locks, ha rinnovato nel
+        // frattempo: la sua sessione è buona.
+        const nelFrattempo = giaRinnovataAltrove();
+        if (nelFrattempo) {
+          usaSessione(nelFrattempo);
+          return nelFrattempo.accessToken;
+        }
         // Il refresh token è scaduto o è stato revocato (logout altrove,
         // cambio password, disattivazione): non c'è modo di recuperare in
         // silenzio, serve un nuovo accesso.
         pulisci();
         setSessionExpired(true);
         return null;
-      } finally {
-        rinnovoInCorso.current = null;
       }
-    })();
+    }).finally(() => {
+      rinnovoInCorso.current = null;
+    });
     return rinnovoInCorso.current;
-  }, [salvaSessione, pulisci]);
+  }, [salvaSessione, usaSessione, pulisci]);
+
+  /**
+   * Sessione persistente cambiata da un'altra scheda o finestra dell'app:
+   * rinnovata, e allora si usa la nuova; chiusa con "Esci", e allora si esce
+   * anche qui. Il browser manda l'evento solo alle ALTRE schede, e solo per
+   * localStorage: le sessioni di scheda non ne sono toccate.
+   */
+  useEffect(() => {
+    const allineaAltreSchede = (e: StorageEvent) => {
+      if (e.storageArea !== localStorage || e.key !== CHIAVE_TOKEN) return;
+      // Chi ha una sessione di scheda la tiene: è un accesso diverso.
+      if (tokenRef.current && !persistenteRef.current) return;
+      const nuova = e.newValue ? leggiDa(localStorage) : null;
+      if (nuova) {
+        persistenteRef.current = true;
+        usaSessione(nuova);
+      } else if (tokenRef.current) {
+        pulisci();
+      }
+    };
+    window.addEventListener('storage', allineaAltreSchede);
+    return () => window.removeEventListener('storage', allineaAltreSchede);
+  }, [usaSessione, pulisci]);
 
   useEffect(() => {
     setTokenRefresher(rinnovaSessione);
@@ -263,11 +364,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, restaCollegato = false) => {
     setIsLoading(true);
     try {
       const sessione = await authApi.login(email, password);
-      salvaSessione(sessione);
+      salvaSessione(sessione, restaCollegato);
       await verificaSocio(sessione.access_token);
     } finally {
       setIsLoading(false);
@@ -279,11 +380,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * collegata: è un'operazione che spetta a un amministratore, e fino ad
    * allora l'account esiste ma non vede dati.
    */
-  const register = useCallback(async (dati: DatiRegistrazione) => {
+  const register = useCallback(async (dati: DatiRegistrazione, restaCollegato = false) => {
     setIsLoading(true);
     try {
       const sessione = await authApi.registra(dati);
-      salvaSessione(sessione);
+      salvaSessione(sessione, restaCollegato);
       await verificaSocio(sessione.access_token);
     } finally {
       setIsLoading(false);
@@ -291,7 +392,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [salvaSessione, verificaSocio]);
 
   /**
-   * Sessione ripresa da sessionStorage (ricarica della pagina): lo stato del
+   * Sessione ripresa dal browser (ricarica della pagina, app riaperta): lo stato del
    * collegamento non è noto in questo giro, quindi si chiede ora. Una volta
    * per token, così il rinnovo periodico non lo ripete.
    */

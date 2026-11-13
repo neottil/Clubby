@@ -5,6 +5,9 @@
 #                  pagina Info
 #   /config.json   configurazione del club: nome, indirizzi di API e
 #                  authorizer, tema e logo, letta dal browser all'avvio
+#   /manifest.webmanifest
+#                  manifest dell'app installabile (spec 012): nome, icone e
+#                  colori del club sulla schermata Home
 #
 # Nessuno dei due è compilato nel bundle. La versione non potrebbe esserlo:
 # APP_VERSION è il tag che QUESTO deploy mette in esecuzione — tag di data da
@@ -13,8 +16,9 @@
 # esserlo: la stessa immagine serve tutti i club, e ciascuno riceve la propria
 # da qui.
 #
-# FRONTEND_CONFIG_JSON è costruito da deploy-frontend.yml con jq: già su una
-# riga e con gli escape JSON, quindi sicuro anche con virgolette nel nome.
+# FRONTEND_CONFIG_JSON e FRONTEND_MANIFEST_JSON sono costruiti da
+# deploy-frontend.yml con jq: già su una riga e con gli escape JSON, quindi
+# sicuri anche con virgolette nel nome.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -25,3 +29,5 @@ data:
     {"version":"${APP_VERSION}"}
   config.json: |
     ${FRONTEND_CONFIG_JSON}
+  manifest.webmanifest: |
+    ${FRONTEND_MANIFEST_JSON}

@@ -342,7 +342,7 @@ jobs:
             echo "TENANT_NAME=<nome del club mostrato nell'app>"
             echo '```'
             echo ""
-            echo "Facoltative: \`THEME_PRIMARY\`, \`THEME_PRIMARY_TEXT\`, \`THEME_DANGER\`, \`THEME_SUCCESS\`,"
+            echo "Facoltative: \`TENANT_SHORT_NAME\`, \`THEME_PRIMARY\`, \`THEME_PRIMARY_TEXT\`, \`THEME_DANGER\`, \`THEME_SUCCESS\`,"
             echo "\`THEME_NAV_BG\`, \`THEME_NAV_TEXT\`, \`LOGO_FILE\`, \`SSH_PORT\`, \`BACKEND_PORT\`, \`AUTH_PORT\`, \`DB_PORT\`."
             echo "Il deploy richiede inoltre il Secret \`GHCR_PAT\` (non generato da Infra), oltre a \`SSH_HOST\`,"
             echo "\`SSH_USER\` e \`SSH_PRIVATE_KEY\` già usati qui. Elenco completo nel README, sezione"

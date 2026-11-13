@@ -72,7 +72,7 @@ amministra.
 
 | Account | Ruolo | Password |
 |---|---|---|
-| `admin@clubby.local` | admin, **senza scheda socio** | `INITIAL_ADMIN_PASSWORD` |
+| `admin@clubby.dev` | admin, **senza scheda socio** | `INITIAL_ADMIN_PASSWORD` |
 | `marco.bianchi@clubby.dev` | istruttore | `DEMO_PASSWORD` |
 | `elena.ferrari@clubby.dev` | istruttore | `DEMO_PASSWORD` |
 | `luca.moretti@clubby.dev` | socio | `DEMO_PASSWORD` |

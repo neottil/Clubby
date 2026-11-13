@@ -62,6 +62,25 @@ Come si prepara e si avvia l'ambiente di sviluppo. Cosa fa il prodotto sta in
 L'amministratore iniziale viene creato solo se il database degli account è vuoto. Per
 ripartire da zero: `docker compose down -v` e poi di nuovo `docker compose up -d`.
 
+### Provare l'app installabile (PWA)
+
+Con `npm run dev` il service worker **non** si registra: il dev server ricarica i moduli a ogni modifica,
+e una cache davanti lo intralcerebbe. Per provare installazione, avviso "Aggiorna" e avvio offline
+(spec 012) serve la build:
+
+```bash
+cd frontend
+npm run build && npm run preview
+```
+
+e poi http://localhost:4173. Backend e authorizer restano quelli di `npm run dev`. In locale vale il
+manifest statico `frontend/public/manifest.webmanifest`, con nome e logo di Clubby: quello di un club lo
+genera il deploy. Per ripartire puliti dopo una prova: DevTools › Application › Storage › **Clear site
+data**, che toglie service worker, cache e sessione salvata.
+
+Le icone dell'app (`frontend/public/branding/icone/`) le genera `frontend/scripts/genera-icone.mjs`
+prima di ogni `dev` e `build`, a partire dai loghi in `branding/`.
+
 ## Gestione container
 
 | Comando | Descrizione |

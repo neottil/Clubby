@@ -106,7 +106,8 @@ Le immagini Docker sono le stesse per tutti i club; ciò che li distingue arriva
   namespace;
 - il frontend legge all'avvio `/config.json`, generato dalle Variables dell'Environment: nome del club
   (`TENANT_NAME`), colori (`THEME_*`) e logo (`LOGO_FILE`, uno dei file in `branding/`,
-  inclusi nell'immagine).
+  inclusi nell'immagine). Allo stesso modo nginx serve `/manifest.webmanifest`, con cui ogni club si
+  installa come app a sé, con il proprio nome e la propria icona (spec 012).
 
 Attività, costi e istruttori **non** sono variabili d'ambiente: sono dati del tenant, gestiti dal
 pagina Impostazioni della sua istanza. Cambiarli non richiede una nuova build del frontend, e le

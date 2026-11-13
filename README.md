@@ -5,7 +5,8 @@ soci, incontri, voucher prepagati, tesseramenti e ricevute.
 
 Tre moduli indipendenti, deployati separatamente:
 
-- **Frontend** — React 19 + Vite + TypeScript
+- **Frontend** — React 19 + Vite + TypeScript, installabile come app (PWA) sulla schermata Home di
+  Android e iPhone: niente store, si aggiorna con il deploy (vedi [Funzionalità](docs/readme/funzionalita.md))
 - **Backend** (`backend/`) — Node.js 24, server HTTP nativo, i dati dell'associazione
 - **Authorizer** (`authorizer/`) — Node.js 24, account, ruoli e token
 - **Database** — PostgreSQL, un'istanza con due database separati e utenti distinti

@@ -312,7 +312,8 @@ per ogni ambiente.
 
 `Deploy Frontend` genera inoltre con `jq` la configurazione del club — nome, indirizzi di API e
 authorizer, colori e logo — e la mette nel ConfigMap del frontend, da cui nginx la serve su
-`/config.json`. Si ferma con un errore chiaro se mancano `APP_DOMAIN`, `AUTH_DOMAIN` o `TENANT_NAME`, o se
+`/config.json`; accanto, il manifest dell'app installabile (nome breve, colore, icone ricavate da
+`LOGO_FILE`), servito su `/manifest.webmanifest`. Si ferma con un errore chiaro se mancano `APP_DOMAIN`, `AUTH_DOMAIN` o `TENANT_NAME`, o se
 `LOGO_FILE` non esiste in `branding/`.
 
 ## `Promote` ([promote.yml](../../.github/workflows/promote.yml))

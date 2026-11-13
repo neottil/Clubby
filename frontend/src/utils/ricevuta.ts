@@ -8,6 +8,8 @@
  * seconda di dove lo si era cliccato.
  */
 
+import { inAppInstallata, suIos } from './installazione';
+
 /** Il codice mostrato all'utente: "2026_60". */
 export function codiceRicevuta(anno: number, numero: number): string {
   return `${anno}_${numero}`;
@@ -33,6 +35,26 @@ export function nomeFileRicevuta(anno: number, numero: number): string {
  * differita perché revocarlo subito annullerebbe il download appena avviato.
  */
 export function scaricaBlob(blob: Blob, nomeFile: string): void {
+  // Nell'app installata su iPhone (spec 012) un download così apre il PDF a
+  // tutto schermo, senza un modo evidente di tornare all'app: lì si passa dal
+  // foglio di condivisione del sistema, da cui il PDF si apre, si salva in
+  // File o si inoltra. Se la condivisione non è disponibile o non parte, si
+  // ripiega sul download di sempre.
+  if (suIos() && inAppInstallata()) {
+    const file = new File([blob], nomeFile, { type: blob.type || 'application/pdf' });
+    if (navigator.canShare?.({ files: [file] })) {
+      navigator.share({ files: [file] }).catch((e: unknown) => {
+        // Annullata dall'utente: ha visto il foglio e l'ha chiuso, va bene così.
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        scarica(blob, nomeFile);
+      });
+      return;
+    }
+  }
+  scarica(blob, nomeFile);
+}
+
+function scarica(blob: Blob, nomeFile: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

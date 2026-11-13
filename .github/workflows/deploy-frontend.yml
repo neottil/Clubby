@@ -6,7 +6,9 @@ name: Deploy Frontend
 # In più rispetto al backend genera la configurazione del club (nome,
 # indirizzi di API e authorizer, tema, logo) che il browser legge all'avvio da
 # /config.json: l'immagine del frontend è la stessa per tutti i club, e ciò
-# che li distingue arriva da qui, dalle Variables dell'Environment.
+# che li distingue arriva da qui, dalle Variables dell'Environment. Allo
+# stesso modo genera /manifest.webmanifest, con cui il club si installa come
+# app sulla schermata Home (spec 012).
 on:
   workflow_call:
     inputs:
@@ -74,6 +76,8 @@ jobs:
           APP_VERSION: ${{ inputs.image_tag }}
           # Configurazione del club, servita al browser su /config.json.
           TENANT_NAME: ${{ vars.TENANT_NAME }}
+          # Nome sotto l'icona dell'app installata, facoltativo (spec 012).
+          TENANT_SHORT_NAME: ${{ vars.TENANT_SHORT_NAME }}
           THEME_PRIMARY: ${{ vars.THEME_PRIMARY }}
           THEME_PRIMARY_TEXT: ${{ vars.THEME_PRIMARY_TEXT }}
           THEME_DANGER: ${{ vars.THEME_DANGER }}
@@ -135,9 +139,41 @@ jobs:
           export FRONTEND_CONFIG_JSON
           echo "Configurazione del club: $FRONTEND_CONFIG_JSON"
 
+          # Manifest dell'app installabile (spec 012), con jq per lo stesso
+          # motivo. Le icone le genera la build da ogni logo di branding/
+          # (frontend/scripts/genera-icone.mjs), con il nome del file senza
+          # estensione; senza LOGO_FILE si usano quelle del logo di default.
+          # theme_color: il colore della barra di navigazione, o il suo default
+          # in frontend/src/theme.ts.
+          ICONE="logo"
+          if [ -n "$LOGO_FILE" ]; then ICONE="${LOGO_FILE%.*}"; fi
+          FRONTEND_MANIFEST_JSON=$(jq -nc \
+            --arg nome "$TENANT_NAME" \
+            --arg breve "$TENANT_SHORT_NAME" \
+            --arg colore "$THEME_NAV_BG" \
+            --arg icone "/branding/icone/$ICONE" \
+            '{
+              name: $nome,
+              short_name: (if $breve == "" then $nome else $breve end),
+              id: "/",
+              start_url: "/",
+              scope: "/",
+              display: "standalone",
+              lang: "it",
+              theme_color: (if $colore == "" then "#2E2A26" else $colore end),
+              background_color: "#ffffff",
+              icons: [
+                {src: ($icone + "-192.png"), sizes: "192x192", type: "image/png", purpose: "any"},
+                {src: ($icone + "-512.png"), sizes: "512x512", type: "image/png", purpose: "any"},
+                {src: ($icone + "-maskable-512.png"), sizes: "512x512", type: "image/png", purpose: "maskable"}
+              ]
+            }')
+          export FRONTEND_MANIFEST_JSON
+          echo "Manifest del club: $FRONTEND_MANIFEST_JSON"
+
           sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
           mkdir -p k8s/rendered
-          VARS='$KUBE_NAMESPACE $FRONTEND_IMAGE $APP_DOMAIN $APP_VERSION $FRONTEND_CONFIG_JSON'
+          VARS='$KUBE_NAMESPACE $FRONTEND_IMAGE $APP_DOMAIN $APP_VERSION $FRONTEND_CONFIG_JSON $FRONTEND_MANIFEST_JSON'
           for f in frontend/k8s/*.yaml; do
             envsubst "$VARS" < "$f" > "k8s/rendered/frontend-$(basename "$f")"
           done

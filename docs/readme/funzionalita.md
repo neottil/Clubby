@@ -25,6 +25,9 @@
   (il numero dell'ultima migrazione applicata), raggiungibile **anche senza
   accesso** (il menu si riduce a Info e Accedi): serve soprattutto quando l'accesso non funziona. Una
   versione che l'ambiente non dichiara compare come "non disponibile"
+- Installabile come app sulla schermata Home di Android e iPhone (PWA), con nome, icona e colori del
+  club, senza store: avviso quando esce una versione nuova, avviso offline, e la scelta di restare
+  collegati sul dispositivo (spec 012)
 - Elenchi caricati a blocchi (incontri, movimenti, ricevute, soci, voucher, tesseramenti, account),
   con ricerca e ordinamento applicati dal server, per non scaricare tutto a ogni apertura
 

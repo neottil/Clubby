@@ -22,6 +22,9 @@ export default function LoginPage() {
   const [modalita, setModalita] = useState<Modalita>('accesso');
   const [form, setForm] = useState(formVuoto);
   const [errore, setErrore] = useState('');
+  // Non spuntata per default: chi accede da un PC condiviso non deve restare
+  // collegato senza averlo scelto (spec 012).
+  const [restaCollegato, setRestaCollegato] = useState(false);
 
   const aggiorna = (campo: keyof typeof formVuoto) =>
     (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [campo]: e.target.value });
@@ -68,9 +71,9 @@ export default function LoginPage() {
 
     try {
       if (modalita === 'accesso') {
-        await login(form.email, form.password);
+        await login(form.email, form.password, restaCollegato);
       } else {
-        await register(form);
+        await register(form, restaCollegato);
       }
     } catch (err) {
       setErrore(messaggioErrore(err, 'Operazione non riuscita'));
@@ -133,6 +136,19 @@ export default function LoginPage() {
           </p>
         )}
 
+        <label style={styles.casella}>
+          <input
+            type='checkbox'
+            checked={restaCollegato}
+            onChange={e => setRestaCollegato(e.target.checked)}
+            style={styles.casellaInput}
+          />
+          <span>
+            Resta collegato su questo dispositivo
+            <span style={styles.casellaAiuto}>Non sceglierlo su un computer usato da altri.</span>
+          </span>
+        </label>
+
         <button
           style={{ ...styles.button, ...(pronto ? {} : styles.buttonInattivo) }}
           type='submit'
@@ -193,6 +209,13 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 6, border: '1px solid #ddd', fontSize: 15, boxSizing: 'border-box',
   },
   aiuto: { fontSize: 12, color: '#777', margin: '0 0 12px', textAlign: 'center' },
+  // Tutta la riga è cliccabile, alta almeno 44px come gli altri controlli.
+  casella: {
+    display: 'flex', alignItems: 'flex-start', gap: 10, minHeight: 44,
+    fontSize: 14, color: '#333', margin: '4px 0 12px', cursor: 'pointer', lineHeight: 1.4,
+  },
+  casellaInput: { width: 20, height: 20, margin: '1px 0 0', flexShrink: 0, accentColor: theme.primary, cursor: 'pointer' },
+  casellaAiuto: { display: 'block', fontSize: 12, color: '#777', marginTop: 2 },
   aiutoSopra: {
     fontSize: 13, color: '#555', lineHeight: 1.5, margin: '0 0 16px',
     background: '#f1f5f9', borderRadius: 8, padding: '10px 14px',

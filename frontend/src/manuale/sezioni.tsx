@@ -86,6 +86,50 @@ export const SEZIONI: Sezione[] = [
     ),
   },
 
+  {
+    id: 'installare-app',
+    titolo: 'Installare l\'app sul telefono',
+    gruppo: 'Per iniziare',
+    visibile: () => true,
+    contenuto: () => (
+      <>
+        <p>
+          Puoi aggiungere l'applicazione alla schermata Home del telefono, con il nome e il logo del tuo
+          club: si apre a tutto schermo come un'app, senza passare dal browser. Non serve nessuno store.
+        </p>
+        <h4 style={stili.sottotitolo}>Android</h4>
+        <p>
+          Apri l'indirizzo del club con Chrome. Il browser propone da solo di installare l'app; se non lo
+          fa, apri il <strong>menu</strong> dell'applicazione e scegli <strong>Installa l'app</strong>. La
+          voce c'è solo finché l'app non è installata.
+        </p>
+        <h4 style={stili.sottotitolo}>iPhone e iPad</h4>
+        <p>
+          Apri l'indirizzo del club con Safari, tocca <strong>Condividi</strong> (il quadrato con la freccia
+          verso l'alto, nella barra di Safari o nel menu <strong>···</strong>) e poi{' '}
+          <strong>Aggiungi alla schermata Home</strong>. Un avviso in fondo alla pagina lo ricorda finché non
+          lo chiudi; per rivederlo, apri il <strong>menu</strong> e scegli <strong>Installa l'app</strong>.
+          Sull'iPhone l'app installata non vede l'accesso fatto in Safari: la prima volta che la
+          apri ti chiede di accedere di nuovo.
+        </p>
+        <h4 style={stili.sottotitolo}>Restare collegati</h4>
+        <p>
+          Nella pagina di accesso, <strong>Resta collegato su questo dispositivo</strong> tiene aperta la
+          sessione anche dopo aver chiuso l'app o il browser, fino a 30 giorni dall'ultimo utilizzo. Senza,
+          la sessione si chiude con la scheda o con l'app. Non sceglierlo su un computer usato da altri.{' '}
+          <strong>Esci</strong> chiude la sessione su questo dispositivo, in tutte le schede aperte.
+        </p>
+        <h4 style={stili.sottotitolo}>Aggiornamenti e connessione</h4>
+        <p>
+          Quando il club pubblica una versione nuova, in alto compare <strong>È disponibile una nuova
+          versione</strong>: tocca <strong>Aggiorna</strong> quando hai finito quello che stai facendo. Senza
+          connessione l'app si apre lo stesso ma avvisa che sei offline: i dati arrivano sempre dal club, e
+          finché la rete non torna non si aggiornano.
+        </p>
+      </>
+    ),
+  },
+
   // ---------------------------------------------------------------------
   // I tuoi dati — chiunque abbia una scheda socio
   // ---------------------------------------------------------------------

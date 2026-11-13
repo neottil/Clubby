@@ -538,6 +538,12 @@ Fuori dal rilascio **non tocca mai** l'infrastruttura di `infra.yml`, né la pro
 **Cosa fanno**: vedi pattern 4. Input `environment` e `image_tag`; nessuna conoscenza del chiamante (né del
 branch/run di `build-deploy.yml`, né dell'input di `promote.yml`).
 
+`deploy-frontend.yml` scrive nel ConfigMap del frontend, oltre a `version.json`, i due file che
+distinguono un club dall'altro con la stessa immagine: `config.json` e `manifest.webmanifest` (spec 012:
+nome da `TENANT_NAME` e dalla facoltativa `TENANT_SHORT_NAME`, colore da `THEME_NAV_BG`, icone da
+`LOGO_FILE` — generate in build da `frontend/scripts/genera-icone.mjs` con il nome del logo senza
+estensione).
+
 ### `tag.yml`
 
 **Trigger**: solo `workflow_call`, dalla Pipeline su `main` dopo l'approvazione `approvazione-tag`; nessun input (vedi pattern 5 — non serve

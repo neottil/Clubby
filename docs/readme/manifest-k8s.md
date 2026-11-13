@@ -30,7 +30,7 @@ authorizer/
 
 frontend/
 ├── k8s/                     # manifest con placeholder ${VAR}, applicati da deploy-frontend
-│   ├── configmap.yaml        # /version.json e /config.json del club, serviti da nginx
+│   ├── configmap.yaml        # /version.json, /config.json e /manifest.webmanifest del club, serviti da nginx
 │   ├── deployment.yaml
 │   ├── service.yaml
 │   └── ingress.yaml           # stesso host/secretName TLS del backend, SENZA annotazione cert-manager

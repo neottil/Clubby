@@ -37,6 +37,12 @@ Questa è la documentazione del prodotto, divisa per contesto. Il
 | [AGENTS.md](../../AGENTS.md) | regole di lavoro, convenzioni di codice, workflow spec-driven |
 | [specs/README.md](../../specs/README.md) | indice delle specifiche: dove è stata decisa una cosa |
 
+## Per chi presenta il prodotto
+
+| Documento | Copre |
+|---|---|
+| [docs/commerciale/resoconto-commerciale.md](../commerciale/resoconto-commerciale.md) | resoconto commerciale: cos'è Clubby, cosa fa, come si personalizza, argomenti di vendita e limiti |
+
 ## Altro
 
 - Il lavoro ancora aperto sta nelle **issue di GitHub**, non in un file del repository

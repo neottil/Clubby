@@ -64,6 +64,12 @@ sulla scheda dopo una pausa o una sospensione del computer, e al primo rifiuto p
 sessione si chiude con il logout, chiudendo la scheda, o quando un admin disattiva l'account, ne cambia
 ruolo o privilegio, o ne azzera la password.
 
+Con **Resta collegato su questo dispositivo**, una casella della pagina di accesso non spuntata per
+default, la sessione sopravvive anche alla chiusura del browser o dell'app installata (spec 012): resta
+salvata sul dispositivo finché il refresh token non scade, cioè 30 giorni dall'ultimo rinnovo. È una
+sessione sola per tutte le schede e le finestre aperte sul dispositivo: una la rinnova per tutte, e
+**Esci** in una le chiude tutte. Senza la casella vale quanto sopra.
+
 ## Password dimenticata
 
 Non c'è recupero self-service: il progetto non ha un servizio di posta. Un admin azzera

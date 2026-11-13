@@ -89,10 +89,32 @@ function modalitaValida(valore: unknown): ModalitaRicarica {
   return valore === 'percentage' || valore === 'map' ? valore : 'free';
 }
 
+/**
+ * Il server non si raggiunge: rete assente, non configurazione sbagliata.
+ *
+ * Con l'app installata (spec 012) è un caso normale: il service worker apre
+ * l'app anche offline, ma /config.json arriva solo dal server. main.tsx lo
+ * distingue per mostrare "Sei offline" invece di "Applicazione non
+ * configurata", che manderebbe a cercare un guasto che non c'è.
+ */
+export class ErroreRete extends Error {
+  constructor() {
+    super('Server non raggiungibile');
+    this.name = 'ErroreRete';
+  }
+}
+
 /** /config.json se servito, altrimenti null (in locale non esiste). */
 async function leggiConfigJson(): Promise<Partial<ConfigFrontend> | null> {
+  let res: Response;
   try {
-    const res = await fetch('/config.json', { cache: 'no-store' });
+    res = await fetch('/config.json', { cache: 'no-store' });
+  } catch {
+    // fetch fallisce così solo senza risposta: in locale vite risponde sempre
+    // (con index.html), quindi qui si arriva solo senza rete.
+    throw new ErroreRete();
+  }
+  try {
     // Controllo sul tipo: un server che risponde con index.html per ogni
     // percorso sconosciuto darebbe 200 anche senza il file.
     if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
@@ -153,6 +175,19 @@ export async function caricaConfig(): Promise<void> {
     },
     modalitaRicarica: modalitaValida(letta.modalitaRicarica),
   });
+}
+
+/**
+ * Icona dell'app installata su iOS (apple-touch-icon), ricavata dal logo del
+ * club: scripts/genera-icone.mjs la produce in build per ogni logo, con lo
+ * stesso nome del file senza estensione ("/branding/romaasd.svg" →
+ * "/branding/icone/romaasd-180.png"; il logo di default "/logo.svg" →
+ * "/branding/icone/logo-180.png").
+ */
+export function iconaApple(logo: string): string {
+  const file = logo.split('/').pop() ?? '';
+  const nome = file.replace(/\.[^.]*$/, '') || 'logo';
+  return `/branding/icone/${nome}-180.png`;
 }
 
 /**

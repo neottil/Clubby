@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { config } from './config';
 import Layout from './components/Layout';
+import AvvisiApp from './components/AvvisiApp';
 import LoginPage from './pages/LoginPage';
 import CambioPasswordPage from './pages/CambioPasswordPage';
 import SociPage from './pages/SociPage';
@@ -97,6 +98,9 @@ function RottaAccesso() {
 export default function App() {
   return (
     <AuthProvider>
+      {/* Versione nuova, offline, installazione su iPhone (spec 012): valgono
+          per ogni pagina, con o senza sessione. */}
+      <AvvisiApp />
       <BrowserRouter>
         <Routes>
           {/* Non c'è più una rotta /callback: con l'accesso via email e

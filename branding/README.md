@@ -15,6 +15,13 @@ dedicata; il deploy si ferma se il file non esiste qui.
 In locale la variabile equivalente è `VITE_LOGO_FILE` in `frontend/.env.local`.
 Se non è impostata, resta il logo di default `frontend/public/logo.svg`.
 
+Dallo stesso logo la build del frontend ricava anche le **icone dell'app installata** sulla schermata
+Home (spec 012): `frontend/scripts/genera-icone.mjs` scrive in `frontend/public/branding/icone/` le PNG
+da 192 e 512 px, la versione *maskable* per Android e quella da 180 px per iOS, con il nome del logo
+senza estensione (`romaasd-512.png`). Non c'è niente da preparare a mano: se esistono sia
+`romaasd.svg` sia `romaasd.png`, si parte dall'SVG. Un logo quadrato rende meglio, perché le icone sono
+quadrate.
+
 > `frontend/public/branding/` e `backend/branding/` sono **copie generate**: le
 > scrive `scripts/copia-branding.mjs`, che gira da solo prima di `npm run dev` e
 > `npm run build` di ciascuno dei due moduli — ognuno passando il proprio nome,
