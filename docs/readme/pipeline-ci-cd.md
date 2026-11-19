@@ -122,7 +122,8 @@ ha toccato non si builda né si deploya, e resta in `development` con l'immagine
 merge non resta in uso nessuna immagine del branch, che la pulizia alla sua cancellazione toglierebbe dal
 registry. Uno scope cambiato rispetto a `main` si builda e deploya per intero, anche se è cambiato solo il
 manifest (il branch non ha ancora un'immagine sua da riusare). Il job `test` usa per gli scope non
-ribuildati la stessa baseline. Senza nemmeno un tag di `main` nel branch (prima run in assoluto, o un
+ribuildati la stessa baseline: esegue `npm run test:api` come in locale, ma con backend e authorizer
+avviati da quelle immagini invece che dai sorgenti, su un Postgres usa e getta di Testcontainers (spec 014). Senza nemmeno un tag di `main` nel branch (prima run in assoluto, o un
 branch aperto prima dell'ultimo tag di `main`, i cui tag più vecchi sono stati ripuliti) builda e deploya
 tutto per quello scope, per sicurezza.
 

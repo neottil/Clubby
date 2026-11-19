@@ -190,68 +190,67 @@ e non si buttano: le modifiche allo schema si applicano come migrazioni (vedi
 
 `tests/api/` verifica dall'esterno, con token veri, i permessi e i dati che ogni ruolo riceve: ruoli nel
 token, visibilità degli incontri e totali di Incontri, Resoconto e Resoconti, listino e soci per ruolo,
-regole di scrittura degli incontri e del voucher, privilegio admin e ruolo, rifiuto di corpi malformati e
-di route inesistenti. Richiede l'authorizer, il backend e il database raggiungibile.
+regole di scrittura degli incontri e del voucher, ricevute e tesseramenti, modalità di ricarica, moduli
+accesi e spenti, privilegio admin e ruolo, rifiuto di corpi malformati e di route inesistenti.
 
-Il backend va avviato con `npm run dev:backend:test` invece che con `npm run dev`: carica
-`backend/.env.test` sopra a `backend/.env`, con i soli interruttori che la suite richiede
-(`RECHARGE_MODE=free`, i due moduli accesi) — in modalità `map` la creazione dei dati di prova viene
-rifiutata, perché non ci sono tagli configurati. Il tuo `backend/.env` resta com'è. Gira **senza**
-`--watch` di proposito: un riavvio a metà suite fa fallire tutti i test successivi con "non
-raggiungibile".
-
-Lo stesso comando avvia anche una **seconda istanza** del backend sulla porta **3002**, con
-`backend/.env.test-varianti`: modalità a tagli e moduli spenti, per i test che non si possono fare
-sulla prima (`ricariche-map.test.ts`, `moduli-spenti.test.ts`). Usa lo stesso database. Chiudendo il
-comando si fermano entrambe; se la 3002 resta occupata, è un'istanza rimasta accesa.
-
-```bash
-npm run dev:authorizer
-```
-
-```bash
-npm run dev:backend:test
-```
+Si esegue con un comando solo, e serve soltanto **Docker acceso** (spec 014):
 
 ```bash
 npm run test:api
 ```
 
-I test non dipendono dai dati presenti né dal seed demo: ogni file crea i propri account, soci, attività,
-voucher e incontri e li elimina alla fine, anche se un test fallisce o l'esecuzione viene interrotta.
-I dati di prova sono riconoscibili a colpo d'occhio — email sul dominio `clubby.test`, nomi di soci e
-attività che finiscono in `_test` (es. `mario_test rossi_test`, `educazione_test`) — e la pulizia elimina
-solo quelli. Se dovessero restarne dopo un'interruzione brusca, li rimuove l'esecuzione successiva oppure:
+Un file solo:
 
 ```bash
-npm run test:api:pulizia
+npm run test:api -- tests/api/ricariche.test.ts
 ```
 
-La pulizia e il primo admin di prova passano direttamente dai database, con i parametri `DB_*` di
-`backend/.env` e `authorizer/.env` (sostituibili con `TEST_APP_DB_URL` e `TEST_AUTH_DB_URL`); tutto il
-resto si crea dalle API. `API_URL`, `API_URL_VARIANTI` e `AUTH_URL` cambiano gli indirizzi dei servizi.
+La suite non usa né i servizi di `npm run dev` né il database di `docker compose`, e può girare mentre
+sono accesi. Avvia con Testcontainers un PostgreSQL usa e getta, vi applica baseline e migrazioni, e per
+ogni file di test clona due database e avvia backend e authorizer **dai sorgenti**, su porte libere e con
+tutte le variabili impostate dalla suite (il tuo `.env` non conta). Prima di ogni caso i database tornano
+vuoti, e ogni caso crea solo i dati che gli servono: il contatore delle ricevute, le impostazioni e i
+dati del database di sviluppo restano come sono. A fine esecuzione, anche con Ctrl+C, container e
+processi spariscono.
 
+I file girano in parallelo, quattro alla volta; `TEST_PARALLELISMO` cambia il numero. Se un file
+fallisce, sotto l'errore compaiono le ultime righe di log del suo backend e del suo authorizer.
 
-## Gli strumenti non stanno tutti nella stessa shell
+Le dipendenze della suite stanno in `tests/package.json` e le installa `npm run install:all` (oppure
+`npm install --prefix tests`).
 
-Su Windows con Docker dentro WSL gli strumenti si dividono, ed è la prima cosa
-che fa perdere tempo a chi non lo sa:
+**Debug.** In VS Code, la configurazione *Test API (debug)* di `.vscode/launch.json` chiede un file (vuoto
+per tutti), esegue un file alla volta e collega il debugger anche al backend e all'authorizer avviati dalla
+suite: i breakpoint nei sorgenti dei servizi e nei test funzionano insieme. Fuori da VS Code,
+`TEST_DEBUG=1 npm run test:api -- <file>` avvia i servizi con `--inspect` su 9229 (backend) e 9230
+(authorizer), a cui ci si collega con le due configurazioni *Attach* o con qualunque debugger.
+
+**Su Windows si lancia da WSL**, come `npm run dev`: lì ci sono sia Node sia Docker, e Testcontainers
+trova Docker da solo, senza configurazione. Lanciata da Windows, la suite non vedrebbe il Docker di WSL e
+si fermerebbe subito con il messaggio "Docker non risponde".
+
+## Su Windows si lavora da WSL
+
+Su Windows con Docker dentro WSL (nessun Docker Desktop) **tutto si lancia da
+WSL**: `npm run dev`, `npm run test:api`, `docker compose`, il seed. Node e npm
+vanno installati in WSL; da lì i servizi si vedono fra loro su `localhost`, e il
+browser in Windows li raggiunge su `localhost` grazie all'inoltro delle porte
+di WSL.
 
 | Strumento | Dove |
 |---|---|
-| `psql`, `pg_dump`, `pg_restore` | solo in WSL |
-| `docker`, `docker compose` | solo in WSL (nessun Docker Desktop nel PATH di Windows) |
-| `node`, `npm` | solo in Windows; da WSL si invoca `node.exe` |
-| `jq`, `curl` | entrambe |
+| `node`, `npm` | WSL |
+| `docker`, `docker compose` | WSL (nessun Docker Desktop nel PATH di Windows) |
+| `psql`, `pg_dump`, `pg_restore` | WSL |
+| `jq`, `curl` | WSL |
+| browser, VS Code | Windows (VS Code collegato a WSL) |
 
-Tre conseguenze, tutte già pagate:
+Due cose da sapere:
 
-- **Da WSL `localhost` non è l'host Windows.** I servizi avviati da `npm run dev`
-  si raggiungono con `http://$(ip route show default | cut -d" " -f3):3001`.
-- **Gli argomenti attraversano il confine WSL↔Windows, le variabili d'ambiente
-  no.** Un percorso va tradotto con `wslpath -w`, e un percorso Windows passato a
-  un `import()` ESM vuole `pathToFileURL()`. È il motivo per cui il seed passa i
-  dati a Node via stdin come JSON, e non dall'ambiente — vedi
+- **Se in WSL manca `node`, il seed ripiega su `node.exe` di Windows** per la
+  sola ricevuta dimostrativa. Gli argomenti attraversano il confine
+  WSL↔Windows, le variabili d'ambiente no: è il motivo per cui il seed passa i
+  dati a Node via stdin come JSON e traduce i percorsi con `wslpath -w` — vedi
   [scripts/seed/07-ricevuta-dimostrativa.sh](../../scripts/seed/07-ricevuta-dimostrativa.sh).
 - **Il `pg_dump` della shell può essere più vecchio del server.** Se è la 16 e il
   server è la 18 rifiuta di partire (`aborting because of server version

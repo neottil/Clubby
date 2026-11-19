@@ -34,8 +34,8 @@ con `source` i file di questa cartella, nell'ordine in cui vanno eseguiti.
 
 ## Prerequisiti
 
-`bash`, `psql`, `curl`, `jq`, e `node` per la sola ricevuta dimostrativa — in
-WSL, dove `node` non c'è, viene usato `node.exe` se disponibile. L'authorizer
+`bash`, `psql`, `curl`, `jq`, e `node` per la sola ricevuta dimostrativa — se
+in WSL `node` manca, viene usato `node.exe` di Windows se disponibile. L'authorizer
 deve essere avviato: gli account nascono dalla sua API di registrazione.
 
 ## Variabili
@@ -53,7 +53,8 @@ I default valgono per l'ambiente locale via `docker-compose`.
 | `LOGO_FILE` | logo stampato sulla ricevuta (default `clubby_local.png`) |
 | `SEED_FORZA=1` | salta la conferma interattiva dell'azzeramento |
 
-Da WSL, dove `localhost` non è l'host Windows:
+Da WSL, con `npm run dev` avviato anch'esso in WSL, il default `http://localhost:3001` va bene così.
+Solo se l'authorizer girasse in Windows, da WSL `localhost` non lo raggiungerebbe:
 
 ```bash
 AUTH_INTERNAL_URL=http://$(ip route show default | cut -d" " -f3):3001 ./scripts/seed-demo-data.sh

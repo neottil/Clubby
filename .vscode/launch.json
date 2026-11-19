@@ -13,6 +13,34 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
+      "type": "node",
+      "request": "launch",
+      "name": "Test API (debug)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "test:api", "--", "${input:fileTestApi}"],
+      "cwd": "${workspaceFolder}",
+      "env": { "TEST_PARALLELISMO": "1" },
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach: backend dei test (9229)",
+      "address": "127.0.0.1",
+      "port": 9229,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach: authorizer dei test (9230)",
+      "address": "127.0.0.1",
+      "port": 9230,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
       "name": "Frontend (Chrome debug)",
       "type": "chrome",
       "request": "launch",
@@ -21,6 +49,14 @@
       "sourceMapPathOverrides": {
         "/@fs/*": "${workspaceFolder}/frontend/src/*"
       }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "fileTestApi",
+      "type": "promptString",
+      "description": "File di test da eseguire (vuoto: tutta la suite)",
+      "default": ""
     }
   ]
 }

@@ -6,29 +6,25 @@
  * metodo non previsto. Le abilitazioni degli istruttori restano PUT: il corpo
  * sostituisce l'intero insieme.
  *
- * Le impostazioni sono una riga sola per club, non un dato con il suffisso
- * _test: quelle toccate qui si rimettono com'erano anche se un assert fallisce.
+ * Ogni caso parte da un database vuoto e crea il record che modifica; le
+ * impostazioni tornano quelle iniziali prima di ogni caso (ambiente.ts).
  */
 
-import { after, before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { API_URL, api, giorniFa, type Sessione } from './helpers.ts';
-import { ATTESE, preparaDati, pulisciDatiTest, type DatiTest } from './dati.ts';
+import { api, giorniFa, servizi } from './helpers.ts';
+import { usaAmbiente } from './ambiente.ts';
+import { creaAdmin, creaAttivita, creaIncontro, creaIstruttore, creaSocio } from './fabbrica.ts';
+
+usaAmbiente();
 
 describe('Metodi HTTP delle modifiche', () => {
-  let d: DatiTest;
-  let admin: Sessione;
-
-  before(async () => {
-    d = await preparaDati();
-    admin = d.sessioni.istruttore1;
-  });
-  after(() => pulisciDatiTest());
-
   describe('soci', () => {
     it('PATCH su un socio cambia solo il campo inviato', async () => {
-      const prima = (await api(admin, 'GET', `/api/soci/${d.soci.senzaAccount}`)).body;
-      const r = await api(admin, 'PATCH', `/api/soci/${d.soci.senzaAccount}`, { note: 'nota da PATCH_test' });
+      const admin = await creaAdmin();
+      const socio = await creaSocio(admin, 'socio1');
+      const prima = (await api(admin, 'GET', `/api/soci/${socio.id}`)).body;
+      const r = await api(admin, 'PATCH', `/api/soci/${socio.id}`, { note: 'nota da PATCH_test' });
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(r.body.note, 'nota da PATCH_test');
       assert.equal(r.body.nome, prima.nome);
@@ -37,88 +33,105 @@ describe('Metodi HTTP delle modifiche', () => {
     });
 
     it('PATCH su un socio da non admin → 403', async () => {
-      const r = await api(d.sessioni.istruttore2, 'PATCH', `/api/soci/${d.soci.senzaAccount}`, { note: 'no' });
+      const admin = await creaAdmin();
+      const istruttore = await creaIstruttore(admin, 'istruttore2');
+      const socio = await creaSocio(admin, 'socio1');
+      const r = await api(istruttore, 'PATCH', `/api/soci/${socio.id}`, { note: 'no' });
       assert.equal(r.status, 403);
+      assert.equal((await api(admin, 'GET', `/api/soci/${socio.id}`)).body.note, 'Creato dai test API');
     });
 
     it('PUT su un socio → 404 (fase 2)', async () => {
-      const r = await api(admin, 'PUT', `/api/soci/${d.soci.senzaAccount}`, { note: 'nota da PUT_test' });
+      const admin = await creaAdmin();
+      const socio = await creaSocio(admin, 'socio1');
+      const r = await api(admin, 'PUT', `/api/soci/${socio.id}`, { note: 'nota da PUT_test' });
       assert.equal(r.status, 404);
+      assert.equal((await api(admin, 'GET', `/api/soci/${socio.id}`)).body.note, 'Creato dai test API');
     });
   });
 
   describe('incontri', () => {
-    let creato: string | undefined;
+    /** Un admin, istruttore2 abilitato a educazione e socio1 con un voucher da 100. */
+    async function scenario() {
+      const admin = await creaAdmin('istruttore1');
+      const educazione = await creaAttivita(admin, 'educazione', 30);
+      const istruttore2 = await creaIstruttore(admin, 'istruttore2', [educazione]);
+      const socio1 = (await creaSocio(admin, 'socio1', { ricarica: 100 })).id;
+      return { admin, istruttore2, socio1, educazione };
+    }
 
     it('PATCH su un incontro cambia solo il campo inviato', async () => {
-      const c = await api(d.sessioni.istruttore2, 'POST', '/api/incontri', {
-        socio_id: d.soci.socio1,
+      const d = await scenario();
+      const c = await api(d.istruttore2, 'POST', '/api/incontri', {
+        socio_id: d.socio1,
         data_incontro: giorniFa(1),
-        attivita_id: d.attivita.educazione,
+        attivita_id: d.educazione,
         costo: 30,
         note: 'Creato dai test API',
       });
       assert.equal(c.status, 201, JSON.stringify(c.body));
-      creato = c.body.id;
 
-      const r = await api(d.sessioni.istruttore2, 'PATCH', `/api/incontri/${creato}`, { note: 'nota da PATCH_test' });
+      const r = await api(d.istruttore2, 'PATCH', `/api/incontri/${c.body.id}`, { note: 'nota da PATCH_test' });
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(r.body.note, 'nota da PATCH_test');
       assert.equal(Number(r.body.costo), 30);
-      assert.equal(r.body.attivita_id, d.attivita.educazione);
-      assert.equal(r.body.istruttore_id, d.sessioni.istruttore2.id);
-
-      assert.equal((await api(d.sessioni.istruttore2, 'DELETE', `/api/incontri/${creato}`)).status, 204);
+      assert.equal(r.body.attivita_id, d.educazione);
+      assert.equal(r.body.istruttore_id, d.istruttore2.id);
     });
 
     it('PUT su un incontro → 404 (fase 2)', async () => {
-      const altrui = await api(admin, 'GET', `/api/incontri?istruttore_id=${admin.id}&limit=1`);
-      const r = await api(admin, 'PUT', `/api/incontri/${altrui.body.data[0].id}`, { costo: 1 });
+      const d = await scenario();
+      const incontro = await creaIncontro(d.admin, { socio: d.socio1, attivita: d.educazione, istruttore: d.admin });
+      const r = await api(d.admin, 'PUT', `/api/incontri/${incontro.id}`, { costo: 1 });
       assert.equal(r.status, 404);
+      assert.equal(Number((await api(d.admin, 'GET', `/api/incontri/${incontro.id}`)).body.costo), 30);
     });
 
     it('PATCH di un istruttore su un incontro non suo → 403', async () => {
-      const altrui = await api(admin, 'GET', `/api/incontri?istruttore_id=${admin.id}&limit=1`);
-      const id = altrui.body.data[0].id;
-      const r = await api(d.sessioni.istruttore2, 'PATCH', `/api/incontri/${id}`, { costo: 1 });
+      const d = await scenario();
+      const altrui = await creaIncontro(d.admin, { socio: d.socio1, attivita: d.educazione, istruttore: d.admin });
+      const r = await api(d.istruttore2, 'PATCH', `/api/incontri/${altrui.id}`, { costo: 1 });
       assert.equal(r.status, 403);
+      assert.equal(Number((await api(d.admin, 'GET', `/api/incontri/${altrui.id}`)).body.costo), 30);
     });
   });
 
   describe('attività', () => {
     it('PATCH su un\'attività cambia solo il campo inviato', async () => {
-      const prima = ((await api(admin, 'GET', '/api/attivita?tutte=1')).body as any[])
-        .find(a => a.id === d.attivita.passeggiata);
-      const r = await api(admin, 'PATCH', `/api/attivita/${d.attivita.passeggiata}`, { costo_default: 18 });
+      const admin = await creaAdmin();
+      const passeggiata = await creaAttivita(admin, 'passeggiata', 15);
+      const r = await api(admin, 'PATCH', `/api/attivita/${passeggiata}`, { costo_default: 18 });
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(Number(r.body.costo_default), 18);
-      assert.equal(r.body.nome, prima.nome);
-      assert.equal(r.body.attiva, prima.attiva);
+      assert.equal(r.body.nome, 'passeggiata_test');
+      assert.equal(r.body.attiva, true);
     });
 
     it('PUT su un\'attività → 404 (fase 2)', async () => {
-      const r = await api(admin, 'PUT', `/api/attivita/${d.attivita.passeggiata}`, { costo_default: 1 });
+      const admin = await creaAdmin();
+      const passeggiata = await creaAttivita(admin, 'passeggiata', 15);
+      const r = await api(admin, 'PUT', `/api/attivita/${passeggiata}`, { costo_default: 1 });
       assert.equal(r.status, 404);
+      const dopo = ((await api(admin, 'GET', '/api/attivita?tutte=1')).body as any[]).find(a => a.id === passeggiata);
+      assert.equal(Number(dopo.costo_default), 15);
     });
   });
 
   describe('impostazioni', () => {
     it('PATCH sulle impostazioni cambia solo la chiave inviata', async () => {
+      const admin = await creaAdmin();
       const originali = (await api(admin, 'GET', '/api/impostazioni')).body;
       const pie = 'Piè di pagina da PATCH (prova_test).';
-      try {
-        const r = await api(admin, 'PATCH', '/api/impostazioni', { ricevuta_pie_pagina: pie });
-        assert.equal(r.status, 200, JSON.stringify(r.body));
-        assert.equal(r.body.ricevuta_pie_pagina, pie);
-        assert.equal(r.body.ricevuta_intestazione, originali.ricevuta_intestazione);
-        assert.equal(r.body.quota_tesseramento, originali.quota_tesseramento);
-        assert.equal(r.body.percentuale_ricarica, originali.percentuale_ricarica);
-      } finally {
-        await api(admin, 'PATCH', '/api/impostazioni', { ricevuta_pie_pagina: originali.ricevuta_pie_pagina ?? '' });
-      }
+      const r = await api(admin, 'PATCH', '/api/impostazioni', { ricevuta_pie_pagina: pie });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal(r.body.ricevuta_pie_pagina, pie);
+      assert.equal(r.body.ricevuta_intestazione, originali.ricevuta_intestazione);
+      assert.equal(r.body.quota_tesseramento, originali.quota_tesseramento);
+      assert.equal(r.body.percentuale_ricarica, originali.percentuale_ricarica);
     });
 
     it('PUT sulle impostazioni → 404 (fase 2)', async () => {
+      const admin = await creaAdmin();
       const prima = (await api(admin, 'GET', '/api/impostazioni')).body;
       const r = await api(admin, 'PUT', '/api/impostazioni', { ricevuta_pie_pagina: 'da PUT (prova_test)' });
       assert.equal(r.status, 404);
@@ -128,22 +141,24 @@ describe('Metodi HTTP delle modifiche', () => {
 
   describe('abilitazioni degli istruttori', () => {
     it('le abilitazioni si sostituiscono ancora con PUT', async () => {
-      const percorso = `/api/istruttori/${d.sessioni.istruttore2.id}/attivita`;
-      const prima: string[] = (await api(admin, 'GET', percorso)).body.attivita_ids;
-      assert.equal(prima.length, ATTESE.abilitazioniIstruttore2.length);
-      try {
-        const r = await api(admin, 'PUT', percorso, { attivita_ids: [d.attivita.educazione] });
-        assert.equal(r.status, 200, JSON.stringify(r.body));
-        assert.deepEqual(r.body.attivita_ids, [d.attivita.educazione]);
-      } finally {
-        await api(admin, 'PUT', percorso, { attivita_ids: prima });
-      }
+      const admin = await creaAdmin();
+      const educazione = await creaAttivita(admin, 'educazione');
+      const dogdance = await creaAttivita(admin, 'dogdance');
+      const istruttore2 = await creaIstruttore(admin, 'istruttore2', [educazione, dogdance]);
+      const percorso = `/api/istruttori/${istruttore2.id}/attivita`;
+      assert.equal((await api(admin, 'GET', percorso)).body.attivita_ids.length, 2);
+      const r = await api(admin, 'PUT', percorso, { attivita_ids: [educazione] });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.deepEqual(r.body.attivita_ids, [educazione]);
+      assert.deepEqual((await api(admin, 'GET', percorso)).body.attivita_ids, [educazione]);
     });
   });
 
   describe('CORS', () => {
     it('il preflight CORS ammette PATCH', async () => {
-      const r = await fetch(`${API_URL}/api/soci/${d.soci.senzaAccount}`, {
+      const admin = await creaAdmin();
+      const socio = await creaSocio(admin, 'socio1');
+      const r = await fetch(`${servizi.api}/api/soci/${socio.id}`, {
         method: 'OPTIONS',
         headers: {
           Origin: 'http://localhost:5173',

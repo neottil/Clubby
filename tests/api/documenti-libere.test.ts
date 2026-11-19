@@ -4,15 +4,20 @@
  *
  * Stessa numerazione, stesse rotte e stesso PDF delle ricevute dei soci: i
  * casi qui provano che le due strade non si pestano i piedi, e che le libere
- * restano dell'admin. Le ricevute di prova hanno l'intestatario con il
- * suffisso _test, ed è da lì che la pulizia le riconosce.
+ * restano dell'admin.
+ *
+ * Ogni caso parte da un database vuoto: la numerazione riparte da 1, e le
+ * impostazioni sono quelle iniziali (ambiente.ts le rimette prima di ogni caso).
  */
 
-import { after, before, describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { api, giorniFa, scaricaBinario, type Sessione } from './helpers.ts';
-import { preparaDati, pulisciDatiTest, type DatiTest } from './dati.ts';
+import { usaAmbiente } from './ambiente.ts';
+import { creaAccount, creaAdmin, creaAttivita, creaIstruttore, creaSocio } from './fabbrica.ts';
 import { testoDelPdf } from './pdf.ts';
+
+usaAmbiente();
 
 const INTESTATARIO = 'Ospite Esterno ASD Altro Club_test';
 
@@ -34,7 +39,6 @@ function assertPdf(base64: string, cosa: string) {
 }
 
 describe('Documenti: ricevute libere', () => {
-  let d: DatiTest;
   let admin: Sessione;
 
   const corpo = (sovrascrivi: Record<string, unknown> = {}) => ({
@@ -47,20 +51,16 @@ describe('Documenti: ricevute libere', () => {
   const emetti = (body: unknown, s: Sessione = admin) => api(s, 'POST', '/api/documenti', body);
   const totaleDocumenti = async () => (await api(admin, 'GET', '/api/documenti?limit=1')).body.total as number;
 
-  before(async () => {
-    d = await preparaDati();
-    admin = d.sessioni.istruttore1;
-  });
-  after(() => pulisciDatiTest());
+  // Ogni caso ha il suo admin, creato prima di lui sul database appena azzerato.
+  beforeEach(async () => { admin = await creaAdmin(); });
 
   it('l\'anteprima di una ricevuta libera non crea documenti', async () => {
-    const prima = await totaleDocumenti();
     const r = await anteprima(corpo());
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assertPdf(r.body.pdf_base64, 'anteprima');
     assert.equal(Number(r.body.importo), 15);
     assert.ok(r.body.importo_lettere, 'l\'importo in lettere deve esserci');
-    assert.equal(await totaleDocumenti(), prima, 'l\'anteprima non deve scrivere');
+    assert.equal(await totaleDocumenti(), 0, 'l\'anteprima non deve scrivere');
   });
 
   it('la conferma emette una ricevuta libera con il PDF', async () => {
@@ -68,30 +68,36 @@ describe('Documenti: ricevute libere', () => {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assertPdf(r.body.pdf_base64, 'emissione');
     assert.ok(r.body.id);
-    assert.equal(r.body.nome_file, `ricevuta_${r.body.anno}_${r.body.numero}.pdf`);
+    // Database vuoto: è la prima ricevuta dell'anno.
+    assert.equal(r.body.numero, 1);
+    assert.equal(r.body.nome_file, `ricevuta_${r.body.anno}_1.pdf`);
     assert.equal(Number(r.body.importo), 15);
+    assert.equal(await totaleDocumenti(), 1);
   });
 
   it('una ricevuta libera e una di socio emesse di seguito hanno numeri consecutivi', async () => {
-    // Un incontro di senzaAccount, che non ha voucher: resta una voce a sé.
+    // Un incontro di un socio senza voucher: resta una voce a sé.
+    const socio = (await creaSocio(admin, 'senzaAccount')).id;
+    const educazione = await creaAttivita(admin, 'educazione');
     const incontro = await api(admin, 'POST', '/api/incontri', {
-      socio_id: d.soci.senzaAccount,
+      socio_id: socio,
       data_incontro: giorniFa(5),
-      attivita_id: d.attivita.educazione,
+      attivita_id: educazione,
       costo: 17,
     });
     assert.equal(incontro.status, 201, JSON.stringify(incontro.body));
 
     const libera = await emetti(corpo());
     const diSocio = await emetti({
-      socio_id: d.soci.senzaAccount,
+      socio_id: socio,
       causale: 'prova_test',
       voci: [{ tipo: 'incontro', id: incontro.body.id }],
     });
     assert.equal(libera.status, 201, JSON.stringify(libera.body));
     assert.equal(diSocio.status, 201, JSON.stringify(diSocio.body));
     assert.equal(diSocio.body.anno, libera.body.anno);
-    assert.equal(diSocio.body.numero, libera.body.numero + 1, 'una numerazione sola per tutte le ricevute');
+    // Una numerazione sola per tutte le ricevute, e parte da 1.
+    assert.deepEqual([libera.body.numero, diSocio.body.numero], [1, 2]);
   });
 
   it('il totale è la somma delle righe, non quello inviato', async () => {
@@ -144,17 +150,15 @@ describe('Documenti: ricevute libere', () => {
   });
 
   it('rifiuta un corpo con voci e righe insieme', async () => {
-    const misto = await anteprima({ ...corpo(), socio_id: d.soci.socio1, voci: [] });
+    const socio = (await creaSocio(admin, 'socio1')).id;
+    const misto = await anteprima({ ...corpo(), socio_id: socio, voci: [] });
     assert.equal(misto.status, 400, JSON.stringify(misto.body));
     const vuoto = await anteprima({ causale: 'prova_test' });
     assert.equal(vuoto.status, 400, JSON.stringify(vuoto.body));
   });
 
   it('il PDF ha intestazione, piè di pagina, intestatario e righe', async () => {
-    // Le impostazioni sono una riga per club: si rimettono com'erano anche se
-    // un assert fallisce.
-    const originali = (await api(admin, 'GET', '/api/impostazioni')).body;
-    try {
+    {
       const patch = await api(admin, 'PATCH', '/api/impostazioni', {
         ricevuta_intestazione: 'ASD INTESTAZIONE LIBERA_test\nVia delle Prove 1',
         ricevuta_pie_pagina: 'Piede della ricevuta libera_test',
@@ -181,11 +185,6 @@ describe('Documenti: ricevute libere', () => {
       ]) {
         assert.ok(testo.includes(atteso), `manca "${atteso}" nel PDF:\n${testo}`);
       }
-    } finally {
-      await api(admin, 'PATCH', '/api/impostazioni', {
-        ricevuta_intestazione: originali.ricevuta_intestazione ?? '',
-        ricevuta_pie_pagina: originali.ricevuta_pie_pagina ?? '',
-      });
     }
   });
 
@@ -206,17 +205,23 @@ describe('Documenti: ricevute libere', () => {
   });
 
   it('istruttore e socio non emettono ricevute libere', async () => {
-    for (const s of [d.sessioni.istruttore2, d.sessioni.socio1]) {
+    const istruttore = await creaIstruttore(admin, 'istruttore2');
+    const socio = await creaAccount(admin, 'socio1');
+    for (const s of [istruttore, socio]) {
       assert.equal((await anteprima(corpo(), s)).status, 403);
       assert.equal((await emetti(corpo(), s)).status, 403);
     }
+    assert.equal(await totaleDocumenti(), 0);
   });
 
   it('una ricevuta libera la scarica solo l\'admin', async () => {
     const r = await emetti(corpo());
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.equal((await scaricaBinario(admin, `/api/documenti/${r.body.id}`)).status, 200);
-    for (const s of [d.sessioni.socio1, d.sessioni.istruttore2]) {
+    const socio = await creaAccount(admin, 'socio1');
+    await creaSocio(admin, 'socio1', { account: socio });
+    const istruttore = await creaIstruttore(admin, 'istruttore2');
+    for (const s of [socio, istruttore]) {
       assert.equal((await scaricaBinario(s, `/api/documenti/${r.body.id}`)).status, 403);
     }
   });
@@ -224,16 +229,17 @@ describe('Documenti: ricevute libere', () => {
   it('l\'elenco comprende le ricevute libere e il filtro per socio le esclude', async () => {
     const r = await emetti(corpo());
     assert.equal(r.status, 201, JSON.stringify(r.body));
+    const socio = (await creaSocio(admin, 'socio1')).id;
 
     const tutte = (await api(admin, 'GET', '/api/documenti?limit=200')).body.data as any[];
-    const libera = tutte.find(x => x.id === r.body.id);
-    assert.ok(libera, 'la ricevuta libera deve comparire nell\'elenco');
+    assert.deepEqual(tutte.map(x => x.id), [r.body.id], 'la ricevuta libera deve comparire nell\'elenco');
+    const [libera] = tutte;
     assert.equal(libera.socio_id, null);
     assert.equal(libera.nome, null);
     assert.equal(libera.intestatario, INTESTATARIO);
 
-    const diUnSocio = (await api(admin, 'GET', `/api/documenti?socio_id=${d.soci.socio1}&limit=200`)).body.data as any[];
-    assert.ok(!diUnSocio.some(x => x.id === r.body.id), 'filtrando per socio non deve comparire');
+    const diUnSocio = await api(admin, 'GET', `/api/documenti?socio_id=${socio}&limit=200`);
+    assert.equal(diUnSocio.body.total, 0, 'filtrando per socio non deve comparire');
   });
 
   it('il filtro per periodo comprende le ricevute libere', async () => {
@@ -242,10 +248,10 @@ describe('Documenti: ricevute libere', () => {
     const oggi = oggiLocale();
 
     const nelPeriodo = (await api(admin, 'GET', `/api/documenti?da=${oggi}&a=${oggi}&limit=200`)).body.data as any[];
-    assert.ok(nelPeriodo.some(x => x.id === r.body.id));
+    assert.deepEqual(nelPeriodo.map(x => x.id), [r.body.id]);
 
-    const fuori = (await api(admin, 'GET', `/api/documenti?da=${giorniFa(-3)}&limit=200`)).body.data as any[];
-    assert.ok(!fuori.some(x => x.id === r.body.id));
+    const fuori = await api(admin, 'GET', `/api/documenti?da=${giorniFa(-3)}&limit=200`);
+    assert.equal(fuori.body.total, 0);
   });
 
   it('le righe libere non compaiono fra le voci da documentare', async () => {

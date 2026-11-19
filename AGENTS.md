@@ -212,7 +212,8 @@ clubby/
 ├── authorizer/             # Credenziali e token, database proprio
 │   ├── src/{crypto,service,middleware,db}/
 │   └── k8s/
-├── tests/api/              # Suite black-box via HTTP (node:test)
+├── tests/                  # Suite delle API: package.json proprio (Testcontainers, pg)
+│   └── api/                # avvia.ts, ambiente.ts, fabbrica.ts, *.test.ts (node:test)
 ├── branding/               # loghi dei club (SVG per il browser, PNG per i PDF)
 ├── scripts/                # init-local, migra, copia-branding
 │   └── seed/               # I passi del seed, caricati da seed-demo-data.sh
@@ -227,15 +228,13 @@ clubby/
 
 | Command | Descrizione |
 |---------|-------------|
-| `npm run install:all` | Installa le dipendenze dei tre moduli |
+| `npm run install:all` | Installa le dipendenze dei tre moduli e della suite (`tests/`) |
 | `npm run dev` | Avvia backend, authorizer e frontend insieme |
 | `npm run dev:backend` | Solo backend (porta 3000) |
-| `npm run dev:backend:test` | Backend per la suite: `backend/.env.test` sopra a `.env` sulla 3000, più l'istanza `backend/.env.test-varianti` sulla 3002 (tagli, moduli spenti); senza watch |
 | `npm run dev:authorizer` | Solo authorizer (porta 3001) |
 | `npm run dev:frontend` | Solo frontend (porta 5173) |
 | `npm run db:migra` | Applica le migrazioni pendenti ai due database |
-| `npm run test:api` | Suite delle API (richiede i servizi avviati) |
-| `npm run test:api:pulizia` | Rimuove i dati di prova rimasti da una suite interrotta |
+| `npm run test:api` | Suite delle API su database usa e getta (richiede Docker; `-- tests/api/<file>` per un file solo) |
 | `npm run version -- <modulo> <major\|minor\|patch>` | Bump della versione di un modulo |
 | `npm run build --prefix frontend` | Build del frontend — **è il vero type check** |
 | `npm run build --prefix backend` | Compila il backend |
@@ -405,27 +404,38 @@ schema è rotta subito. Rimuovere qualcosa si fa in **due release**.
 
 ### Test
 
-`tests/api/` è una suite **black-box via HTTP**: richiede backend e authorizer
-avviati e un database raggiungibile. Non è unit test — verifica le API come le
-userebbe un client.
+`tests/api/` è una suite **black-box via HTTP**: verifica le API come le
+userebbe un client. Non è unit test. Si esegue **solo** con `npm run test:api`
+(spec 014), che richiede Docker acceso e nient'altro: niente servizi avviati a
+mano, niente database di sviluppo.
 
-- I dati di prova si riconoscono dal suffisso `_test` e dal dominio
-  `clubby.test`, e vengono rimossi alla fine anche se un test fallisce.
-- I test creano i dati **dalle API**, come farebbe un admin; solo il primo admin
-  e la pulizia passano dal database.
-- Serve `RECHARGE_MODE=free`: in modalità `map` la creazione dei dati di prova
-  viene rifiutata, non essendoci tagli configurati. Per questo il backend dei
-  test si avvia con `npm run dev:backend:test`, che carica `backend/.env.test`
-  sopra a `backend/.env` senza modificarlo, e **senza** `--watch`: un riavvio a
-  metà suite fa fallire tutto ciò che segue. Non si tocca il `.env` dell'utente
-  e non si passano variabili a mano.
-- Lo stesso comando avvia una **seconda istanza** del backend sulla porta 3002
-  (`backend/.env.test-varianti`: `RECHARGE_MODE=map`, moduli spenti), sullo
-  stesso database: è lì che si provano la modalità a tagli e i 404 dei moduli
-  spenti (`API_URL_VARIANTI` in `tests/api/helpers.ts`). I dati si creano
-  sempre dalla prima. Finite le prove, anche la 3002 va liberata (spec 013).
-- In CI la suite gira nel job `test` di `build-deploy.yml`, contro le immagini
-  appena buildate e un PostgreSQL usa-e-getta. **Blocca i deploy**, non le build.
+- **Database usa e getta.** `avvia.ts` avvia con Testcontainers un PostgreSQL
+  per esecuzione e vi prepara i database modello (baseline e migrazioni, come
+  `docker-compose.yml`). Ogni file di test gira nel proprio processo, clona i
+  modelli in due database suoi e vi avvia contro backend e authorizer
+  (`ambiente.ts`, `usaAmbiente()`). A fine esecuzione non resta niente: né
+  container, né dati, né porte occupate. Il database di sviluppo non c'entra
+  mai, e un file lanciato con `node --test` si ferma con un messaggio.
+- **Ogni caso parte da database vuoti**: prima di ciascun test le tabelle si
+  svuotano e le impostazioni tornano quelle iniziali. Il test crea **solo** i
+  dati che verifica, con le funzioni di `fabbrica.ts`, e confronta totali e
+  numeri esatti (la prima ricevuta è la n. 1). Nessun caso dipende da un altro.
+- I dati si creano **dalle API**, come farebbe un admin; dal database passa
+  solo il privilegio del primo admin (`creaAdmin`).
+- **Configurazioni**: un file che prova una variante la chiede a
+  `usaAmbiente({ RECHARGE_MODE, ENABLE_MODULE_TESSERAMENTO, ENABLE_MODULE_RICEVUTE })`
+  e riceve servizi avviati così (es. `ricariche-map.test.ts`,
+  `moduli-spenti.test.ts`). Un modulo spento si verifica con **tutte** le sue
+  rotte a 404 (`moduli.ts`).
+- **In locale** i servizi partono **dai sorgenti** (`node --import tsx`), per il
+  debug: configurazione "Test API (debug)" di `.vscode/launch.json`, oppure
+  `TEST_DEBUG=1` (un file alla volta, `--inspect` su 9229 backend e 9230
+  authorizer). `TEST_PARALLELISMO` dice quanti file girano insieme (4).
+- **In CI** la suite gira nel job `test` di `build-deploy.yml` con
+  `TEST_IMMAGINE_BACKEND` e `TEST_IMMAGINE_AUTHORIZER`: i servizi partono dalle
+  immagini della run, e le migrazioni dell'app dall'immagine del backend.
+  **Blocca i deploy**, non le build.
+- Se un file fallisce, la suite stampa le ultime righe di log dei suoi servizi.
 
 ### Chiudere quello che si è aperto
 
@@ -434,14 +444,13 @@ si sono creati.** Non "se capita" e non "lo lascio su così puoi provare": chi
 riprende in mano la macchina deve ritrovarla com'era.
 
 - **Servizi**: ogni backend, authorizer, frontend o server di anteprima avviato
-  per provare va fermato. Le porte 3000, 3001, 3002 e 5173 devono tornare libere, o
+  per provare va fermato. Le porte 3000, 3001 e 5173 devono tornare libere, o
   restare occupate **solo** da processi che l'utente aveva già avviato per
   conto suo. Un'istanza dimenticata fa fallire il successivo `npm run dev` con
   un errore di porta occupata che sembra un guasto del progetto.
-- **Dati**: i dati di prova creati a mano (soci, incontri, ricariche,
-  tesseramenti, ricevute) vanno rimossi. La suite pulisce da sé anche fallendo;
-  se è stata interrotta, o se si è creato qualcosa dall'interfaccia, si passa
-  `npm run test:api:pulizia`.
+- **Dati**: i dati di prova creati a mano dall'interfaccia o dalle API (soci,
+  incontri, ricariche, tesseramenti, ricevute) vanno rimossi. La suite non
+  tocca il database di sviluppo: i suoi dati spariscono con il suo container.
 - **Impostazioni**: quelle scritte per provare (quota, percentuale,
   intestazione e piè di pagina delle ricevute) sono **una riga sola per club**,
   non un dato riconoscibile dal suffisso `_test`: vanno rimesse com'erano.
@@ -459,7 +468,7 @@ così l'utente non deve controllare.
 | Type check del frontend | `npm run build --prefix frontend` (non `tsc --noEmit`: usa un tsconfig più permissivo) |
 | Lint del frontend | `npx eslint src --ext .ts,.tsx` da `frontend/` |
 | Compilazione del backend | `npm run build --prefix backend` |
-| Suite API | `npm run test:api` |
+| Suite API | `npm run test:api` (Docker acceso) |
 | Migrazioni da zero | container PostgreSQL vuoto + `schema.sql` + `scripts/migra.sh` |
 
 ### Git

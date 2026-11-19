@@ -1,23 +1,12 @@
 /**
  * Chiamate HTTP ai servizi, per i test delle API.
  *
- * Variabili:
- *   API_URL            backend      (default http://localhost:3000)
- *   API_URL_VARIANTI   backend in modalità a tagli e a moduli spenti
- *                      (default http://localhost:3002, spec 013)
- *   AUTH_URL           authorizer   (default http://localhost:3001)
+ * Gli indirizzi di backend e authorizer non hanno valori di ripiego: li scrive
+ * ambiente.ts quando ha avviato i servizi del file (spec 014). Prima di allora
+ * sono vuoti, e una chiamata fallisce invece di finire su un servizio di
+ * sviluppo acceso per altri motivi.
  */
-
-export const API_URL  = process.env.API_URL  ?? 'http://localhost:3000';
-export const AUTH_URL = process.env.AUTH_URL ?? 'http://localhost:3001';
-/**
- * Seconda istanza del backend, sullo stesso database: `RECHARGE_MODE=map` e
- * moduli spenti, letti dall'ambiente all'avvio e quindi non provabili sulla
- * prima. La avvia `npm run dev:backend:test` insieme all'altra; se non
- * risponde i test falliscono, non si saltano: una suite verde che non ha
- * provato niente direbbe il falso.
- */
-export const API_URL_VARIANTI = process.env.API_URL_VARIANTI ?? 'http://localhost:3002';
+export const servizi = { api: '', auth: '' };
 
 export interface Risposta {
   status: number;
@@ -45,6 +34,7 @@ async function chiama(base: string, method: string, path: string, token?: string
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
+  if (!base) throw new Error('Servizi non ancora avviati: le chiamate vanno fatte dentro i test, dopo usaAmbiente()');
   let res: Response;
   try {
     res = await fetch(base + path, {
@@ -55,7 +45,7 @@ async function chiama(base: string, method: string, path: string, token?: string
         : JSON.stringify(body),
     });
   } catch (e) {
-    throw new Error(`${base} non raggiungibile (${(e as Error).message}): avvia i servizi con npm run dev:backend:test e npm run dev:authorizer`);
+    throw new Error(`${base} non raggiungibile (${(e as Error).message})`);
   }
 
   const testo = await res.text();
@@ -71,12 +61,7 @@ export function claims(token: string): { sub: string; email: string; roles: stri
 
 /** Chiamata al backend. */
 export function api(s: Sessione, method: string, path: string, body?: unknown): Promise<Risposta> {
-  return chiama(API_URL, method, path, s.accessToken, body);
-}
-
-/** Chiamata alla seconda istanza del backend (tagli, moduli spenti). */
-export function apiVarianti(s: Sessione, method: string, path: string, body?: unknown): Promise<Risposta> {
-  return chiama(API_URL_VARIANTI, method, path, s.accessToken, body);
+  return chiama(servizi.api, method, path, s.accessToken, body);
 }
 
 /**
@@ -84,13 +69,13 @@ export function apiVarianti(s: Sessione, method: string, path: string, body?: un
  * come testo, e la decodifica UTF-8 rovinerebbe i byte.
  */
 export async function scaricaBinario(s: Sessione, path: string): Promise<{ status: number; byte: Buffer }> {
-  const res = await fetch(API_URL + path, { headers: { Authorization: `Bearer ${s.accessToken}` } });
+  const res = await fetch(servizi.api + path, { headers: { Authorization: `Bearer ${s.accessToken}` } });
   return { status: res.status, byte: Buffer.from(await res.arrayBuffer()) };
 }
 
 /** Chiamata all'authorizer; il token è facoltativo (login, registrazione, refresh). */
 export function authApi(s: Sessione | undefined, method: string, path: string, body?: unknown): Promise<Risposta> {
-  return chiama(AUTH_URL, method, path, s?.accessToken, body);
+  return chiama(servizi.auth, method, path, s?.accessToken, body);
 }
 
 /**

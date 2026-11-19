@@ -40,7 +40,7 @@ PIE_DEMO=$(psql_righe "SELECT valore FROM impostazione WHERE chiave = 'ricevuta_
 
 PDF_JS="$SCRIPT_DIR/../backend/dist/service/documenti/pdf.js"
 
-# Node serve solo a questo passo. In WSL non c'e', ma l'interoperabilita' con
+# Node serve solo a questo passo. Se in WSL manca, l'interoperabilita' con
 # Windows rende disponibile node.exe: in quel caso i percorsi vanno tradotti
 # con wslpath, perche' node.exe non capisce /mnt/c/... Le variabili d'ambiente
 # invece NON attraversano il confine WSL->Windows, ed e' il motivo per cui piu

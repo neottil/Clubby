@@ -9,20 +9,24 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { API_URL, AUTH_URL } from './helpers.ts';
+import { servizi } from './helpers.ts';
+import { usaAmbiente } from './ambiente.ts';
+
+usaAmbiente();
 
 /** Una versione è una stringa non vuota, oppure null se l'ambiente non la dichiara. */
 function versioneValida(v: unknown): boolean {
   return v === null || (typeof v === 'string' && v.length > 0);
 }
 
-for (const [servizio, url] of [
-  ['backend', `${API_URL}/api/version`],
-  ['authorizer', `${AUTH_URL}/version`],
+// Gli indirizzi si leggono dentro i test: i servizi partono nel before.
+for (const [servizio, indirizzo] of [
+  ['backend', () => `${servizi.api}/api/version`],
+  ['authorizer', () => `${servizi.auth}/version`],
 ] as const) {
   describe(`Versione del ${servizio}`, () => {
     it('risponde 200 senza token, con una versione o null', async () => {
-      const res = await fetch(url);
+      const res = await fetch(indirizzo());
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.ok('version' in body, 'manca il campo version');
@@ -30,12 +34,12 @@ for (const [servizio, url] of [
     });
 
     it('ignora un token non valido invece di rifiutarlo', async () => {
-      const res = await fetch(url, { headers: { Authorization: 'Bearer non-un-token' } });
+      const res = await fetch(indirizzo(), { headers: { Authorization: 'Bearer non-un-token' } });
       assert.equal(res.status, 200);
     });
 
     it('espone gli header CORS: la chiama il browser', async () => {
-      const res = await fetch(url);
+      const res = await fetch(indirizzo());
       assert.ok(res.headers.get('access-control-allow-origin'), 'manca Access-Control-Allow-Origin');
     });
   });
@@ -43,8 +47,8 @@ for (const [servizio, url] of [
 
 describe('Versione del database', () => {
   it('è il numero dell\'ultima migrazione presente nel repository', async () => {
-    // Il database dei test è migrato con questi stessi file (compose in locale,
-    // migra.sh in CI): se il numero non coincide, lo schema è indietro rispetto
+    // Il database dei test è migrato con questi stessi file (dal repository in
+    // locale, dall'immagine del backend in CI): se il numero non coincide, lo schema è indietro rispetto
     // al codice — che è esattamente ciò che questa versione deve far vedere.
     const cartella = fileURLToPath(new URL('../../backend/src/db/migrations/', import.meta.url));
     const numeri = readdirSync(cartella)
@@ -54,7 +58,7 @@ describe('Versione del database', () => {
       .sort();
     const attesa = numeri.length > 0 ? numeri[numeri.length - 1] : null;
 
-    const body = await (await fetch(`${API_URL}/api/version`)).json();
+    const body = await (await fetch(`${servizi.api}/api/version`)).json();
     assert.ok('db' in body, 'manca il campo db');
     assert.equal(body.db, attesa);
   });
