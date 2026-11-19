@@ -14,10 +14,17 @@
 
 import { query, withTransaction, type QueryFn } from '../../db/client.js';
 import { limiteEOffset } from '../../util/paginazione.js';
+import { dataValida } from '../../util/date.js';
+import { arrotondaImporto } from '../../util/ricariche.js';
 import { BadRequestError, ConflictError, NotFoundError } from '../../middleware/auth.js';
 import { getSocioById } from '../soci.service.js';
 import { leggiImpostazioni } from '../impostazioni.service.js';
-import { vociPerDocumento, segnaVociEmesse, type RiferimentoVoce } from './voci.service.js';
+import {
+  vociPerDocumento,
+  segnaVociEmesse,
+  type RiferimentoVoce,
+  type RiferimentoVoceEmessa,
+} from './voci.service.js';
 import { prossimoNumero, numeroProvvisorio } from './numerazione.js';
 import { generaDocumentoPdf, type DatiDocumento, type RigaDocumento } from './pdf.js';
 import { percorsoLogo } from './logo.js';
@@ -29,7 +36,8 @@ export interface Documento {
   anno: number;
   numero: number;
   data_documento: string;
-  socio_id: string;
+  /** Null per le ricevute libere (spec 013), intestate a chi non è socio. */
+  socio_id: string | null;
   intestatario: string;
   causale: string;
   importo: number;
@@ -39,10 +47,35 @@ export interface Documento {
   created_at: string;
 }
 
-export interface EmissioneInput {
+/** Ricevuta di un socio: le voci esistono già nel database, qui si indicano. */
+export interface EmissioneSocio {
   socioId: string;
   causale: string;
   voci: RiferimentoVoce[];
+}
+
+/** Una riga di una ricevuta libera, come la scrive l'admin. */
+export interface RigaLiberaInput {
+  /** "YYYY-MM-DD"; omessa vale la data del documento. */
+  data?: unknown;
+  descrizione: unknown;
+  importo: unknown;
+}
+
+/**
+ * Ricevuta libera (spec 013): intestata a chi non è socio, con righe che non
+ * esistono da nessuna parte prima dell'emissione — è l'admin a dichiararle.
+ */
+export interface EmissioneLibera {
+  intestatario: string;
+  causale: string;
+  righe: RigaLiberaInput[];
+}
+
+export type EmissioneInput = EmissioneSocio | EmissioneLibera;
+
+function eLibera(input: EmissioneInput): input is EmissioneLibera {
+  return 'righe' in input;
 }
 
 export interface AnteprimaDocumento {
@@ -56,6 +89,12 @@ export interface AnteprimaDocumento {
 
 /** Massimo di voci in un documento: oltre, la selezione è quasi certo un errore. */
 const MAX_VOCI = 200;
+
+/**
+ * Massimo di righe in una ricevuta libera. Una ricevuta per un evento ne ha
+ * poche: il limite c'è per non accettare un corpo arbitrario.
+ */
+const MAX_RIGHE_LIBERE = 50;
 
 /**
  * Nome del file scaricato: anno prima del numero, così i file di un club
@@ -89,6 +128,7 @@ async function preparaDati(
 ): Promise<{ dati: DatiDocumento; importo: number; vociValide: number }> {
   const causale = input.causale?.trim();
   if (!causale) throw new BadRequestError('La causale è obbligatoria');
+  if (eLibera(input)) return preparaDatiLibera(input, causale, numero);
   if (!Array.isArray(input.voci) || input.voci.length === 0) {
     throw new BadRequestError('Seleziona almeno una voce da documentare');
   }
@@ -102,32 +142,91 @@ async function preparaDati(
     throw new ConflictError('Nessuna delle voci selezionate è ancora da registrare');
   }
 
-  const impostazioni = await leggiImpostazioni();
   const intestatario = `${socio.nome} ${socio.cognome}`.trim();
   const data = oggi();
-  const anno = Number(data.slice(0, 4));
 
   const righe: RigaDocumento[] = voci.map(v => ({
     data: String(v.data).slice(0, 10),
     descrizione: v.descrizione,
     importo: Number(v.importo),
   }));
+
+  return componiDati({ numero, data, intestatario, causale, righe }, voci.length);
+}
+
+/**
+ * Valida le righe di una ricevuta libera e le porta nella forma del PDF.
+ *
+ * Qui gli importi arrivano dal client, ed è l'unico punto dell'area in cui
+ * succede: le righe libere non esistono altrove da cui ricalcolarle (spec 013).
+ * Il **totale** invece resta del backend, che somma le righe.
+ */
+function righeLibere(righe: unknown, oggiIso: string): RigaDocumento[] {
+  if (!Array.isArray(righe) || righe.length === 0) {
+    throw new BadRequestError('Serve almeno una riga');
+  }
+  if (righe.length > MAX_RIGHE_LIBERE) {
+    throw new BadRequestError(`Una ricevuta libera ha al massimo ${MAX_RIGHE_LIBERE} righe`);
+  }
+  return righe.map((r: RigaLiberaInput, i) => {
+    const n = i + 1;
+    const descrizione = typeof r?.descrizione === 'string' ? r.descrizione.trim() : '';
+    if (!descrizione) throw new BadRequestError(`Riga ${n}: la descrizione è obbligatoria`);
+
+    const importo = Number(r.importo);
+    if (r.importo === null || r.importo === '' || typeof r.importo === 'boolean'
+        || !Number.isFinite(importo) || arrotondaImporto(importo) <= 0) {
+      throw new BadRequestError(`Riga ${n}: l'importo deve essere positivo`);
+    }
+
+    let data = oggiIso;
+    if (r.data !== undefined && r.data !== null && r.data !== '') {
+      if (!dataValida(r.data)) {
+        throw new BadRequestError(`Riga ${n}: la data deve essere valida, nel formato YYYY-MM-DD`);
+      }
+      // Confronto fra stringhe ISO: stesso formato, quindi stesso ordine.
+      if (r.data > oggiIso) throw new BadRequestError(`Riga ${n}: la data non può essere futura`);
+      data = r.data;
+    }
+    return { data, descrizione, importo: arrotondaImporto(importo) };
+  });
+}
+
+function preparaDatiLibera(
+  input: EmissioneLibera,
+  causale: string,
+  numero: number
+): Promise<{ dati: DatiDocumento; importo: number; vociValide: number }> {
+  const intestatario = typeof input.intestatario === 'string' ? input.intestatario.trim() : '';
+  if (!intestatario) throw new BadRequestError('L\'intestatario è obbligatorio');
+
+  const data = oggi();
+  const righe = righeLibere(input.righe, data);
+  return componiDati({ numero, data, intestatario, causale, righe }, righe.length);
+}
+
+/**
+ * La parte comune ai due tipi di ricevuta: totale, importo in lettere e i
+ * testi del club. Intestazione, piè di pagina e logo sono gli stessi per
+ * tutte: è lo stesso documento dell'associazione (spec 013).
+ */
+async function componiDati(
+  base: { numero: number; data: string; intestatario: string; causale: string; righe: RigaDocumento[] },
+  vociValide: number
+): Promise<{ dati: DatiDocumento; importo: number; vociValide: number }> {
+  const impostazioni = await leggiImpostazioni();
   // Arrotondato al centesimo: la somma di più NUMERIC letti come float
   // potrebbe altrimenti dare 160.00000000000003, che finirebbe in lettere.
-  const importo = Math.round(righe.reduce((t, r) => t + r.importo, 0) * 100) / 100;
+  const importo = Math.round(base.righe.reduce((t, r) => t + r.importo, 0) * 100) / 100;
 
   return {
     importo,
-    vociValide: voci.length,
+    vociValide,
     dati: {
-      numero,
-      anno,
-      data,
-      intestatario,
-      causale,
+      ...base,
+      anno: Number(base.data.slice(0, 4)),
       importo,
       importoLettere: importoInLettere(importo),
-      righe,
       intestazione: impostazioni.ricevuta_intestazione,
       piePagina: impostazioni.ricevuta_pie_pagina,
       logo: percorsoLogo(),
@@ -178,8 +277,9 @@ export async function emettiDocumento(
     // Se fra l'anteprima e la conferma qualcuno ha registrato una delle voci,
     // l'importo non è più quello visto a schermo: si annulla tutto e si
     // chiede di rifare la selezione, invece di emettere un documento diverso
-    // da quello approvato.
-    if (vociValide !== input.voci.length) {
+    // da quello approvato. Le righe libere nascono qui: non c'è niente che
+    // possa essere cambiato nel frattempo.
+    if (!eLibera(input) && vociValide !== input.voci.length) {
       throw new ConflictError(
         'Alcune delle voci selezionate sono già finite in una ricevuta nel frattempo. Ricarica l\'elenco e rifai la selezione.'
       );
@@ -201,7 +301,7 @@ export async function emettiDocumento(
         anno,
         numero,
         data: dati.data,
-        socioId: input.socioId,
+        socioId: eLibera(input) ? null : input.socioId,
         intestatario: dati.intestatario,
         causale: dati.causale,
         importo,
@@ -214,7 +314,13 @@ export async function emettiDocumento(
 
     const documento = toDocumento(inserito.rows[0]);
 
-    const esito = await segnaVociEmesse(input.voci, documento.id, q);
+    // Le righe libere si scrivono adesso, e si legano alla ricevuta come ogni
+    // altra voce: un solo percorso documento → documento_emesso_voce → origine.
+    const voci = eLibera(input)
+      ? await scriviVociLibere(dati.righe, q)
+      : input.voci;
+
+    const esito = await segnaVociEmesse(voci, documento.id, q);
     // Seconda rete: fra il controllo sopra e questa INSERT un'altra
     // transazione potrebbe aver marcato le stesse voci. L'indice unico la
     // ferma, e qui ce ne accorgiamo prima di confermare.
@@ -228,6 +334,32 @@ export async function emettiDocumento(
   });
 }
 
+/**
+ * Scrive le righe di una ricevuta libera e ne restituisce i riferimenti, nello
+ * stesso ordine. `WITH ORDINALITY` numera le righe come arrivano: è la
+ * `posizione`, che il PDF ripete.
+ */
+async function scriviVociLibere(
+  righe: RigaDocumento[],
+  q: QueryFn
+): Promise<RiferimentoVoceEmessa[]> {
+  const result = await q(
+    `INSERT INTO ricevuta_voce_libera (posizione, data, descrizione, importo)
+     SELECT r.posizione, CAST(r.data AS DATE), r.descrizione, CAST(r.importo AS NUMERIC)
+       FROM UNNEST(CAST(:date AS TEXT[]), CAST(:descrizioni AS TEXT[]), CAST(:importi AS TEXT[]))
+            WITH ORDINALITY AS r(data, descrizione, importo, posizione)
+     RETURNING id, posizione`,
+    {
+      date: righe.map(r => r.data),
+      descrizioni: righe.map(r => r.descrizione),
+      importi: righe.map(r => String(r.importo)),
+    }
+  );
+  return result.rows
+    .sort((a, b) => Number(a.posizione) - Number(b.posizione))
+    .map(r => ({ tipo: 'libera' as const, id: r.id as string }));
+}
+
 export interface ListDocumentiOptions {
   socioId?: string;
   /** Estremi inclusi, "YYYY-MM-DD". */
@@ -238,7 +370,8 @@ export interface ListDocumentiOptions {
 }
 
 export interface PaginaDocumenti {
-  rows: Array<Documento & { nome: string; cognome: string }>;
+  /** `nome` e `cognome` del socio; null per le ricevute libere. */
+  rows: Array<Documento & { nome: string | null; cognome: string | null }>;
   total: number;
 }
 
@@ -269,7 +402,10 @@ export async function listDocumenti(options: ListDocumentiOptions = {}): Promise
             d.created_at, s.nome, s.cognome,
             COUNT(*) OVER() AS total_count
        FROM documento d
-       JOIN socio s ON s.id = d.socio_id
+       -- LEFT: le ricevute libere (spec 013) non hanno un socio, e con una
+       -- JOIN semplice sparirebbero dall'elenco. Il filtro per socio le
+       -- esclude comunque, perché NULL non è uguale a nessun id.
+       LEFT JOIN socio s ON s.id = d.socio_id
        ${whereSql}
       ORDER BY d.anno DESC, d.numero DESC
       LIMIT :limit OFFSET :offset`,
@@ -281,8 +417,8 @@ export async function listDocumenti(options: ListDocumentiOptions = {}): Promise
     const { total_count: _n, nome, cognome, ...documento } = row as Record<string, unknown>;
     return {
       ...toDocumento(documento),
-      nome: nome as string,
-      cognome: cognome as string,
+      nome: (nome as string) ?? null,
+      cognome: (cognome as string) ?? null,
     };
   });
 
@@ -310,7 +446,7 @@ function toDocumento(row: Record<string, unknown>): Documento {
     // riceverebbe "160.00" e lo stamperebbe come testo.
     importo: Number(row.importo),
     data_documento: String(row.data_documento).slice(0, 10),
-    socio_id: row.socio_id as string,
+    socio_id: (row.socio_id as string) ?? null,
     intestatario: row.intestatario as string,
     causale: row.causale as string,
     importo_lettere: row.importo_lettere as string,

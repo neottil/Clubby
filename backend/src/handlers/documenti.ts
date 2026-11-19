@@ -26,6 +26,7 @@ import {
   emettiDocumento,
   listDocumenti,
   getDocumentoConPdf,
+  type EmissioneInput,
 } from '../service/documenti/documenti.service.js';
 import { getSocioByViewerId } from '../service/soci.service.js';
 import { corpoJson } from '../util/corpo.js';
@@ -69,6 +70,39 @@ function leggiVoci(body: Record<string, unknown>): RiferimentoVoce[] {
   return voci as RiferimentoVoce[];
 }
 
+/**
+ * Il corpo di anteprima ed emissione, in uno dei due formati: di un socio
+ * (`socio_id` + `voci`) o libero (`intestatario` + `righe`, spec 013).
+ *
+ * Mescolarli è un 400 e non una precedenza silenziosa: chi manda entrambi ha
+ * sbagliato qualcosa, e scegliere per lui emetterebbe un documento che non si
+ * annulla.
+ */
+function leggiEmissione(body: Record<string, unknown>): EmissioneInput {
+  const causale = String(body.causale ?? '');
+  const diSocio = body.socio_id !== undefined || body.voci !== undefined;
+  const libera = body.intestatario !== undefined || body.righe !== undefined;
+
+  if (diSocio && libera) {
+    throw new BadRequestError(
+      'Una ricevuta è di un socio (socio_id e voci) oppure libera (intestatario e righe), non entrambe'
+    );
+  }
+  if (libera) {
+    if (typeof body.intestatario !== 'string') {
+      throw new BadRequestError('intestatario è obbligatorio');
+    }
+    if (!Array.isArray(body.righe)) {
+      throw new BadRequestError('righe è obbligatorio e deve essere un elenco');
+    }
+    return { intestatario: body.intestatario, causale, righe: body.righe };
+  }
+  if (typeof body.socio_id !== 'string' || !body.socio_id) {
+    throw new BadRequestError('socio_id è obbligatorio, oppure intestatario e righe per una ricevuta libera');
+  }
+  return { socioId: body.socio_id, causale, voci: leggiVoci(body) };
+}
+
 export const handler = async (
   event: RequestEvent
 ): Promise<ResponseResult> => {
@@ -84,7 +118,8 @@ export const handler = async (
     // L'UNICA rotta dell'area aperta oltre l'admin. Il controllo non è "sei un
     // socio" ma "sei IL socio": si confronta documento.socio_id con la scheda
     // di chi chiama. Un socio che prova l'id della ricevuta di un altro
-    // riceve 403.
+    // riceve 403. Una ricevuta libera ha socio_id NULL, che non coincide con
+    // nessuna scheda: la riapre solo l'admin (spec 013).
     // -----------------------------------------------------------
     if (metodo === 'GET' && id) {
       const { documento, pdf } = await getDocumentoConPdf(id);
@@ -130,15 +165,7 @@ export const handler = async (
     // POST /api/documenti/anteprima — genera il PDF senza scrivere niente
     // -----------------------------------------------------------
     if (metodo === 'POST' && percorso.endsWith('/anteprima')) {
-      const body = corpoJson(event);
-      if (typeof body.socio_id !== 'string' || !body.socio_id) {
-        throw new BadRequestError('socio_id è obbligatorio');
-      }
-      const anteprima = await anteprimaDocumento({
-        socioId: body.socio_id,
-        causale: String(body.causale ?? ''),
-        voci: leggiVoci(body),
-      });
+      const anteprima = await anteprimaDocumento(leggiEmissione(corpoJson(event)));
       // JSON e non il PDF grezzo: all'anteprima servono anche il numero
       // provvisorio e l'importo in lettere, che il frontend mostra accanto
       // al documento prima della conferma.
@@ -177,16 +204,8 @@ export const handler = async (
     // POST /api/documenti — emissione definitiva
     // -----------------------------------------------------------
     if (metodo === 'POST') {
-      const body = corpoJson(event);
-      if (typeof body.socio_id !== 'string' || !body.socio_id) {
-        throw new BadRequestError('socio_id è obbligatorio');
-      }
       const { documento, pdf } = await emettiDocumento(
-        {
-          socioId: body.socio_id,
-          causale: String(body.causale ?? ''),
-          voci: leggiVoci(body),
-        },
+        leggiEmissione(corpoJson(event)),
         auth.userId
       );
       return created({

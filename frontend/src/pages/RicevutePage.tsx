@@ -15,6 +15,10 @@
  * non coperti da voucher. Gli incontri pagati col voucher, le rettifiche e il
  * saldo importato non compaiono (il perché è in
  * service/documenti/voci.service.ts nel backend).
+ *
+ * Accanto, la ricevuta libera (spec 013): per chi non è socio, con intestatario
+ * e righe scritti a mano. Non passa dalle voci, ma finisce nella stessa
+ * numerazione e nella stessa scheda delle ricevute emesse.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -33,8 +37,8 @@ import Etichetta from '../components/Etichetta';
 import Modal from '../components/Modal';
 import Tabs from '../components/Tabs';
 import ApriRicevuta from '../components/ApriRicevuta';
-import { nomeFileRicevuta, scaricaBlob } from '../utils/ricevuta';
-import { euro, dataIso } from '../utils/formato';
+import { nomeFileRicevuta, scaricaBlob, apriPdfBase64, pdfDaBase64 } from '../utils/ricevuta';
+import { euro, dataIso, oggiIso } from '../utils/formato';
 import { ui } from '../styles/ui';
 import { useSelezione } from '../hooks/useSelezione';
 import { messaggioErrore } from '../utils/errori';
@@ -44,15 +48,6 @@ const VOCI: Record<VoceDocumento['tipo'], { etichetta: string; colore: string; s
   tesseramento: { etichetta: 'Tesseramento',     colore: '#92400e', sfondo: '#fffbeb' },
   incontro:     { etichetta: 'Incontro',         colore: '#374151', sfondo: '#f3f4f6' },
 };
-
-/** Apre un PDF ricevuto in base64 in una scheda nuova. */
-function apriPdfBase64(base64: string): void {
-  const byte = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-  const url = URL.createObjectURL(new Blob([byte], { type: 'application/pdf' }));
-  window.open(url, '_blank', 'noopener');
-  // Revoca differita: revocare subito annullerebbe l'apertura appena avviata.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
 
 export default function RicevutePage() {
   const { token } = useAuth();
@@ -153,6 +148,9 @@ function SchedaVoci({ api, soci, socioId, da, a }: SchedaVociProps) {
 
   // --- Emissione ---------------------------------------------------------
   const [modaleAperta, setModaleAperta] = useState(false);
+  // La ricevuta libera ha una modale sua: non usa né il socio filtrato né la
+  // selezione, e chiudendola la pagina resta com'era (spec 013).
+  const [liberaAperta, setLiberaAperta] = useState(false);
   const [causale, setCausale]           = useState('');
   const [anteprima, setAnteprima]       = useState<AnteprimaDocumento | null>(null);
   const [inCorso, setInCorso]           = useState(false);
@@ -254,14 +252,10 @@ function SchedaVoci({ api, soci, socioId, da, a }: SchedaVociProps) {
         causale: causale.trim(),
         voci: vociScelte(),
       });
-      const byte = Uint8Array.from(atob(emesso.pdf_base64), c => c.charCodeAt(0));
       // Il nome si ricalcola invece di usare emesso.nome_file: è lo stesso, ma
       // così il download subito dopo l'emissione e quello dalle tabelle
       // passano dall'unica funzione che decide come si chiama una ricevuta.
-      scaricaBlob(
-        new Blob([byte], { type: 'application/pdf' }),
-        nomeFileRicevuta(emesso.anno, emesso.numero),
-      );
+      scaricaBlob(pdfDaBase64(emesso.pdf_base64), nomeFileRicevuta(emesso.anno, emesso.numero));
       setEsito(`Ricevuta n. ${emesso.numero}/${emesso.anno} emessa per ${euro(emesso.importo)}.`);
       chiudiModale();
       selezione.azzera();
@@ -306,6 +300,13 @@ function SchedaVoci({ api, soci, socioId, da, a }: SchedaVociProps) {
             title={motivoBlocco || undefined}
           >
             Emetti ricevuta ({selezione.quanti})
+          </button>
+          <button
+            style={styles.btnSecondario}
+            onClick={() => setLiberaAperta(true)}
+            title='Per chi non è socio: intestatario e righe si scrivono a mano'
+          >
+            Ricevuta libera
           </button>
         </div>
       </div>
@@ -450,7 +451,256 @@ function SchedaVoci({ api, soci, socioId, da, a }: SchedaVociProps) {
           )}
         </Modal>
       )}
+
+      {liberaAperta && (
+        <ModaleRicevutaLibera
+          api={api}
+          onChiudi={() => setLiberaAperta(false)}
+          onEmessa={messaggio => { setLiberaAperta(false); setEsito(messaggio); }}
+        />
+      )}
     </>
+  );
+}
+
+// =====================================================================
+// Ricevuta libera (spec 013)
+// =====================================================================
+
+interface RigaForm {
+  /** Solo per React: le righe si tolgono da qualunque posizione. */
+  chiave: number;
+  data: string;
+  descrizione: string;
+  importo: string;
+}
+
+const MAX_RIGHE_LIBERE = 50;
+
+/**
+ * Ricevuta per chi non è socio — un iscritto di un altro club a una gara, un
+ * partecipante a un evento. Intestatario, causale e righe li scrive l'admin;
+ * numerazione, intestazione e piè di pagina sono quelli di ogni ricevuta.
+ *
+ * Il percorso dopo il form è lo stesso della ricevuta di un socio: anteprima
+ * con numero provvisorio, poi conferma, che non si annulla.
+ */
+function ModaleRicevutaLibera({ api, onChiudi, onEmessa }: {
+  api: Api;
+  onChiudi: () => void;
+  onEmessa: (messaggio: string) => void;
+}) {
+  const oggi = oggiIso();
+  const prossimaChiave = useRef(1);
+  const rigaVuota = (): RigaForm => ({ chiave: prossimaChiave.current++, data: oggi, descrizione: '', importo: '' });
+
+  const [intestatario, setIntestatario] = useState('');
+  const [causale, setCausale]           = useState('');
+  // Finché l'admin non la tocca, la causale segue la descrizione della prima
+  // riga: con una riga sola sono quasi sempre la stessa frase.
+  const [causaleToccata, setCausaleToccata] = useState(false);
+  const [righe, setRighe]               = useState<RigaForm[]>(() => [rigaVuota()]);
+  const [anteprima, setAnteprima]       = useState<AnteprimaDocumento | null>(null);
+  const [inCorso, setInCorso]           = useState(false);
+  const [errore, setErrore]             = useState('');
+
+  const aggiorna = (chiave: number, campo: keyof Omit<RigaForm, 'chiave'>, valore: string) => {
+    setRighe(prev => prev.map(r => r.chiave === chiave ? { ...r, [campo]: valore } : r));
+    if (!causaleToccata && campo === 'descrizione' && righe[0]?.chiave === chiave) setCausale(valore);
+  };
+
+  const importoRiga = (r: RigaForm) => parseFloat(r.importo);
+  const totale = Math.round(righe.reduce((t, r) => t + (importoRiga(r) > 0 ? importoRiga(r) : 0), 0) * 100) / 100;
+
+  const motivoBlocco = !intestatario.trim()
+    ? 'Scrivi l\'intestatario'
+    : !causale.trim()
+      ? 'Scrivi la causale'
+      : righe.some(r => !r.descrizione.trim())
+        ? 'Ogni riga ha bisogno di una descrizione'
+        : righe.some(r => !(importoRiga(r) > 0))
+          ? 'Ogni riga ha bisogno di un importo positivo'
+          : righe.some(r => r.data > oggi)
+            ? 'Una riga ha una data futura'
+            : '';
+
+  const corpo = () => ({
+    intestatario: intestatario.trim(),
+    causale: causale.trim(),
+    righe: righe.map(r => ({
+      data: r.data || undefined,
+      descrizione: r.descrizione.trim(),
+      importo: importoRiga(r),
+    })),
+  });
+
+  const generaAnteprima = async () => {
+    setInCorso(true);
+    setErrore('');
+    try {
+      setAnteprima(await api.anteprimaDocumento(corpo()));
+    } catch (e) {
+      setErrore(messaggioErrore(e));
+    } finally {
+      setInCorso(false);
+    }
+  };
+
+  const conferma = async () => {
+    setInCorso(true);
+    setErrore('');
+    try {
+      const emesso = await api.emettiDocumento(corpo());
+      scaricaBlob(pdfDaBase64(emesso.pdf_base64), nomeFileRicevuta(emesso.anno, emesso.numero));
+      onEmessa(
+        `Ricevuta libera n. ${emesso.numero}/${emesso.anno} emessa per ${euro(emesso.importo)}: la trovi in Ricevute emesse.`
+      );
+    } catch (e) {
+      setErrore(messaggioErrore(e));
+      setAnteprima(null);
+    } finally {
+      setInCorso(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={anteprima ? 'Conferma la ricevuta libera' : 'Ricevuta libera'}
+      width={anteprima ? 460 : 640}
+      onClose={onChiudi}
+      footer={
+        anteprima ? (
+          <>
+            <button style={styles.btnSecondario} onClick={() => setAnteprima(null)} disabled={inCorso}>
+              Indietro
+            </button>
+            <button style={styles.btn} onClick={conferma} disabled={inCorso}>
+              {inCorso ? 'Emissione...' : 'Conferma ed emetti'}
+            </button>
+          </>
+        ) : (
+          <>
+            <button style={styles.btnSecondario} onClick={onChiudi} disabled={inCorso}>
+              Annulla
+            </button>
+            <button
+              style={{ ...styles.btn, ...(motivoBlocco ? styles.btnSpento : {}) }}
+              onClick={generaAnteprima}
+              disabled={!!motivoBlocco || inCorso}
+              title={motivoBlocco || undefined}
+            >
+              {inCorso ? 'Generazione...' : 'Genera anteprima'}
+            </button>
+          </>
+        )
+      }
+    >
+      {errore && <Avviso tipo='errore' messaggio={errore} onChiudi={() => setErrore('')} />}
+
+      {anteprima ? (
+        <>
+          <p style={styles.riepilogo}>
+            <strong>{intestatario.trim()}</strong>
+            {' — '}
+            {righe.length} {righe.length === 1 ? 'riga' : 'righe'}
+          </p>
+          <p style={styles.riepilogo}>
+            Ricevuta n. <strong>{anteprima.numero_provvisorio}/{anteprima.anno}</strong> —{' '}
+            <strong>{euro(anteprima.importo)}</strong>
+            <br />
+            <span style={styles.lettere}>{anteprima.importo_lettere}</span>
+          </p>
+          <button style={styles.btnSecondario} onClick={() => apriPdfBase64(anteprima.pdf_base64)}>
+            Apri l'anteprima in PDF
+          </button>
+          <p style={styles.avvertenza}>
+            Il numero è provvisorio: quello definitivo viene assegnato alla conferma.
+            Una ricevuta emessa non si annulla.
+          </p>
+        </>
+      ) : (
+        <div style={styles.formLibera}>
+          <p style={styles.notaLibera}>
+            Per chi non è socio, ad esempio l'iscritto di un altro club a una gara. Per gli incassi
+            di un socio registrati in Clubby usa le voci: la ricevuta libera non compare nella sua area.
+          </p>
+          <label style={styles.campo}>
+            Intestatario
+            <input
+              style={styles.input}
+              value={intestatario}
+              onChange={e => setIntestatario(e.target.value)}
+              placeholder='es. Mario Rossi — ASD Cinofila Lago'
+              autoFocus
+              maxLength={200}
+            />
+          </label>
+          <label style={styles.campo}>
+            Causale
+            <input
+              style={styles.input}
+              value={causale}
+              onChange={e => { setCausale(e.target.value); setCausaleToccata(true); }}
+              placeholder='es. iscrizione alla gara del 12 ottobre'
+              maxLength={500}
+            />
+          </label>
+
+          <div style={styles.campo}>
+            Righe
+            {righe.map((r, i) => (
+              <div key={r.chiave} style={styles.rigaLibera}>
+                <input
+                  type='date'
+                  style={{ ...styles.input, ...styles.rigaData }}
+                  value={r.data}
+                  max={oggi}
+                  onChange={e => aggiorna(r.chiave, 'data', e.target.value)}
+                  aria-label={`Data della riga ${i + 1}`}
+                />
+                <input
+                  style={{ ...styles.input, ...styles.rigaDescrizione }}
+                  value={r.descrizione}
+                  onChange={e => aggiorna(r.chiave, 'descrizione', e.target.value)}
+                  placeholder='Descrizione'
+                  maxLength={300}
+                  aria-label={`Descrizione della riga ${i + 1}`}
+                />
+                <input
+                  type='number'
+                  step='0.01'
+                  min='0.01'
+                  style={{ ...styles.input, ...styles.rigaImporto }}
+                  value={r.importo}
+                  onChange={e => aggiorna(r.chiave, 'importo', e.target.value)}
+                  placeholder='€'
+                  aria-label={`Importo della riga ${i + 1}`}
+                />
+                <button
+                  style={styles.btnSmall}
+                  onClick={() => setRighe(prev => prev.filter(x => x.chiave !== r.chiave))}
+                  disabled={righe.length === 1}
+                  title={righe.length === 1 ? 'Serve almeno una riga' : 'Togli la riga'}
+                  aria-label={`Togli la riga ${i + 1}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <div style={styles.piedeRighe}>
+              <button
+                style={styles.btnSmall}
+                onClick={() => setRighe(prev => [...prev, rigaVuota()])}
+                disabled={righe.length >= MAX_RIGHE_LIBERE}
+              >
+                + Aggiungi riga
+              </button>
+              <span>Totale <strong>{euro(totale)}</strong></span>
+            </div>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -523,7 +773,9 @@ function SchedaDocumenti({ api, socioId, da, a }: { api: Api; socioId: string; d
             <table style={{ ...styles.table, opacity: loading ? 0.55 : 1 }} aria-busy={loading}>
               <thead>
                 <tr>
-                  {['Ricevuta', 'Data', 'Socio', 'Causale', 'Importo'].map(h => (
+                  {/* "Intestatario" e non "Socio": con le ricevute libere
+                      (spec 013) non tutti gli intestatari sono soci. */}
+                  {['Ricevuta', 'Data', 'Intestatario', 'Causale', 'Importo'].map(h => (
                     <th key={h} style={h === 'Importo' ? { ...styles.th, textAlign: 'right' } : styles.th}>{h}</th>
                   ))}
                 </tr>
@@ -541,7 +793,17 @@ function SchedaDocumenti({ api, socioId, da, a }: { api: Api; socioId: string; d
                     {/* intestatario e non cognome+nome: è come si chiamava il
                         socio quando la ricevuta è stata consegnata, e il
                         documento deve restare leggibile com'era. */}
-                    <td style={styles.td}>{d.intestatario}</td>
+                    <td style={styles.td}>
+                      {d.intestatario}
+                      {/* Chi scorre l'elenco deve sapere che questa persona
+                          non la troverà fra i soci. */}
+                      {d.socio_id === null && (
+                        <>
+                          {' '}
+                          <Etichetta testo='non socio' colore='#6b21a8' sfondo='#faf5ff' />
+                        </>
+                      )}
+                    </td>
                     <td style={styles.td}>{d.causale}</td>
                     <td style={{ ...styles.td, ...styles.importo }}>{euro(d.importo)}</td>
                   </tr>
@@ -597,4 +859,16 @@ const styles: Record<string, React.CSSProperties> = {
   riepilogo: { margin: '0 0 12px', fontSize: 14, color: '#374151', lineHeight: 1.5 },
   lettere: { fontSize: 13, color: '#6b7280', fontStyle: 'italic' },
   avvertenza: { margin: '12px 0 0', fontSize: 12, color: '#92400e', lineHeight: 1.5 },
+  // Ricevuta libera: su schermo stretto la riga va a capo, con la descrizione
+  // a tutta larghezza sotto data e importo.
+  formLibera: { display: 'flex', flexDirection: 'column', gap: 14 },
+  notaLibera: { margin: 0, fontSize: 12, color: '#6b7280', lineHeight: 1.5 },
+  rigaLibera: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
+  rigaData: { width: 150, flex: '0 0 150px' },
+  rigaDescrizione: { width: 'auto', flex: '1 1 200px', minWidth: 0 },
+  rigaImporto: { width: 110, flex: '0 0 110px' },
+  piedeRighe: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    gap: 12, flexWrap: 'wrap', color: '#374151', fontSize: 14,
+  },
 };

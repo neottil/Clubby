@@ -9,7 +9,9 @@
  *               dall'admin (impostazione "percentuale_ricarica").
  *   map         L'admin sceglie da un elenco di tagli preconfigurati
  *               (tabella ricarica_taglio): ogni taglio dichiara quanto si paga
- *               e quanto viene accreditato, es. 100 → 110.
+ *               e quanto viene accreditato, es. 100 → 110. In fondo
+ *               all'elenco c'è sempre "Altro importo…", con cui l'admin
+ *               indica sia il pagato sia il valore (spec 013).
  *
  * In tutte e tre, le ricevute contano SOLO l'importo pagato: il valore
  * aggiunto non è denaro incassato, e registrarlo significherebbe dichiarare un

@@ -201,6 +201,17 @@ export interface RiferimentoVoce {
 }
 
 /**
+ * Ciò che può finire in `documento_emesso_voce`: le tre fonti selezionabili,
+ * più le righe delle ricevute libere (spec 013). `'libera'` non è un
+ * `TipoVoce` perché non si sceglie mai da un elenco: le righe libere nascono
+ * già emesse, dentro la transazione che emette la ricevuta.
+ */
+export interface RiferimentoVoceEmessa {
+  tipo: TipoVoce | 'libera';
+  id: string;
+}
+
+/**
  * Lega le voci indicate al documento appena creato, e risponde con quante
  * sono state marcate DAVVERO in questa chiamata.
  *
@@ -216,7 +227,7 @@ export interface RiferimentoVoce {
  * comparirà comunque in nessun elenco, perché la JOIN parte dalle voci vere.
  */
 export async function segnaVociEmesse(
-  voci: RiferimentoVoce[],
+  voci: RiferimentoVoceEmessa[],
   documentoId: string,
   q: QueryFn = query
 ): Promise<{ richieste: number; emesse: number }> {

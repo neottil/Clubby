@@ -230,7 +230,7 @@ clubby/
 | `npm run install:all` | Installa le dipendenze dei tre moduli |
 | `npm run dev` | Avvia backend, authorizer e frontend insieme |
 | `npm run dev:backend` | Solo backend (porta 3000) |
-| `npm run dev:backend:test` | Backend per la suite: `backend/.env.test` sopra a `.env`, senza watch |
+| `npm run dev:backend:test` | Backend per la suite: `backend/.env.test` sopra a `.env` sulla 3000, più l'istanza `backend/.env.test-varianti` sulla 3002 (tagli, moduli spenti); senza watch |
 | `npm run dev:authorizer` | Solo authorizer (porta 3001) |
 | `npm run dev:frontend` | Solo frontend (porta 5173) |
 | `npm run db:migra` | Applica le migrazioni pendenti ai due database |
@@ -260,7 +260,7 @@ Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`, tranne `/a
 | `/api/incontri/:id` | GET/PATCH/DELETE | Incontro |
 | `/api/incontri/rendiconta` | POST | Segna incontri come rendicontati (admin) |
 | `/api/voucher` | GET/POST | Voucher prepagati |
-| `/api/voucher/:id/movimenti` | GET/POST | Movimenti di un voucher |
+| `/api/voucher/:id/movimenti` | GET/POST | Movimenti di un voucher; in modalità `map` la ricarica accetta anche `valore` ("Altro importo…") |
 | `/api/voucher/:id/ultima-ricarica` | GET | Data e importo dell'ultima ricarica (204 se nessuna) |
 | `/api/ricarica-tagli` | GET/POST | Tagli di ricarica preconfigurati (admin) |
 | `/api/ricarica-tagli/:id` | DELETE | Elimina un taglio |
@@ -268,9 +268,9 @@ Backend (`/api`, tutte autenticate con `Authorization: Bearer <jwt>`, tranne `/a
 | `/api/tesseramenti/:socioId` | GET | Storico dei rinnovi, con numero di tessera e stato: admin **o il socio stesso** *(modulo tesseramento)* |
 | `/api/tesseramenti/rinnovi/:id` | PATCH | Corregge il numero di tessera del tesseramento in corso (admin) *(modulo tesseramento)* |
 | `/api/documenti/voci` | GET | Voci ancora da documentare *(modulo ricevute)* |
-| `/api/documenti/anteprima` | POST | Anteprima della ricevuta, senza scrivere *(modulo ricevute)* |
-| `/api/documenti` | GET/POST | Ricevute emesse / emissione *(modulo ricevute)* |
-| `/api/documenti/:id` | GET | Scarica il PDF: admin o socio intestatario *(modulo ricevute)* |
+| `/api/documenti/anteprima` | POST | Anteprima della ricevuta, di un socio o libera, senza scrivere *(modulo ricevute)* |
+| `/api/documenti` | GET/POST | Ricevute emesse / emissione, di un socio (`socio_id` + `voci`) o libera (`intestatario` + `righe`) *(modulo ricevute)* |
+| `/api/documenti/:id` | GET | Scarica il PDF: admin o socio intestatario; le libere solo admin *(modulo ricevute)* |
 | `/api/impostazioni` | GET/PATCH | Quota di tesseramento, percentuale di ricarica, testi delle ricevute (admin) |
 | `/api/admin/users` | GET | Account con la scheda socio collegata |
 | `/api/admin/associa-viewer` | POST | Collega un account a una scheda socio |
@@ -419,6 +419,11 @@ userebbe un client.
   sopra a `backend/.env` senza modificarlo, e **senza** `--watch`: un riavvio a
   metà suite fa fallire tutto ciò che segue. Non si tocca il `.env` dell'utente
   e non si passano variabili a mano.
+- Lo stesso comando avvia una **seconda istanza** del backend sulla porta 3002
+  (`backend/.env.test-varianti`: `RECHARGE_MODE=map`, moduli spenti), sullo
+  stesso database: è lì che si provano la modalità a tagli e i 404 dei moduli
+  spenti (`API_URL_VARIANTI` in `tests/api/helpers.ts`). I dati si creano
+  sempre dalla prima. Finite le prove, anche la 3002 va liberata (spec 013).
 - In CI la suite gira nel job `test` di `build-deploy.yml`, contro le immagini
   appena buildate e un PostgreSQL usa-e-getta. **Blocca i deploy**, non le build.
 
@@ -429,7 +434,7 @@ si sono creati.** Non "se capita" e non "lo lascio su così puoi provare": chi
 riprende in mano la macchina deve ritrovarla com'era.
 
 - **Servizi**: ogni backend, authorizer, frontend o server di anteprima avviato
-  per provare va fermato. Le porte 3000, 3001 e 5173 devono tornare libere, o
+  per provare va fermato. Le porte 3000, 3001, 3002 e 5173 devono tornare libere, o
   restare occupate **solo** da processi che l'utente aveva già avviato per
   conto suo. Un'istanza dimenticata fa fallire il successivo `npm run dev` con
   un errore di porta occupata che sembra un guasto del progetto.

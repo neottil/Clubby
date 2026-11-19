@@ -200,6 +200,11 @@ rifiutata, perché non ci sono tagli configurati. Il tuo `backend/.env` resta co
 `--watch` di proposito: un riavvio a metà suite fa fallire tutti i test successivi con "non
 raggiungibile".
 
+Lo stesso comando avvia anche una **seconda istanza** del backend sulla porta **3002**, con
+`backend/.env.test-varianti`: modalità a tagli e moduli spenti, per i test che non si possono fare
+sulla prima (`ricariche-map.test.ts`, `moduli-spenti.test.ts`). Usa lo stesso database. Chiudendo il
+comando si fermano entrambe; se la 3002 resta occupata, è un'istanza rimasta accesa.
+
 ```bash
 npm run dev:authorizer
 ```
@@ -224,7 +229,7 @@ npm run test:api:pulizia
 
 La pulizia e il primo admin di prova passano direttamente dai database, con i parametri `DB_*` di
 `backend/.env` e `authorizer/.env` (sostituibili con `TEST_APP_DB_URL` e `TEST_AUTH_DB_URL`); tutto il
-resto si crea dalle API. `API_URL` e `AUTH_URL` cambiano gli indirizzi dei servizi.
+resto si crea dalle API. `API_URL`, `API_URL_VARIANTI` e `AUTH_URL` cambiano gli indirizzi dei servizi.
 
 
 ## Gli strumenti non stanno tutti nella stessa shell

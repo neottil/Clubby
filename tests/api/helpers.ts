@@ -2,12 +2,22 @@
  * Chiamate HTTP ai servizi, per i test delle API.
  *
  * Variabili:
- *   API_URL   backend      (default http://localhost:3000)
- *   AUTH_URL  authorizer   (default http://localhost:3001)
+ *   API_URL            backend      (default http://localhost:3000)
+ *   API_URL_VARIANTI   backend in modalità a tagli e a moduli spenti
+ *                      (default http://localhost:3002, spec 013)
+ *   AUTH_URL           authorizer   (default http://localhost:3001)
  */
 
 export const API_URL  = process.env.API_URL  ?? 'http://localhost:3000';
 export const AUTH_URL = process.env.AUTH_URL ?? 'http://localhost:3001';
+/**
+ * Seconda istanza del backend, sullo stesso database: `RECHARGE_MODE=map` e
+ * moduli spenti, letti dall'ambiente all'avvio e quindi non provabili sulla
+ * prima. La avvia `npm run dev:backend:test` insieme all'altra; se non
+ * risponde i test falliscono, non si saltano: una suite verde che non ha
+ * provato niente direbbe il falso.
+ */
+export const API_URL_VARIANTI = process.env.API_URL_VARIANTI ?? 'http://localhost:3002';
 
 export interface Risposta {
   status: number;
@@ -45,7 +55,7 @@ async function chiama(base: string, method: string, path: string, token?: string
         : JSON.stringify(body),
     });
   } catch (e) {
-    throw new Error(`${base} non raggiungibile (${(e as Error).message}): avvia i servizi con npm run dev`);
+    throw new Error(`${base} non raggiungibile (${(e as Error).message}): avvia i servizi con npm run dev:backend:test e npm run dev:authorizer`);
   }
 
   const testo = await res.text();
@@ -62,6 +72,20 @@ export function claims(token: string): { sub: string; email: string; roles: stri
 /** Chiamata al backend. */
 export function api(s: Sessione, method: string, path: string, body?: unknown): Promise<Risposta> {
   return chiama(API_URL, method, path, s.accessToken, body);
+}
+
+/** Chiamata alla seconda istanza del backend (tagli, moduli spenti). */
+export function apiVarianti(s: Sessione, method: string, path: string, body?: unknown): Promise<Risposta> {
+  return chiama(API_URL_VARIANTI, method, path, s.accessToken, body);
+}
+
+/**
+ * Scarica un corpo binario (il PDF di una ricevuta). `chiama` lo leggerebbe
+ * come testo, e la decodifica UTF-8 rovinerebbe i byte.
+ */
+export async function scaricaBinario(s: Sessione, path: string): Promise<{ status: number; byte: Buffer }> {
+  const res = await fetch(API_URL + path, { headers: { Authorization: `Bearer ${s.accessToken}` } });
+  return { status: res.status, byte: Buffer.from(await res.arrayBuffer()) };
 }
 
 /** Chiamata all'authorizer; il token è facoltativo (login, registrazione, refresh). */

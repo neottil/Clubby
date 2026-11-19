@@ -1,7 +1,7 @@
 {
   "name": "clubby-frontend",
   "private": true,
-  "version": "2.13.1",
+  "version": "2.14.0",
   "type": "module",
   "scripts": {
     "predev": "node ../scripts/copia-branding.mjs frontend && node scripts/genera-icone.mjs",

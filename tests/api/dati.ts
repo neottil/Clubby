@@ -186,6 +186,24 @@ export async function pulisciDatiTest(): Promise<void> {
         WHERE socio_id IN (SELECT id FROM socio WHERE email LIKE $1 OR cognome LIKE $2)`,
       [LIKE_EMAIL, LIKE_NOME]
     );
+    // Ricevute libere di prova (spec 013): nessun socio a cui agganciarle, si
+    // riconoscono dall'intestatario. Legami, righe e documento, in quest'ordine:
+    // il legame punta al documento con una foreign key, e alle righe senza.
+    const libere = `SELECT id FROM documento WHERE socio_id IS NULL AND intestatario LIKE $1`;
+    const { rows: righeLibere } = await app.query(
+      `SELECT riferimento_id FROM documento_emesso_voce
+        WHERE tipo = 'libera' AND documento_id IN (${libere})`,
+      [LIKE_NOME]
+    );
+    await app.query(
+      `DELETE FROM documento_emesso_voce WHERE documento_id IN (${libere})`,
+      [LIKE_NOME]
+    );
+    await app.query(
+      'DELETE FROM ricevuta_voce_libera WHERE id = ANY($1::uuid[])',
+      [righeLibere.map((r: { riferimento_id: string }) => r.riferimento_id)]
+    );
+    await app.query(`DELETE FROM documento WHERE id IN (${libere})`, [LIKE_NOME]);
     // Voucher, movimenti e incontri se ne vanno a cascata con il socio.
     await app.query('DELETE FROM socio WHERE email LIKE $1 OR cognome LIKE $2', [LIKE_EMAIL, LIKE_NOME]);
     // Rete di sicurezza per incontri di prova finiti fuori dai soci di prova,

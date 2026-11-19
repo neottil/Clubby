@@ -452,6 +452,20 @@ export const SEZIONI: Sezione[] = [
           l'anteprima. Da quel momento le voci comprese non si modificano più. La scheda{' '}
           <strong>Ricevute emesse</strong> conserva tutti i PDF, che anche il socio intestatario può riaprire.
         </p>
+        <h4 style={stili.sottotitolo}>Ricevuta libera</h4>
+        <p>
+          Per chi <strong>non è socio</strong>, ad esempio l'iscritto di un altro club a una gara, c'è il
+          pulsante <strong>Ricevuta libera</strong> nella scheda Crea ricevuta. Scrivi l'
+          <strong>Intestatario</strong> (una persona, un club, un ente), la <strong>Causale</strong> e le
+          righe con data, descrizione e importo: <strong>+ Aggiungi riga</strong> ne aggiunge una, la ✕ la
+          toglie, e il totale si aggiorna mentre scrivi. Poi anteprima e conferma, come per le altre.
+        </p>
+        <p>
+          Numerazione, intestazione e piè di pagina sono gli stessi di ogni ricevuta. Una ricevuta libera
+          la vedi e la riapri solo tu: in <strong>Ricevute emesse</strong> ha l'etichetta{' '}
+          <strong>non socio</strong>. Per gli incassi di un socio registrati in Clubby usa le voci, così il
+          socio ritrova la ricevuta nella sua area.
+        </p>
       </>
     ),
   },

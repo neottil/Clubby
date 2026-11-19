@@ -1,0 +1,44 @@
+meta {
+  name: Anteprima ricevuta libera
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/documenti/anteprima
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "intestatario": "Mario Rossi - ASD Cinofila Lago",
+    "causale": "iscrizione alla gara del 12 ottobre",
+    "righe": [
+      { "data": "2026-10-12", "descrizione": "Iscrizione gara agility", "importo": 15.00 },
+      { "descrizione": "Pranzo", "importo": 12.50 }
+    ]
+  }
+}
+
+docs {
+  Solo admin (spec 013). Ricevuta per chi non è socio: intestatario e righe
+  li scrive l'admin, invece di sceglierli fra le voci da documentare. Come
+  l'anteprima di un socio, NON scrive niente.
+
+  Corpo:
+    intestatario  testo libero, obbligatorio (persona, club, ente)
+    causale       testo libero, obbligatorio
+    righe         da 1 a 50: descrizione e importo > 0 obbligatori;
+                  data facoltativa (omessa = oggi), non futura
+
+  Il totale è la somma delle righe: un "importo" nel corpo viene ignorato.
+  Mandare anche socio_id o voci è un 400: una ricevuta è di un socio oppure
+  libera.
+
+  Intestazione, piè di pagina e logo sono quelli di ogni ricevuta.
+}

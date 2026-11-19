@@ -516,7 +516,8 @@ jobs:
       # connessione per le due operazioni che fanno in SQL.
       #
       # RECHARGE_MODE=free è obbligatorio: in modalità "map" la creazione dei
-      # dati di prova verrebbe rifiutata, non essendoci tagli configurati.
+      # dati di prova verrebbe rifiutata, non essendoci tagli configurati. La
+      # modalità a tagli si prova sulla seconda istanza (step successivo).
       # AUTH_JWT_PRIVATE_KEY è assente di proposito: l'authorizer ne genera una
       # effimera all'avvio, che è esattamente ciò che serve a un processo che
       # vive quanto il job.
@@ -560,9 +561,17 @@ jobs:
             "$REGISTRY/clubby-authorizer:${{ steps.immagini.outputs.authorizer }}"
           docker run -d --name backend    --network host --env-file backend/.env \
             "$REGISTRY/clubby-backend:${{ steps.immagini.outputs.backend }}"
+          # Seconda istanza, stessa immagine e stesso database (spec 013):
+          # modalità a tagli e moduli spenti si leggono all'avvio, quindi per
+          # provarli serve un processo avviato così. Le -e vincono sul file.
+          docker run -d --name backend-varianti --network host --env-file backend/.env \
+            -e PORT=3002 -e RECHARGE_MODE=map \
+            -e ENABLE_MODULE_TESSERAMENTO=false -e ENABLE_MODULE_RICEVUTE=false \
+            "$REGISTRY/clubby-backend:${{ steps.immagini.outputs.backend }}"
           for i in $(seq 1 30); do
             if curl -sf http://localhost:3001/health > /dev/null \
-               && curl -sf http://localhost:3000/health > /dev/null; then
+               && curl -sf http://localhost:3000/health > /dev/null \
+               && curl -sf http://localhost:3002/health > /dev/null; then
               echo "Servizi pronti dopo ${i}s."
               exit 0
             fi
@@ -581,6 +590,7 @@ jobs:
         if: failure()
         run: |
           echo "=== backend ==="    && docker logs --tail 50 backend    || true
+          echo "=== backend-varianti ===" && docker logs --tail 50 backend-varianti || true
           echo "=== authorizer ===" && docker logs --tail 50 authorizer || true
 
   # Decide quale immagine backend deployare in QUESTA run (specifico di

@@ -1,0 +1,35 @@
+meta {
+  name: Ricarica con altro importo (admin, modalità map)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/api/voucher/{{voucher_id}}/movimenti
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "tipo": "ricarica",
+    "importo": 40.00,
+    "valore": 45.00,
+    "descrizione": "Ricarica voucher"
+  }
+}
+
+docs {
+  Solo admin, solo con RECHARGE_MODE=map (spec 013): è la voce "Altro
+  importo…" del form. importo è quanto paga il socio (va nelle ricevute),
+  valore quanto viene accreditato sul voucher.
+
+  - valore vale anche se importo coincide con un taglio, e anche senza tagli
+  - valore inferiore a importo, o non positivo → 400
+  - senza valore, un importo fuori taglio → 400 come sempre
+  - in modalità free o percentage un valore nel corpo → 400
+}

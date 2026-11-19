@@ -16,7 +16,9 @@ const MODALITA: Array<{ valore: ModalitaRicarica; nome: string; descrizione: str
     valore: 'map',
     nome: 'Tagli preconfigurati',
     descrizione: 'Si sceglie un taglio da un elenco (per esempio 50 € pagati → 55 € accreditati). '
-      + 'L\'elenco dei tagli si prepara nella card Ricariche delle Impostazioni.',
+      + 'L\'elenco dei tagli si prepara nella card Ricariche delle Impostazioni. In fondo all\'elenco '
+      + 'c\'è sempre "Altro importo…", per le cifre fuori listino: si scrivono l\'importo pagato e il '
+      + 'valore da accreditare, che non può essere inferiore.',
   },
 ];
 

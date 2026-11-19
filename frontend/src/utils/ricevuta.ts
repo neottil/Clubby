@@ -54,6 +54,20 @@ export function scaricaBlob(blob: Blob, nomeFile: string): void {
   scarica(blob, nomeFile);
 }
 
+/** I byte di un PDF arrivato in base64 nel corpo JSON di una risposta. */
+export function pdfDaBase64(base64: string): Blob {
+  const byte = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  return new Blob([byte], { type: 'application/pdf' });
+}
+
+/** Apre un PDF ricevuto in base64 in una scheda nuova: l'anteprima. */
+export function apriPdfBase64(base64: string): void {
+  const url = URL.createObjectURL(pdfDaBase64(base64));
+  window.open(url, '_blank', 'noopener');
+  // Revoca differita: revocare subito annullerebbe l'apertura appena avviata.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 function scarica(blob: Blob, nomeFile: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

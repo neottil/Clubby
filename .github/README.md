@@ -514,8 +514,14 @@ Gira **sempre**, anche quando cambia solo il frontend. Il vantaggio non è solo 
 che baseline e migrazioni si applichino da zero su un database vuoto, cioè quel percorso che in un ambiente
 reale viene eseguito una volta sola e che nessun deploy successivo può più smentire.
 
-Due vincoli da conoscere se lo si modifica: `RECHARGE_MODE=free` è obbligatorio (in modalità `map` la
-creazione dei dati di prova viene rifiutata, non essendoci tagli configurati), e `TEST_APP_DB_URL` /
+Il backend parte **due volte** dalla stessa immagine e sullo stesso database (spec 013): il container
+`backend` sulla 3000, e `backend-varianti` sulla 3002 con `RECHARGE_MODE=map` e i due moduli spenti,
+sovrascritti con `-e` sullo stesso `--env-file`. Modalità di ricarica e moduli si leggono all'avvio, e
+senza la seconda istanza la modalità a tagli e i 404 dei moduli spenti non sarebbero provabili. L'attesa
+su `/health` comprende entrambe, e i log della seconda compaiono anch'essi se qualcosa fallisce.
+
+Due vincoli da conoscere se lo si modifica: `RECHARGE_MODE=free` è obbligatorio sull'istanza principale (in
+modalità `map` la creazione dei dati di prova viene rifiutata, non essendoci tagli configurati), e `TEST_APP_DB_URL` /
 `TEST_AUTH_DB_URL` non vanno impostate — sono le uniche variabili che potrebbero puntare una suite che
 crea e cancella righe verso un database che non è il suo.
 

@@ -157,9 +157,10 @@ export const handler = async (
       }
       // Quanto viene accreditato sul voucher lo decide il server a partire
       // dalla modalità dell'ambiente (RECHARGE_MODE) e dalla configurazione
-      // salvata: dal client arriva solo quanto il socio paga. Se lo mandasse
-      // lui, chi conosce l'API potrebbe accreditarsi il credito che preferisce.
-      const { valore, importoPagato } = await calcolaRicarica(body.importo);
+      // salvata: di norma dal client arriva solo quanto il socio paga.
+      // L'eccezione è la voce "Altro importo…" della modalità a tagli, dove
+      // l'admin indica anche il valore (spec 013): la rotta è già solo sua.
+      const { valore, importoPagato } = await calcolaRicarica(body.importo, body.valore);
 
       // Whitelist esplicita: incontro_id è gestito solo internamente da
       // incontri.service, non deve poter essere impostato da qui.

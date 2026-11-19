@@ -58,6 +58,9 @@ const ETICHETTA_TIPO: Record<Movimento['tipo'], string> = {
 
 const formVoucherVuoto = { socio_id: '', importaSaldo: false, saldo_iniziale: '' };
 
+/** Valore della voce "Altro importo…" nella select dei tagli: non è un importo. */
+const ALTRO_IMPORTO = 'altro';
+
 export default function VouchersPage() {
   const { token, user } = useAuth();
   const api = createApiClient(token);
@@ -107,6 +110,12 @@ export default function VouchersPage() {
   // (entrambe le API sono riservate all'admin, l'unico che registra ricariche).
   const [tagli, setTagli] = useState<TaglioRicarica[]>([]);
   const [percentuale, setPercentuale] = useState(0);
+  // Modalità a tagli, voce "Altro importo…" (spec 013): l'admin scrive il
+  // pagato e il valore da accreditare. Il valore copia il pagato finché non lo
+  // si modifica a mano, così il caso senza extra resta di un campo solo.
+  const [altroImporto, setAltroImporto]     = useState(false);
+  const [valoreRicarica, setValoreRicarica] = useState('');
+  const [valoreToccato, setValoreToccato]   = useState(false);
   const [saving, setSaving]                   = useState(false);
 
   // Dettaglio incontro (aperto cliccando il chip "Incontro" su un movimento)
@@ -236,6 +245,9 @@ export default function VouchersPage() {
   // chiamata sarebbe sprecata (vengono caricati quando si apre "Movimenti").
   const openRicarica = (voucher: Voucher) => {
     setImportoRicarica('');
+    setAltroImporto(false);
+    setValoreRicarica('');
+    setValoreToccato(false);
     setDataRicarica(oggiIso());
     setPanel({ voucher, mode: 'ricarica' });
   };
@@ -302,7 +314,35 @@ export default function VouchersPage() {
     finally { setSaving(false); }
   };
 
-  const ricaricaValida = parseFloat(importoRicarica) > 0 && !!dataRicarica;
+  // In modalità a tagli si scrive il valore quando si sceglie "Altro
+  // importo…", oppure sempre se non ci sono tagli: senza, la select sarebbe
+  // vuota e la ricarica impossibile.
+  const conValore = config.modalitaRicarica === 'map' && (altroImporto || tagli.length === 0);
+  const pagatoRicarica = parseFloat(importoRicarica);
+  const valoreScritto = parseFloat(valoreRicarica);
+  const valoreTroppoBasso = conValore && valoreScritto > 0 && pagatoRicarica > 0 && valoreScritto < pagatoRicarica;
+  const ricaricaValida = pagatoRicarica > 0 && !!dataRicarica
+    && (!conValore || (valoreScritto > 0 && !valoreTroppoBasso));
+  // Il taglio con lo stesso importo, se c'è: con "Altro importo…" non si
+  // applica, ma va detto, perché chi l'ha scelto per sbaglio se ne accorga.
+  const taglioCoincidente = conValore ? tagli.find(t => Number(t.importo) === pagatoRicarica) : undefined;
+
+  const cambiaPagato = (valore: string) => {
+    setImportoRicarica(valore);
+    if (conValore && !valoreToccato) setValoreRicarica(valore);
+  };
+
+  const scegliTaglio = (valore: string) => {
+    if (valore === ALTRO_IMPORTO) {
+      setAltroImporto(true);
+      setImportoRicarica('');
+      setValoreRicarica('');
+      setValoreToccato(false);
+      return;
+    }
+    setAltroImporto(false);
+    setImportoRicarica(valore);
+  };
 
   /**
    * Quanto finirà sul voucher, mostrato sotto il campo prima di salvare.
@@ -326,9 +366,12 @@ export default function VouchersPage() {
       // Ricevute.
       await api.createMovimento(voucher.id, {
         tipo: 'ricarica',
-        importo: parseFloat(importoRicarica),
+        importo: pagatoRicarica,
         data_movimento: dataRicarica,
         descrizione: 'Ricarica voucher',
+        // Solo con "Altro importo…": nelle altre strade il valore lo calcola
+        // il backend dalla configurazione, e un valore inviato sarebbe un 400.
+        ...(conValore ? { valore: valoreScritto } : {}),
       });
       // Aggiorna i saldi e passa ai movimenti: il pannello resta uno solo, e
       // la ricarica appena inserita è subito visibile.
@@ -369,32 +412,72 @@ export default function VouchersPage() {
         <input id='data-ricarica' type='date' style={styles.input} value={dataRicarica} onChange={e => setDataRicarica(e.target.value)} />
       </div>
       {/* In modalità "map" l'importo si sceglie fra i tagli configurati
-          dall'admin: un campo libero accetterebbe valori che il backend
-          rifiuta comunque, non essendoci un taglio corrispondente. */}
+          dall'admin; l'ultima voce, "Altro importo…", apre il pagato e il
+          valore da accreditare (spec 013). */}
       {config.modalitaRicarica === 'map' ? (
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor='importo-ricarica'>Ricarica</label>
-          <select
-            id='importo-ricarica'
-            style={styles.selectPieno}
-            value={importoRicarica}
-            onChange={e => setImportoRicarica(e.target.value)}
-          >
-            <option value=''>Scegli un taglio...</option>
-            {tagli.map(t => (
-              <option key={t.id} value={String(t.importo)}>
-                {euro(t.importo)} → {euro(t.valore)} sul voucher
-              </option>
-            ))}
-          </select>
-          {/* Non è un suggerimento ma un impedimento: senza tagli la ricarica
-              non si può proprio registrare, quindi va letto come un errore. */}
-          {tagli.length === 0 && (
-            <p style={styles.hintErrore}>
-              Nessun taglio configurato: impostali nelle Impostazioni, card Ricariche.
+        <>
+          {tagli.length > 0 ? (
+            <div style={styles.field}>
+              <label style={styles.label} htmlFor='taglio-ricarica'>Ricarica</label>
+              <select
+                id='taglio-ricarica'
+                style={styles.selectPieno}
+                value={altroImporto ? ALTRO_IMPORTO : importoRicarica}
+                onChange={e => scegliTaglio(e.target.value)}
+              >
+                <option value=''>Scegli un taglio...</option>
+                {tagli.map(t => (
+                  <option key={t.id} value={String(t.importo)}>
+                    {euro(t.importo)} → {euro(t.valore)} sul voucher
+                  </option>
+                ))}
+                <option value={ALTRO_IMPORTO}>Altro importo…</option>
+              </select>
+            </div>
+          ) : (
+            // Non più un errore: la ricarica si registra lo stesso, con il
+            // valore indicato. Resta scritto perché chi ha attivato i tagli se
+            // li aspetta.
+            <p style={styles.notaSenzaTagli}>
+              Nessun taglio configurato: indica tu quanto accreditare. I tagli si impostano nelle
+              Impostazioni, card Ricariche.
             </p>
           )}
-        </div>
+          {conValore && (
+            <div style={styles.field}>
+              <div style={styles.campiAffiancati}>
+                <div style={styles.campoAffiancato}>
+                  <label style={styles.label} htmlFor='importo-ricarica'>Importo pagato (€)</label>
+                  <input
+                    id='importo-ricarica' type='number' step='0.01' min='0.01' style={styles.input}
+                    value={importoRicarica} onChange={e => cambiaPagato(e.target.value)}
+                  />
+                </div>
+                <div style={styles.campoAffiancato}>
+                  <label style={styles.label} htmlFor='valore-ricarica'>Valore accreditato (€)</label>
+                  <input
+                    id='valore-ricarica' type='number' step='0.01' min='0.01' style={styles.input}
+                    value={valoreRicarica}
+                    onChange={e => { setValoreRicarica(e.target.value); setValoreToccato(true); }}
+                  />
+                </div>
+              </div>
+              {valoreTroppoBasso ? (
+                <p style={styles.hintErrore}>
+                  Il valore accreditato non può essere inferiore all'importo pagato.
+                </p>
+              ) : pagatoRicarica > 0 && valoreScritto > 0 && (
+                <p style={styles.hintCampo}>
+                  Il socio paga <strong>{euro(pagatoRicarica)}</strong>, sul voucher vanno{' '}
+                  <strong>{euro(valoreScritto)}</strong>.
+                  {taglioCoincidente && (
+                    <> Il taglio da {euro(taglioCoincidente.importo)} accrediterebbe {euro(taglioCoincidente.valore)}.</>
+                  )}
+                </p>
+              )}
+            </div>
+          )}
+        </>
       ) : (
         <div style={styles.field}>
           <label style={styles.label} htmlFor='importo-ricarica'>Importo pagato (€)</label>
@@ -726,6 +809,12 @@ const styles: Record<string, React.CSSProperties> = {
   hint: { fontSize: 13, color: '#666', marginTop: 0, marginBottom: 16 },
   hintCampo: { fontSize: 12, color: '#666', margin: '6px 0 0' },
   hintErrore: { fontSize: 12, color: theme.danger, margin: '6px 0 0' },
+  // Al posto della select dei tagli: sta sopra i campi, e senza spazio sotto
+  // si attaccherebbe all'etichetta "Importo pagato".
+  notaSenzaTagli: { fontSize: 12, color: '#666', margin: '0 0 14px' },
+  // Pagato e valore accreditato affiancati; su schermo stretto vanno a capo.
+  campiAffiancati: { display: 'flex', gap: 12, flexWrap: 'wrap' },
+  campoAffiancato: { flex: '1 1 160px', minWidth: 0 },
   // Sotto l'importo di una ricarica con extra: peso e colore normali, perché
   // la colonna mostra come cifra principale quanto è stato pagato, e questo è
   // il valore effettivamente accreditato sul voucher.

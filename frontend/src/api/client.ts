@@ -285,6 +285,12 @@ export interface MovimentoInput {
   importo: number;
   data_movimento?: string;
   descrizione?: string;
+  /**
+   * Quanto accreditare, solo con "Altro importo…" della modalità a tagli
+   * (spec 013). Nelle altre modalità il backend lo rifiuta: lì il valore lo
+   * decide la configurazione.
+   */
+  valore?: number;
 }
 
 /** Ruolo nel club, indipendente dal privilegio di amministrazione. */
@@ -423,8 +429,12 @@ export interface Documento {
   anno: number;
   numero: number;
   data_documento: string;
-  socio_id: string;
-  /** Nome e cognome come erano al momento dell'emissione. */
+  /** Null per le ricevute libere, intestate a chi non è socio (spec 013). */
+  socio_id: string | null;
+  /**
+   * Come compare sulla ricevuta: nome e cognome del socio al momento
+   * dell'emissione, o il testo scritto dall'admin per una ricevuta libera.
+   */
   intestatario: string;
   causale: string;
   importo: number;
@@ -432,16 +442,34 @@ export interface Documento {
   nome_file: string;
   emesso_da: string | null;
   created_at: string;
-  /** Dalla JOIN con socio: il nome ATTUALE, per il filtro e la ricerca. */
-  nome: string;
-  cognome: string;
+  /** Dalla JOIN con socio: il nome ATTUALE. Null per le ricevute libere. */
+  nome: string | null;
+  cognome: string | null;
 }
 
-export interface EmissioneInput {
+/** Ricevuta di un socio: le voci si scelgono fra quelle da documentare. */
+export interface EmissioneSocio {
   socio_id: string;
   causale: string;
   voci: RiferimentoVoce[];
 }
+
+/** Una riga di una ricevuta libera. */
+export interface RigaLibera {
+  /** "YYYY-MM-DD"; omessa vale oggi. */
+  data?: string;
+  descrizione: string;
+  importo: number;
+}
+
+/** Ricevuta libera (spec 013): intestatario e righe scritti dall'admin. */
+export interface EmissioneLibera {
+  intestatario: string;
+  causale: string;
+  righe: RigaLibera[];
+}
+
+export type EmissioneInput = EmissioneSocio | EmissioneLibera;
 
 /** Esito dell'anteprima: il PDF da mostrare, più i dati che lo accompagnano. */
 export interface AnteprimaDocumento {

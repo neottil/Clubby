@@ -1,0 +1,37 @@
+meta {
+  name: Emetti ricevuta libera
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/api/documenti
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_admin}}
+}
+
+body:json {
+  {
+    "intestatario": "Mario Rossi - ASD Cinofila Lago",
+    "causale": "iscrizione alla gara del 12 ottobre",
+    "righe": [
+      { "data": "2026-10-12", "descrizione": "Iscrizione gara agility", "importo": 15.00 },
+      { "descrizione": "Pranzo", "importo": 12.50 }
+    ]
+  }
+}
+
+docs {
+  Solo admin (spec 013). Emette la ricevuta libera: stessa numerazione per
+  anno delle ricevute dei soci, PDF conservato, NON si annulla.
+
+  Risposta 201:
+    { id, anno, numero, data_documento, importo, importo_lettere, nome_file, pdf_base64 }
+
+  In GET /api/documenti compare con socio_id, nome e cognome a null. Da
+  GET /api/documenti/{id} la scarica solo l'admin.
+}

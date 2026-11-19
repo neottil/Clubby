@@ -6,10 +6,11 @@
  *   importoPagato   quanto il socio ha pagato: è ciò che finisce nelle ricevute
  *   valore          quanto entra sul voucher: pagato + eventuale extra
  *
- * Il valore lo decide SEMPRE il server, a partire dalla modalità configurata
+ * Il valore lo decide il server, a partire dalla modalità configurata
  * (RECHARGE_MODE) e dalla configurazione salvata: il client dice solo quanto si
- * paga. Lasciarglielo mandare significherebbe permettere a chi conosce l'API di
- * accreditarsi il credito che preferisce.
+ * paga. L'unica eccezione, dichiarata, è la voce "Altro importo…" della
+ * modalità a tagli (spec 013), in cui l'admin indica anche il valore: la rotta
+ * è riservata a lui, che potrebbe comunque già creare un taglio qualsiasi.
  */
 
 import { query } from '../db/client.js';
@@ -88,15 +89,38 @@ export interface EsitoRicarica {
  * Traduce l'importo richiesto dall'admin nelle due quantità del movimento,
  * secondo la modalità configurata per questo ambiente.
  *
- * In modalità `map` l'importo deve corrispondere esattamente a un taglio
- * configurato: il valore accreditato si legge da lì. Accettare un importo
- * qualsiasi, magari accreditandolo tale e quale, aggirerebbe in silenzio la
- * configurazione del club.
+ * In modalità `map` ci sono due strade (spec 013):
+ *   - solo `importo`: deve corrispondere esattamente a un taglio, e il valore
+ *     accreditato si legge da lì. Un importo fuori taglio senza valore resta
+ *     un errore: accreditarlo tale e quale sarebbe una scelta che nessuno ha
+ *     fatto;
+ *   - `importo` e `valore`: è la voce "Altro importo…" del form, e l'admin
+ *     dichiara entrambi. Vale il valore indicato anche se l'importo coincide
+ *     con un taglio, perché è ciò che l'admin ha scritto e visto a schermo.
+ *
+ * Nelle altre modalità il valore lo decide la configurazione, e un `valore`
+ * nel corpo è rifiutato invece che ignorato: chi lo manda crederebbe di
+ * averlo impostato.
  */
-export async function calcolaRicarica(importoRichiesto: unknown): Promise<EsitoRicarica> {
+export async function calcolaRicarica(
+  importoRichiesto: unknown,
+  valoreRichiesto?: unknown
+): Promise<EsitoRicarica> {
   const pagato = importoValido(importoRichiesto, 'importo');
+  const modalita = modalitaRicarica();
 
-  switch (modalitaRicarica()) {
+  if (valoreRichiesto !== undefined && valoreRichiesto !== null) {
+    if (modalita !== 'map') {
+      throw new BadRequestError('Il valore accreditato si indica solo nella modalità a tagli');
+    }
+    const valore = importoValido(valoreRichiesto, 'valore');
+    if (valore < pagato) {
+      throw new BadRequestError('Il valore accreditato non può essere inferiore all\'importo pagato');
+    }
+    return { valore, importoPagato: valore === pagato ? null : pagato };
+  }
+
+  switch (modalita) {
     case 'free':
       // Pagato e accreditato coincidono: importo_pagato resta NULL, come per
       // tutte le ricariche registrate prima che i moduli esistessero.
@@ -115,16 +139,13 @@ export async function calcolaRicarica(importoRichiesto: unknown): Promise<EsitoR
 
     case 'map': {
       const tagli = await listTagli();
-      if (tagli.length === 0) {
-        throw new BadRequestError(
-          'Nessun taglio di ricarica configurato: impostali nelle Impostazioni, card Ricariche'
-        );
-      }
       const taglio = tagli.find(t => Number(t.importo) === pagato);
       if (!taglio) {
-        const disponibili = tagli.map(t => Number(t.importo).toFixed(2)).join(', ');
+        const disponibili = tagli.length > 0
+          ? `i tagli disponibili sono ${tagli.map(t => Number(t.importo).toFixed(2)).join(', ')}`
+          : 'non ci sono tagli configurati';
         throw new BadRequestError(
-          `Importo non previsto: le ricariche disponibili sono ${disponibili}`
+          `Importo non previsto (${disponibili}): scegli un taglio o indica il valore da accreditare`
         );
       }
       const valore = arrotondaImporto(Number(taglio.valore));

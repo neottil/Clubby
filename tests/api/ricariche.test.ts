@@ -107,6 +107,15 @@ describe('Ricariche', () => {
     assert.equal(await saldo(admin, socio), prima + 40);
   });
 
+  it('in modalità free un valore esplicito è rifiutato (400)', async () => {
+    // Il valore si indica solo con "Altro importo…" della modalità a tagli
+    // (spec 013): qui lo decide la configurazione, e ignorarlo in silenzio
+    // farebbe credere a chi lo manda di averlo impostato.
+    const voucher = await voucherDi(d.soci.socio1);
+    const r = await api(admin, 'POST', `/api/voucher/${voucher.id}/movimenti`, { importo: 10, valore: 12 });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+  });
+
   it('l\'ultima ricarica riporta data e importo, 204 se non ce ne sono', async () => {
     const voucher = await voucherDi(d.soci.socio1);
     const r = await api(admin, 'GET', `/api/voucher/${voucher.id}/ultima-ricarica`);

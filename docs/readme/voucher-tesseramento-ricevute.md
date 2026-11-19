@@ -42,6 +42,8 @@ importato, che non è un incasso.
 La pagina ha due schede, sugli stessi filtri: **Crea ricevuta**, con le voci ancora da documentare, e
 **Ricevute emesse**, con lo storico dei PDF prodotti.
 
+Accanto alle voci c'è la **ricevuta libera**, per chi non è socio: vedi [sotto](#ricevute-libere).
+
 ## Ricevute in PDF
 
 Selezionate le voci di **un socio** — una ricevuta è intestata a una persona sola, quindi il pulsante
@@ -83,6 +85,26 @@ Nel PDF l'intestazione è allineata a **sinistra** e il logo sta a **destra sull
 la carta intestata di un'associazione. Il **logo** invece è
 quello del club, lo stesso mostrato in testa a ogni pagina (vedi [`branding/`](../../branding/README.md)).
 
+## Ricevute libere
+
+Il club incassa anche da chi socio non è: l'iscritto di un altro club a una gara, il partecipante a
+un evento aperto. A loro si consegna una **ricevuta libera**, dal pulsante omonimo nella scheda
+**Crea ricevuta**, senza registrarli come soci.
+
+L'admin scrive l'**intestatario** (un campo di testo: una persona, un club, un ente), la
+**causale** e una o più **righe** con data, descrizione e importo. Le righe non vengono da movimenti,
+incontri o tesseramenti: esistono solo dentro quella ricevuta, e il totale è la loro somma. Da lì il
+percorso è quello di sempre: anteprima con numero provvisorio, conferma, PDF scaricato e conservato.
+
+Tutto il resto è come per le ricevute dei soci: **stessa numerazione** per anno, stessa
+intestazione, stesso piè di pagina e stesso logo, e una ricevuta emessa non si annulla. La differenza
+è chi la vede: una ricevuta libera la emette e la riapre **solo l'admin**. In **Ricevute emesse**
+compare con l'etichetta *non socio* accanto all'intestatario, e sparisce quando si filtra per un
+socio.
+
+Non è il modo di documentare gli incassi di un socio registrati in Clubby: quelli passano dalle voci,
+così il socio ritrova la ricevuta nella propria area.
+
 ## Voci già registrate
 
 La pagina serve a sapere **che cosa resta da registrare**, quindi le voci per cui una ricevuta è già
@@ -117,7 +139,7 @@ Di norma una ricarica accredita sul voucher esattamente l'importo pagato. La var
 |---|---|---|
 | `free` (predefinita) | Importo libero, accreditato tale e quale | nessuna |
 | `percentage` | Importo libero, accreditato con una percentuale in più | percentuale nella card **Ricariche** delle Impostazioni |
-| `map` | Importo scelto fra tagli preconfigurati (es. 50 → 55, 100 → 110) | elenco dei tagli nella card **Ricariche** |
+| `map` | Importo scelto fra tagli preconfigurati (es. 50 → 55, 100 → 110), oppure "Altro importo…" con pagato e valore indicati dall'admin | elenco dei tagli nella card **Ricariche** |
 
 **In Ricevute compare sempre l'importo pagato**, mai il valore accreditato: il credito in più
 è uno sconto concesso al socio, non denaro incassato, e contarlo dichiarerebbe un ricavo che non
@@ -125,9 +147,13 @@ c'è stato. Il voucher invece si muove per il valore accreditato, che è quello 
 spendere. Il movimento conserva entrambi, e la pagina Voucher mostra il credito ricevuto con sotto
 l'importo pagato quando differiscono.
 
-Quanto accreditare **lo calcola sempre il backend** a partire dalla modalità e dalla
-configurazione salvata: il browser invia solo quanto il socio paga. In modalità `map` un importo
-che non corrisponde a nessun taglio viene rifiutato.
+Quanto accreditare **lo calcola il backend** a partire dalla modalità e dalla configurazione
+salvata: di norma il browser invia solo quanto il socio paga. L'unica eccezione è la modalità `map`:
+in fondo all'elenco dei tagli c'è sempre **"Altro importo…"**, per le cifre fuori listino, dove
+l'admin scrive sia l'importo pagato sia il valore da accreditare. Il valore si precompila con il
+pagato, non può essergli inferiore, e vale anche se il pagato coincide con un taglio (il form lo
+segnala). Senza tagli configurati la ricarica passa da lì, invece di essere bloccata. Un importo
+fuori taglio mandato senza valore resta rifiutato.
 
 La card **Ricariche** delle Impostazioni è sempre visibile: in modalità `free` spiega come attivare
 la funzionalità, così i tagli o la percentuale si possono preparare prima di accenderla. Il
